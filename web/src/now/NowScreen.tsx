@@ -49,6 +49,12 @@ function withIdIfUntitled(label: string, id: string): string {
   return label === id ? `課題（${id}）` : label;
 }
 
+interface Answered {
+  challengeId: string;
+  title: string;
+  label: string;
+}
+
 export function NowScreen({
   live,
   agentName,
@@ -65,11 +71,9 @@ export function NowScreen({
   const [fresh, setFresh] = useState<readonly Question[] | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: 全体の値が変わったら、読み直した値は捨てる
   useEffect(() => setFresh(null), [live.questions]);
-  // ボタンの回答が通ると、その行は一覧から消える。押した結果が見えるよう、通った回答を画面に残す（次の回答まで）。
-  const [answered, setAnswered] = useState<{
-    challengeId: string;
-    label: string;
-  } | null>(null);
+  // ボタンの回答が通ると、その行は一覧から消える。押した結果が見えるよう、通った回答を画面に残す。
+  // 次の回答を送り始めたら消す（通らなかった回答の脇に、前の「答えました」を残さない）。題名は押した時点のもの。
+  const [answered, setAnswered] = useState<Answered | null>(null);
   const reloadQuestions = useCallback(() => {
     api.questions().then(
       (r) => setFresh(r.questions),
@@ -171,7 +175,7 @@ export function NowScreen({
                 view: "tree",
               })}
             >
-              「{titleOf(answered.challengeId)}」
+              「{answered.title}」
             </a>
             の問いに「{answered.label}」で答えました。
           </output>
@@ -188,7 +192,19 @@ export function NowScreen({
                 agentName={agentName}
                 questions={questions}
                 onChanged={reloadQuestions}
-                onAnswered={setAnswered}
+                onAnswered={(a) =>
+                  setAnswered(
+                    a === null
+                      ? null
+                      : {
+                          ...a,
+                          title: withIdIfUntitled(
+                            titleOf(a.challengeId),
+                            a.challengeId,
+                          ),
+                        },
+                  )
+                }
               />
             ))}
           </ul>
@@ -265,7 +281,7 @@ function WaitingItem({
   agentName: string;
   questions: readonly Question[];
   onChanged: () => void;
-  onAnswered: (a: { challengeId: string; label: string }) => void;
+  onAnswered: (a: Omit<Answered, "title"> | null) => void;
 }) {
   const group = waitingKindGroup(row.kind);
   return (
@@ -317,7 +333,7 @@ function AnswerButtons({
   challengeId: string;
   questions: readonly Question[];
   onChanged: () => void;
-  onAnswered: (a: { challengeId: string; label: string }) => void;
+  onAnswered: (a: Omit<Answered, "title"> | null) => void;
 }) {
   const answerable = questions.filter((q) => hasOptions(q));
   // 通った回答の、選択肢の語を親へ渡す（行が消えた後も出すため）。
@@ -331,7 +347,15 @@ function AnswerButtons({
     },
     [questions, challengeId, onAnswered],
   );
-  const state = useHoldAnswer(agentName, challengeId, onChanged, report);
+  const sent = useHoldAnswer(agentName, challengeId, onChanged, report);
+  // 送り始めたら、前に通った回答の知らせを消す。
+  const state = {
+    ...sent,
+    answer: (holdId: string, option: string, check: string) => {
+      onAnswered(null);
+      return sent.answer(holdId, option, check);
+    },
+  };
   return (
     <div data-testid="now-answer">
       {answerable.map((q) => (

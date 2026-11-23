@@ -1124,6 +1124,8 @@ describe("画面: ボタンの回答が通った後（#1206）", () => {
     expect(within(done).getByRole("link").getAttribute("href")).toBe(
       "#/a/alpha/challenges/C-3",
     );
+    // 回答の行の外にある（行が消えても残る場所）。
+    expect(rowOf("answer")).not.toContainElement(done);
     expect(posts(requests, "challenges/C-3/holds/H-5/answer")).toHaveLength(1);
   });
 
@@ -1133,6 +1135,26 @@ describe("画面: ボタンの回答が通った後（#1206）", () => {
       questions: [question],
       answerPost: apiError(409, "hold_changed", "変わっていました"),
     });
+    await answerA();
+    await screen.findByTestId("hold-changed");
+    expect(screen.queryByTestId("now-answered")).toBeNull();
+  });
+
+  it("#1206: 次の回答を送り始めると、前に通った回答の知らせは消える", async () => {
+    let n = 0;
+    await openNow({
+      nh: { challenges: [ch("C-3", "awaiting_human", "回答の題名")] },
+      questions: [question],
+      answerPost: () =>
+        n++ === 0
+          ? new Response(
+              JSON.stringify({ cycle: { started: false }, hold: {} }),
+              { status: 200 },
+            )
+          : apiError(409, "hold_changed", "変わっていました")(),
+    });
+    await answerA();
+    await screen.findByTestId("now-answered");
     await answerA();
     await screen.findByTestId("hold-changed");
     expect(screen.queryByTestId("now-answered")).toBeNull();
