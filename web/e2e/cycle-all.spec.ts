@@ -126,3 +126,25 @@ test.describe("中身（既定の幅）", () => {
     ).toBeVisible();
   });
 });
+
+test("#1183: 走っているサイクルに、見ているタスク・構造の図・スーパーバイザーの記録・費用の内訳が出る（偽のデータ）", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/cycle");
+  await expect(page.getByTestId("cycle-running-cost")).toContainText("上限");
+  await expect(page.getByTestId("cycle-watching-row")).toHaveCount(2);
+  await expect(page.getByTestId("cycle-structure")).toBeVisible();
+  await expect(page.getByTestId("cycle-waiting")).toBeVisible();
+  await expect(page.getByTestId("cycle-supervisor-row")).toHaveCount(2);
+  await expect(page.getByTestId("cycle-cost-row")).toHaveCount(2);
+});
+
+test("#1183: 走っていないエージェントでは、止めるボタンが出ず、最後のサイクルの終わりが出る（偽のデータ）", async ({
+  page,
+}) => {
+  await page.goto("/#/a/beta/cycle");
+  await expect(page.getByTestId("cycle-last-ended")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "サイクルを止める" }),
+  ).toHaveCount(0);
+});

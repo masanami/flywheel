@@ -47,3 +47,26 @@ test("#1183: 未のフォローアップを選んで済みにすると、未の�
   await page.getByTestId("followup-submit").click();
   await expect(page.getByTestId("followup-row")).toHaveCount(2);
 });
+
+test("#1183: チェックが 0 件のとき「済みにする」「捨てる」は押せず、チェックは未の行にだけ出る（偽のデータ）", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/followups");
+  await expect(page.getByTestId("followup-check")).toHaveCount(3);
+  await expect(page.getByTestId("followup-done-button")).toBeDisabled();
+  await expect(page.getByTestId("followup-drop-button")).toBeDisabled();
+  await page.getByRole("button", { name: /^済み（/ }).click();
+  await expect(page.getByTestId("followup-check")).toHaveCount(0);
+});
+
+test("#1183: 未のフォローアップを選んで捨てると、未の一覧から消える（偽のデータ）", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/followups");
+  await page.getByTestId("followup-check").first().check();
+  await page.getByTestId("followup-drop-button").click();
+  await expect(page.getByTestId("followup-submit")).toBeDisabled();
+  await page.getByTestId("followup-text").fill("不要");
+  await page.getByTestId("followup-submit").click();
+  await expect(page.getByTestId("followup-row")).toHaveCount(2);
+});
