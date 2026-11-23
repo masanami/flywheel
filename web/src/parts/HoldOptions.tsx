@@ -90,7 +90,10 @@ export function HoldOptions({
         {hold.options.map((o) => (
           <li key={o.id} data-option={o.id}>
             <b>{o.label}</b>
-            {o.description !== "" ? <Markdown text={o.description} /> : null}
+            {/* 説明が見出しと同じ文のときは、同じ語を 2 回並べない。 */}
+            {o.description !== "" && o.description !== o.label ? (
+              <Markdown text={o.description} />
+            ) : null}
             {o.button !== true ? (
               <p data-testid="hold-option-conversation">
                 {CONVERSATION_ONLY_NOTE}

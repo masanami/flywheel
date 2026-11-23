@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -75,6 +77,49 @@ func TestIngestAPI_CreatesChallengeAndStartsTheCycleOnce(t *testing.T) {
 	log, err := openStore(t, ws).ListActivities(context.Background(), &doc.Ingested[0].ChallengeID)
 	if err != nil || len(log) == 0 || log[0].Channel != string(core.ChannelUI) {
 		t.Errorf("activities = %+v, %v; want channel ui", log, err)
+	}
+}
+
+// AC-55: 取り込みの口へ、子を持つ親の指定を送ると、課題は親の 1 つだけで、子は親の課題の取り込み元の子として記録される（ターミナルの取り込みと同じ結果）。
+func TestIngestAPI_ParentWithChildrenCreatesOneChallenge(t *testing.T) {
+	ws := ingestWorkspace(t)
+	issue := func(n int, parent string) string {
+		p := "null"
+		if parent != "" {
+			p = `"` + parent + `"`
+		}
+		return fmt.Sprintf(`{"number":%d,"title":"t%d","body":"","user":{"login":"me"},"assignees":[],"labels":[],"state":"open","html_url":"https://github.com/o/r/issues/%d","repository_url":"https://api.github.com/repos/o/r","comments":0,"updated_at":"2026-01-01T00:00:00Z","parent_issue_url":%s}`, n, n, n, p)
+	}
+	parentURL := "https://api.github.com/repos/o/r/issues/7"
+	withUpstream(t, "["+issue(7, "")+","+issue(8, parentURL)+","+issue(9, parentURL)+"]")
+	port, _ := recordingServer(t, ws, CycleLaunch{Started: true})
+	before := challengeCount(t, ws)
+	code, body := apiPost(t, port, "/api/v1/workspaces/w/ingest", `{"items":["o/r#7"]}`)
+	if code != http.StatusOK {
+		t.Fatalf("ingest = %d %s", code, body)
+	}
+	var doc struct {
+		Ingested []struct {
+			ChallengeID string `json:"challenge_id"`
+		} `json:"ingested"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); err != nil || len(doc.Ingested) != 1 {
+		t.Fatalf("body = %s (%v), want 1 ingested", body, err)
+	}
+	if got := challengeCount(t, ws); got != before+1 {
+		t.Errorf("challenges = %d, want %d (the parent only)", got, before+1)
+	}
+	d, err := openStore(t, ws).GetChallenge(context.Background(), doc.Ingested[0].ChallengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := make([]string, 0, len(d.SourceChildren))
+	for _, c := range d.SourceChildren {
+		keys = append(keys, c.ExternalKey)
+	}
+	sort.Strings(keys)
+	if strings.Join(keys, ",") != "o/r#8,o/r#9" {
+		t.Errorf("source children = %v, want [o/r#8 o/r#9]", keys)
 	}
 }
 

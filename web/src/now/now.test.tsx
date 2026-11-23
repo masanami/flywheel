@@ -1202,6 +1202,28 @@ describe("画面: 知らせ（#1184）", () => {
       "#/a/alpha/challenges/C-1/tasks/T-4",
     );
   });
+  it("課題を止める保留を上げた知らせ（タスクなし）は、タスクの題名を出さず、課題の詳細へ移る", async () => {
+    await openNow({
+      notices: [
+        {
+          kind: "supervisor_escalated",
+          at: "2026-11-23T01:00:00Z",
+          challenge_id: "C-1",
+          challenge_title: "課題の題名",
+          task_id: null,
+          task_title: null,
+        },
+      ],
+    });
+    const li = (await (await box()).findByTestId("notice-item")) as HTMLElement;
+    expect(li).toHaveTextContent(
+      "スーパーバイザーがあなたへ上げました（課題の題名）。",
+    );
+    expect(li).not.toHaveTextContent("題名を読めないタスク");
+    expect(within(li).getByRole("link").getAttribute("href")).toBe(
+      "#/a/alpha/challenges/C-1",
+    );
+  });
   it("AC-187 #1184: 変化の知らせを受けると、知らせの口を読み直す", async () => {
     const { requests } = await openNow({ notices: [added] });
     await box();
