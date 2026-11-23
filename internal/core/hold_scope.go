@@ -68,6 +68,15 @@ func taskMayProceed(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) 
 	}
 }
 
+// taskMayProceedSQL は taskMayProceed と同じ述語を、SQL の条件の断片にしたもの（課題の行の別名 c と、タスクの番号の式 taskExpr を受け取る）。
+// SQL の中で使う所（契約の待ちの結び付きを外す UPDATE・周の数え）は、自前で書かずこれを使う。
+// 断片は課題が人間対応待ちのときの条件を含むので、taskExpr が NULL になりうるときは呼び出し側で IS NOT NULL を併記する。
+func taskMayProceedSQL(c, taskExpr string) string {
+	return "(" + c + ".status = 'in_progress' OR (" + c + ".status = 'awaiting_human' AND " + taskExpr + " IS NOT NULL AND NOT EXISTS (" +
+		"SELECT 1 FROM hold o WHERE o.challenge_id = " + c + ".id AND o.answer IS NULL AND o.closed_at IS NULL " +
+		"AND (COALESCE(o.scope, '') <> 'task' OR o.task_id = " + taskExpr + "))))"
+}
+
 // countOpenHolds は、課題の開いている保留（回答が無く、閉じていない）の数。閉じる書き込みと同じトランザクションの中で数える。
 func countOpenHolds(ctx context.Context, tx *sql.Tx, challengeID int64) (int, error) {
 	var n int
@@ -128,4 +137,20 @@ func closeOtherOpenHolds(ctx context.Context, tc *transitionCtx, exceptHoldID in
 		tc.after["closed_holds_reason"] = reason
 	}
 	return closed, nil
+}
+
+// mayProceedOn は、タスク taskID（nil ならタスクに結び付かない作業）の作業を進めてよいか。タスクに結び付くときは taskMayProceed、
+// 結び付かないときは課題が着手中のときだけ。
+func mayProceedOn(ctx context.Context, tx *sql.Tx, challengeID int64, taskID *int64) (bool, error) {
+	if taskID != nil {
+		return taskMayProceed(ctx, tx, challengeID, *taskID)
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, challengeID).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, err
+	}
+	return Status(status) == StatusInProgress, nil
 }

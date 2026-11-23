@@ -322,7 +322,8 @@ func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, con
 		st.Run = len(picked.Blocked) // 進めようが無い課題は、委譲の段が保留にする
 		// 回答が記録された保留を持つ実行（resume で答えを返す番）。
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN hold h ON h.id = k.wait_hold_id JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.ended_at IS NULL AND k.state = 'waiting' AND c.status = 'in_progress' AND h.answered_at IS NOT NULL`).Scan(&answered); err != nil {
+			WHERE k.ended_at IS NULL AND k.state = 'waiting' AND h.answered_at IS NOT NULL
+			AND `+taskMayProceedSQL("c", "k.task_id")).Scan(&answered); err != nil {
 			return err
 		}
 		// 保留の間に成功していた実行（検証中へ進める番）と、保留にし損ねた停止（保留にする番）。

@@ -600,6 +600,32 @@ func InsertHoldWithOptions(t *testing.T, workspace string, challengeID int, ques
 	}
 }
 
+// InsertTaskHold はテスト専用のフィクスチャとして、課題 challengeID のタスク（題名 taskTitle）を止める、未回答の保留
+// （scope は task。選択肢は optionsJSON。空なら NULL）を挿入し、保留の行の番号を返す。
+func InsertTaskHold(t *testing.T, workspace string, challengeID int, taskTitle, question, fromStatus, raisedAt, optionsJSON string) int64 {
+	t.Helper()
+	var options any
+	if optionsJSON != "" {
+		options = optionsJSON
+	}
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var id int64
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, task_id, scope, options)
+			VALUES (?, ?, ?, ?, (SELECT id FROM task WHERE challenge_id = ? AND title = ?), 'task', ?)`,
+			challengeID, question, fromStatus, raisedAt, challengeID, taskTitle, options)
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertTaskHold: %v", err)
+	}
+	return id
+}
+
 // DumpTables はテスト専用に、tables の全行を ROWID 順の文字列にして返す
 // （閲覧だけの経路がストアの行を変えないことの検査に使う）。
 func DumpTables(t *testing.T, workspace string, tables ...string) string {

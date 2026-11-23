@@ -309,8 +309,8 @@ func runAnswer(a Args) (any, error) {
 	option, hasOption := a.Values["option"]
 	planItems := len(a.Multi["choice"]) + len(a.Multi["text"])
 	if planItems > 0 {
-		if hasAnswer || replan || hasOption {
-			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan・--option と同時に指定できません")
+		if _, hasHold := a.Values["hold"]; hasAnswer || replan || hasOption || hasHold {
+			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan・--option・--hold と同時に指定できません")
 		}
 		return runPlanAnswer(a, id)
 	}
@@ -326,7 +326,11 @@ func runAnswer(a Args) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	preview, err := a.Store.PrepareAnswerOption(context.Background(), id, answer, option, replan)
+	holdArg, hasHold := a.Values["hold"]
+	if hasHold && strings.TrimSpace(holdArg) == "" {
+		return nil, mapCoreErr(fmt.Errorf("%w: --hold must look like H-<number>", core.ErrValidation))
+	}
+	preview, err := a.Store.PrepareAnswerHold(context.Background(), id, holdArg, answer, option, replan)
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -347,6 +351,8 @@ func runAnswer(a Args) (any, error) {
 		Answer:          answer,
 		Replan:          replan,
 		Option:          option,
+		// 確かめた保留で照合する（ほかのタスクの保留が立った・閉じたことで課題の版が進んだだけでは断らない）。
+		HoldID: preview.HoldID, HoldQuestion: preview.Question, HoldOptions: preview.Options, HoldOptionRequired: preview.OptionRequired,
 	}, att)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -778,6 +784,12 @@ func answerSummaryText(p *core.AnswerPreview, replan bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "課題 ID:  %s\n", p.ChallengeID)
 	fmt.Fprintf(&b, "タイトル: %s\n", escapeControl(p.Title))
+	if p.HoldID != "" {
+		fmt.Fprintf(&b, "保留:     %s\n", p.HoldID)
+	}
+	if p.TaskTitle != "" {
+		fmt.Fprintf(&b, "タスク:   %s\n", escapeControl(p.TaskTitle))
+	}
 	fmt.Fprintf(&b, "問い:     %s\n", escapeControlKeepLines(p.Question))
 	if p.Option != "" {
 		fmt.Fprintf(&b, "選択肢:   %s（%s）\n", escapeControl(p.OptionLabel), escapeControl(p.Option))
