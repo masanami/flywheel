@@ -38,15 +38,16 @@ test("AC-441 #813: 本物の serve で、フォローアップの一覧に、種
   await expect(
     page.getByTestId("followup-row").filter({ hasText: "未のフォローアップ" }),
   ).toBeVisible();
-  // 済みへ切り替えると、済みの題名が出る
-  await page.getByRole("button", { name: /^済み/ }).click();
+  // 済みへ切り替えると、済みの題名が出る。切り替えの札は「済み（件数）」の形で、
+  // 未の行をまとめて整理する「済みにする」のボタンと取り違えないよう、括弧まで合わせる。
+  await page.getByRole("button", { name: /^済み（/ }).click();
   await expect(
     page
       .getByTestId("followup-row")
       .filter({ hasText: "済みのフォローアップ" }),
   ).toBeVisible();
   // 捨てたへ切り替えると、捨てた題名が出る
-  await page.getByRole("button", { name: /^捨てた/ }).click();
+  await page.getByRole("button", { name: /^捨てた（/ }).click();
   await expect(
     page
       .getByTestId("followup-row")
