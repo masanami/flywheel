@@ -36,7 +36,7 @@ export function ChallengeDetail({
   view: ChallengeView;
 }) {
   const chat = useChat();
-  const { result } = useScreenData(
+  const { result, reload } = useScreenData(
     live,
     agentName,
     () => api.challenge(agentName, id),
@@ -74,6 +74,7 @@ export function ChallengeDetail({
         show={show}
         agentName={agentName}
         workspacePath={workspacePath}
+        reload={reload}
       />
       <ConflictFixesView
         fixes={show.conflict_fixes}
