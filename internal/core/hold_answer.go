@@ -185,11 +185,9 @@ func (s *Store) EditHoldText(ctx context.Context, ch Channel, id string, edit Ho
 		if current.Status != StatusAwaitingHuman {
 			return ErrInvalidTransition
 		}
-		holdID, _, _, _, err := loadUnansweredHold(ctx, tx, cid)
+		// 開いている保留が 2 つ以上のとき、最新の保留を黙って選ばない（ErrValidation）。
+		holdID, _, _, _, _, err := selectAnswerHold(ctx, tx, cid, current.ID, "")
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return errNoUnansweredHold(current.ID)
-			}
 			return err
 		}
 		extra := map[string]any{"version": current.Version + 1}

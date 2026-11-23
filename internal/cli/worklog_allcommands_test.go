@@ -433,7 +433,7 @@ var worklogCases = []worklogCase{
 				// S3（Issue #39）: 未設定（保留の answer が無い）から値が入る
 				// ので、before にそのキーを null で載せる。
 				map[string]any{"status": "awaiting_human", "answer": nil},
-				map[string]any{"answer": "a", "status": "verifying", "version": 3.0}}}
+				map[string]any{"answer": "a", "hold_id": "H-1", "status": "verifying", "version": 3.0}}}
 		},
 	},
 	{

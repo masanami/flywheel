@@ -303,11 +303,14 @@ func TestIntegrationReview_NonIntegrationChallengeKeepsS3aBehavior(t *testing.T)
 func TestIntegrationReview_HeldChallengeDoesNotVerifyTaskUntilResolved(t *testing.T) {
 	t.Parallel()
 	f := newIntegrationFixture(t)
+	// 保留中の課題は、開いている保留（課題を止める保留）を持つ。
 	f.sql(t, `UPDATE challenge SET status = 'awaiting_human'`)
+	f.sql(t, `INSERT INTO hold (challenge_id, question, from_status, raised_at, kind) SELECT id, 'q', 'in_progress', '2026-01-01T00:00:00.000Z', 'human' FROM challenge`)
 	f.readOnce(t, intakeOut(integOptsWithLd, integArtsOK, nil))
 	if n := f.count(t, `SELECT COUNT(*) FROM task WHERE status = 'verifying'`); n != 0 {
 		t.Fatalf("AC-15 verifying tasks = %d", n)
 	}
+	f.sql(t, `UPDATE hold SET answer = 'ok', answered_at = '2026-01-01T00:00:01.000Z'`)
 	f.sql(t, `UPDATE challenge SET status = 'in_progress'`)
 	f.readOnce(t, intakeOut(integOptsWithLd, integArtsOK, nil))
 	if n := f.count(t, `SELECT COUNT(*) FROM task WHERE status = 'verifying'`); n != 1 {
