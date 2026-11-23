@@ -315,7 +315,9 @@ func TestHoldTaskProceed_AnswerToAContractWaitIsReturnedWhileAnotherHoldIsOpen(t
 	f.waitHold(t, f.runA)
 	// 最新の保留（a）へ答える。b の保留は開いたまま。
 	att := verifiedAttestationForTest(t, f.id)
-	if _, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{ChallengeID: f.id, ExpectedVersion: f.version(t), Answer: "進めて"}, att); err != nil {
+	holdA := f.count(t, `SELECT id FROM hold WHERE task_id = `+strconvI(f.taskA)+` AND answer IS NULL`)
+	if _, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{ChallengeID: f.id, ExpectedVersion: f.version(t), Answer: "進めて",
+		HoldID: formatHoldID(holdA), HoldQuestion: "どうしますか"}, att); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.challengeStatus(t); got != "awaiting_human" {
@@ -445,7 +447,7 @@ func TestHoldTaskProceed_SQLPredicateAgreesWithGoPredicate(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				return tx.QueryRowContext(context.Background(), `SELECT `+taskMayProceedSQL("t")+` FROM (SELECT challenge_id, id AS task_id FROM task WHERE id = ?) t`, task).Scan(&sqlAns)
+				return tx.QueryRowContext(context.Background(), `SELECT `+taskMayProceedSQL("c", "t.id")+` FROM task t JOIN challenge c ON c.id = t.challenge_id WHERE t.id = ?`, task).Scan(&sqlAns)
 			}); err != nil {
 				t.Fatal(err)
 			}

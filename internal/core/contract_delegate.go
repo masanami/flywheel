@@ -1549,7 +1549,7 @@ func (s *Store) sameTaskRunOpen(ctx context.Context, row *contractRunRow) (bool,
 // その run の開始時点で終わっていなかった」ことで行う。終わりと同じ時刻（ミリ秒）の run は start の run として扱う:
 // 契約の run を終わらせるのは成功した契約のコマンドの run（start・status・resume・cancel）で、成功以外の run は
 // 終わらせない。この条件は成功以外の run だけを選ぶから。課題が着手中でなくなっていれば（保留・取り下げ・完了）選ばない。
-var reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND ` + taskMayProceedSQL("r") + `
+var reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND ` + taskMayProceedSQL("c", "r.task_id") + `
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND COALESCE(k.task_id, 0) = COALESCE(r.task_id, 0) AND k.start_run_id < r.id
 		AND (k.ended_at IS NULL OR k.ended_at > r.started_at))
@@ -1560,7 +1560,7 @@ var reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NUL
 // 後の保留は、そのタスクに結び付くもの（か、タスクに結び付かないもの）だけを数える（ほかのタスクの保留は、このタスクの作り損ねを隠さない）。
 // 開いたまま（ended_at が NULL）の行は選ばない（状態の確認が終わった記録にした後で拾う。NULL との比較は成り立たず、毎回選んでしまう）。
 // 取りやめにしたタスクの実行は、flywheel が取り消した（計画の作り直し・取り下げ）ので、保留にし損ねたものと数えない。
-var unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND ` + taskMayProceedSQL("k") + `
+var unheldContractStopWhere = `k.kind = 'task' AND k.state IN ('failed', 'cancelled') AND ` + taskMayProceedSQL("c", "k.task_id") + `
 	AND k.ended_at IS NOT NULL
 	AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = k.challenge_id AND h.raised_at >= k.ended_at
 		AND (h.task_id IS NULL OR k.task_id IS NULL OR h.task_id = k.task_id))

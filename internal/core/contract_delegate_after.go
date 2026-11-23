@@ -667,11 +667,16 @@ func (s *Store) loadContractAnswer(ctx context.Context, row *contractRunRow, che
 	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		qerr := tx.QueryRowContext(ctx,
 			`SELECT h.id, h.answer FROM contract_run k JOIN hold h ON h.id = k.wait_hold_id JOIN challenge c ON c.id = k.challenge_id
-			 WHERE k.id = ? AND k.state = 'waiting' AND `+taskMayProceedSQL("k")+` AND h.answered_at IS NOT NULL`, row.ID).Scan(&holdID, &a)
+			 WHERE k.id = ? AND k.state = 'waiting' AND c.status IN ('in_progress', 'awaiting_human') AND h.answered_at IS NOT NULL`, row.ID).Scan(&holdID, &a)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return nil
 		}
-		found = qerr == nil
+		if qerr != nil {
+			return qerr
+		}
+		// 答えを返してよいのは、課題が着手中、または、人間対応待ちでも、このタスクを進めてよいとき（ほかのタスクの保留が開いているだけのとき）。
+		// 課題が着手中へ戻るのを待たない。
+		found, qerr = s.rowMayProceed(ctx, tx, row)
 		return qerr
 	})
 	if err = classifyReadWriteErr(err); err != nil || !found {
@@ -688,7 +693,7 @@ func (s *Store) loadContractAnswer(ctx context.Context, row *contractRunRow, che
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
 		// 読んだ後に別の周が先に結び付きを外した・課題が着手中でなくなったときは 0 件になり、答えは返さない。
 		res, qerr := tx.ExecContext(ctx, `UPDATE contract_run SET wait_hold_id = NULL WHERE id = ? AND wait_hold_id = ? AND state = 'waiting'
-			 AND `+taskMayProceedSQL("contract_run")+``, row.ID, holdID)
+			 AND EXISTS (SELECT 1 FROM challenge c WHERE c.id = contract_run.challenge_id AND `+taskMayProceedSQL("c", "contract_run.task_id")+`)`, row.ID, holdID)
 		if qerr != nil {
 			return qerr
 		}
@@ -841,4 +846,9 @@ func (s *Store) answerSupervisorWait(ctx context.Context, in ContractPollInput, 
 		return nil, err
 	}
 	return rrep, nil
+}
+
+// rowMayProceed は契約の実行 row が結び付くタスクを進めてよいか（mayProceedOn）。
+func (s *Store) rowMayProceed(ctx context.Context, tx *sql.Tx, row *contractRunRow) (bool, error) {
+	return mayProceedOn(ctx, tx, row.ChallengeID, row.TaskID)
 }

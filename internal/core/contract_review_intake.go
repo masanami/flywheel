@@ -118,22 +118,16 @@ func countUnmetFacts(ctx context.Context, tx *sql.Tx, c contractCall, st *Contra
 	if len(c.FactsRequired) == 0 || report == nil || !reviewReachesFactsCheck(st) {
 		return nil
 	}
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, c.ChallengeIDInt).Scan(&status); err != nil {
+	var taskID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT task_id FROM contract_run WHERE id = ?`, rowID).Scan(&taskID); err != nil {
 		return err
 	}
-	if Status(status) != StatusInProgress {
-		// タスクを止める保留だけが開いている課題でも、保留の無いタスクのレビュー待ちは数える。保留が結び付くタスクは数えない。
-		var taskID sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT task_id FROM contract_run WHERE id = ?`, rowID).Scan(&taskID); err != nil {
-			return err
-		}
-		if Status(status) != StatusAwaitingHuman || !taskID.Valid {
-			return nil
-		}
-		if may, err := taskMayProceed(ctx, tx, c.ChallengeIDInt, taskID.Int64); err != nil || !may {
-			return err
-		}
+	var task *int64
+	if taskID.Valid {
+		task = &taskID.Int64
+	}
+	if may, err := mayProceedOn(ctx, tx, c.ChallengeIDInt, task); err != nil || !may {
+		return err
 	}
 	unmet := len(unmetRequiredFacts(c.FactsRequired, st.Facts)) > 0
 	if !c.CountFacts && unmet {
@@ -319,9 +313,15 @@ func (s *Store) receiveContractReview(ctx context.Context, rep *ContractRunRepor
 	if err != nil {
 		return err
 	}
-	// 課題が着手中、または、タスクを止める保留だけが開いていて、このタスクに保留が無いときだけ受け取る。
-	if may, err := s.taskMayProceedFor(ctx, cid, scope.TaskID); err != nil || !may {
+	// 受け取ってよいのは、課題が着手中のとき、または、人間対応待ちでも、このタスクを止める保留が開いていないとき
+	// （ほかのタスクを止める保留だけが開いているとき）。
+	var may bool
+	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		var err error
+		may, err = mayProceedOn(ctx, tx, cid, scope.TaskID)
 		return err
+	}); err != nil || !may {
+		return classifyReadWriteErr(err)
 	}
 	if scope.TaskID != nil && scope.TaskStatus == TaskStatusCancelled {
 		return nil // 取りやめのタスクの実行のレビュー待ちは受け取らない（タスクは取りやめのまま）
@@ -466,13 +466,8 @@ func (s *Store) importIntegrationReview(ctx context.Context, rep *ContractRunRep
 		if ch == nil {
 			return nil
 		}
-		if may := ch.Status == StatusInProgress; !may {
-			if scope.TaskID == nil || ch.Status != StatusAwaitingHuman {
-				return nil
-			}
-			if ok, err := taskMayProceed(ctx, tx, cid, *scope.TaskID); err != nil || !ok {
-				return err
-			}
+		if may, err := mayProceedOn(ctx, tx, cid, scope.TaskID); err != nil || !may {
+			return err
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE challenge SET integration_ref = ? WHERE id = ? AND integration_ref IS NULL`, integrationRef, cid)
 		if err != nil {

@@ -336,7 +336,7 @@ func (s *Store) sendLand(ctx context.Context, in ContractPollInput, cur *contrac
 	ready := false
 	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE contract_run SET verified_ref = ?, land_ref = ?, land_delivered = 0 WHERE id = ? AND verified_ref = ?
-			AND `+taskMayProceedSQL("contract_run")+``, cur.VerifiedRef, cur.VerifiedRef, cur.ID, cur.VerifiedRef)
+			AND EXISTS (SELECT 1 FROM challenge c WHERE c.id = contract_run.challenge_id AND `+taskMayProceedSQL("c", "contract_run.task_id")+`)`, cur.VerifiedRef, cur.VerifiedRef, cur.ID, cur.VerifiedRef)
 		if err != nil {
 			return err
 		}

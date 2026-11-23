@@ -322,7 +322,8 @@ func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, con
 		st.Run = len(picked.Blocked) // 進めようが無い課題は、委譲の段が保留にする
 		// 回答が記録された保留を持つ実行（resume で答えを返す番）。
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN hold h ON h.id = k.wait_hold_id JOIN challenge c ON c.id = k.challenge_id
-			WHERE k.ended_at IS NULL AND k.state = 'waiting' AND `+taskMayProceedSQL("k")+` AND h.answered_at IS NOT NULL`).Scan(&answered); err != nil {
+			WHERE k.ended_at IS NULL AND k.state = 'waiting' AND h.answered_at IS NOT NULL
+			AND `+taskMayProceedSQL("c", "k.task_id")).Scan(&answered); err != nil {
 			return err
 		}
 		// 保留の間に成功していた実行（検証中へ進める番）と、保留にし損ねた停止（保留にする番）。
@@ -337,12 +338,12 @@ func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, con
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run k JOIN challenge c ON c.id = k.challenge_id JOIN task t ON t.id = k.task_id
 			WHERE k.ended_at IS NULL AND k.state = 'waiting' AND k.requested_kind = 'review' AND COALESCE(k.verified_ref, '') <> ''
 			AND NOT (k.land_delivered = 1 AND k.land_ref = k.verified_ref)
-			AND `+taskMayProceedSQL("k")+` AND COALESCE(c.uses_integration, 0) = 1 AND t.status = 'verifying'`).Scan(&landable); err != nil {
+			AND `+taskMayProceedSQL("c", "k.task_id")+` AND COALESCE(c.uses_integration, 0) = 1 AND t.status = 'verifying'`).Scan(&landable); err != nil {
 			return err
 		}
 		// 着手中の課題の、レビュー待ちの実行（差し戻しを返す番かは、下で決める）。
 		rs, err := tx.QueryContext(ctx, contractRunSelect+` WHERE ended_at IS NULL AND kind = 'task' AND state = 'waiting' AND requested_kind = 'review'
-			AND `+taskMayProceedSQL("contract_run")+` ORDER BY id`)
+			AND EXISTS (SELECT 1 FROM challenge c WHERE c.id = contract_run.challenge_id AND `+taskMayProceedSQL("c", "contract_run.task_id")+`) ORDER BY id`)
 		if err != nil {
 			return err
 		}

@@ -111,6 +111,9 @@ type runTransitionParams struct {
 	// restricted は、遷移表の制限つきの行を LookupRestricted で引くこと。立てるのは、その行の専用の書き込みだけ
 	// （いまはスーパーバイザーの手の supervisor_resolve〔T20〕だけ。終端から出る T18 は、終端の検査が先に断るのでこの道を通らない）。本人確認の要る行は、これを立てても本人確認つきの呼び出しだけが通る。
 	restricted bool
+	// holdCheck が非 nil のとき、版の照合の代わりに呼ぶ（回答だけ。確かめた保留が開いたままで問いと選択肢が同じかを、書き込みの中で確かめる）。
+	// 遷移表の検査より前に呼ぶ（保留が閉じていれば、状態の食い違いではなくコンフリクトで断る）。
+	holdCheck func(ctx context.Context, tx *sql.Tx, cid int64) error
 }
 
 // runTransition は transition（#10: 本人確認の無い5操作）・verifiedTransition
@@ -154,7 +157,11 @@ func (s *Store) transitionGateInTx(ctx context.Context, tx *sql.Tx, p runTransit
 	if err != nil {
 		return nil, Transition{}, err
 	}
-	if p.expectedVersion != nil && current.Version != *p.expectedVersion {
+	if p.holdCheck != nil {
+		if err := p.holdCheck(ctx, tx, cid); err != nil {
+			return nil, Transition{}, err
+		}
+	} else if p.expectedVersion != nil && current.Version != *p.expectedVersion {
 		return nil, Transition{}, ErrConflict
 	}
 	if IsTerminal(Table, StatusVocabulary, current.Status) {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 )
 
 // HoldScope は保留の止める範囲。保留を立てるときに決めて hold.scope へ記録し、後から変えない。
@@ -71,6 +70,16 @@ func taskMayProceed(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) 
 	default:
 		return false, nil
 	}
+}
+
+// taskMayProceedSQL は taskMayProceed と同じ述語を、SQL の条件の断片にしたもの（課題の行の別名 c と、タスクの番号の式 taskExpr を受け取る）。
+// SQL の中で使う所（契約の待ちの結び付きを外す UPDATE・周の数え）は、自前で書かずこれを使う。
+// 開いている保留が 1 つも無い人間対応待ち（保留の行と合わない状態）は進めない。断片は課題が人間対応待ちのときの条件を含むので、taskExpr が NULL になりうるときは呼び出し側で IS NOT NULL を併記する。
+func taskMayProceedSQL(c, taskExpr string) string {
+	return "(" + c + ".status = 'in_progress' OR (" + c + ".status = 'awaiting_human' AND " + taskExpr + " IS NOT NULL AND EXISTS (" +
+		"SELECT 1 FROM hold oa WHERE oa.challenge_id = " + c + ".id AND oa.answer IS NULL AND oa.closed_at IS NULL) AND NOT EXISTS (" +
+		"SELECT 1 FROM hold o WHERE o.challenge_id = " + c + ".id AND o.answer IS NULL AND o.closed_at IS NULL " +
+		"AND (COALESCE(o.scope, '') <> 'task' OR o.task_id = " + taskExpr + "))))"
 }
 
 // holdNotOpenTaskScopedSQL は、課題の単位で「最後の保留」を読んで境を決める所が、ほかのタスクの開いている保留
@@ -140,6 +149,22 @@ func closeOtherOpenHolds(ctx context.Context, tc *transitionCtx, exceptHoldID in
 		tc.after["closed_holds_reason"] = reason
 	}
 	return closed, nil
+}
+
+// mayProceedOn は、タスク taskID（nil ならタスクに結び付かない作業）の作業を進めてよいか。タスクに結び付くときは taskMayProceed、
+// 結び付かないときは課題が着手中のときだけ。
+func mayProceedOn(ctx context.Context, tx *sql.Tx, challengeID int64, taskID *int64) (bool, error) {
+	if taskID != nil {
+		return taskMayProceed(ctx, tx, challengeID, *taskID)
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, challengeID).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, err
+	}
+	return Status(status) == StatusInProgress, nil
 }
 
 // tcTaskMayProceed は、遷移の中（tc）で「このタスクを進めてよいか」を述語 taskMayProceed と同じ規則で確かめる（課題の状態は tc の
@@ -226,15 +251,6 @@ func openTaskHoldTaskIDs(ctx context.Context, tx *sql.Tx, cid int64) (map[int64]
 		out[id] = true
 	}
 	return out, rows.Err()
-}
-
-// taskMayProceedSQL は、契約の実行の行（表の別名 k。challenge_id・task_id を持つ）について「このタスクを進めてよいか」を SQL の式で返す
-// （述語 taskMayProceed と同じ規則）。
-func taskMayProceedSQL(k string) string {
-	return strings.ReplaceAll(`EXISTS (SELECT 1 FROM challenge cx WHERE cx.id = @K.challenge_id AND (cx.status = 'in_progress'
-		OR (cx.status = 'awaiting_human' AND @K.task_id IS NOT NULL AND EXISTS (SELECT 1 FROM hold ho WHERE ho.challenge_id = cx.id AND ho.answer IS NULL AND ho.closed_at IS NULL)
-			AND NOT EXISTS (SELECT 1 FROM hold hx WHERE hx.challenge_id = cx.id
-			AND hx.answer IS NULL AND hx.closed_at IS NULL AND (COALESCE(hx.scope, '') <> 'task' OR hx.task_id = @K.task_id)))))`, "@K", k)
 }
 
 // contractRunTaskIDFor は contractRunTaskID を読み取りの中で呼ぶ版。

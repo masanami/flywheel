@@ -293,24 +293,24 @@ func TestHoldScope_AnswerWithRemainingHoldKeepsAwaitingHuman(t *testing.T) {
 	if err := f.overlay(f.taskB, HoldOptionsInput{Scope: HoldScopeTask}); err != nil {
 		t.Fatal(err)
 	}
-	answer := func() *Challenge {
+	answer := func(hold string) *Challenge {
 		t.Helper()
 		att := verifiedAttestationForTest(t, f.id)
-		c, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{ChallengeID: f.id, ExpectedVersion: f.version(t), Answer: "これで"}, att)
+		c, _, err := f.s.ExecuteAnswer(context.Background(), AnswerRequest{ChallengeID: f.id, ExpectedVersion: f.version(t), Answer: "これで", HoldID: hold, HoldQuestion: f.holdQuestion(t, hold)}, att)
 		if err != nil {
 			t.Fatalf("ExecuteAnswer: %v", err)
 		}
 		return c
 	}
 	v := f.version(t)
-	c := answer()
+	c := answer("H-2")
 	if c.Status != StatusAwaitingHuman || c.Version != v+1 {
 		t.Errorf("after first answer: status = %s version = %d, want awaiting_human %d", c.Status, c.Version, v+1)
 	}
 	if got := f.openHolds(t); got != "1" {
 		t.Errorf("open holds = %s, want 1", got)
 	}
-	if c := answer(); c.Status != StatusInProgress {
+	if c := answer("H-1"); c.Status != StatusInProgress {
 		t.Errorf("after second answer: status = %s, want in_progress", c.Status)
 	}
 	if got := f.openHolds(t); got != "0" {
