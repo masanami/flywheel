@@ -406,7 +406,11 @@ func (s *Store) holdContractWaitWith(ctx context.Context, rep *ContractRunReport
 				return err
 			}
 			tc.taskID = taskID
-			holdID, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonContractStopped, "", opts)
+			scoped, err := taskStopOptions(ctx, tc, opts)
+			if err != nil {
+				return err
+			}
+			holdID, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonContractStopped, "", scoped)
 			if err != nil {
 				return err
 			}

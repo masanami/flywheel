@@ -1168,7 +1168,11 @@ func (s *Store) holdContractWithStop(ctx context.Context, runID, challengeID, qu
 			} else if len(tasks) == 1 {
 				tc.taskID = taskIDPtr(&tasks[0])
 			}
-			_, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", opts)
+			scoped, err := taskStopOptions(ctx, tc, opts)
+			if err != nil {
+				return err
+			}
+			_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", scoped)
 			return err
 		})
 	if err != nil {

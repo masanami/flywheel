@@ -153,6 +153,10 @@ var Table = []Transition{
 	{ID: "T11", From: StatusAwaitingPlanApproval, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T11", From: StatusInProgress, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T11", From: StatusVerifying, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
+	// 人間対応待ちからの行は、保留を課題に重ねる（課題の状態は人間対応待ちのまま、版は進める）。表はストアを読まない。
+	// 重ねられる条件（開いている保留がどれもタスクを止める保留・新しい保留が開いている保留の無い別のタスクを止める保留）は、
+	// 保留の行を作る共通の所（insertHoldWithOptions）が同じ書き込みの中で確かめ、満たさなければ ErrInvalidTransition で断る。
+	{ID: "T11", From: StatusAwaitingHuman, Op: OpHold, Target: TransitionTarget{Fixed: StatusAwaitingHuman}},
 	{ID: "T12", From: StatusAwaitingHuman, Op: OpAnswer, Target: TransitionTarget{ReturnToPrecedingHoldStatus: true, IfReplan: StatusClassified}, RequiresVerification: true},
 	{ID: "T13", From: StatusAwaitingCompletionApproval, Op: OpApprove, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
 	{ID: "T14", From: StatusAwaitingCompletionApproval, Op: OpApproveHoldRelease, Target: TransitionTarget{Fixed: StatusDone}, RequiresVerification: true},
@@ -238,6 +242,10 @@ func HoldEntrySources(table []Transition) []Status {
 			continue
 		}
 		if tr.Target.Fixed != StatusAwaitingHuman {
+			continue
+		}
+		// 人間対応待ちから人間対応待ちへの行（T11 の保留を重ねる行）は、人間対応待ちへ入る道ではない。
+		if tr.From == StatusAwaitingHuman {
 			continue
 		}
 		if seen[tr.From] {

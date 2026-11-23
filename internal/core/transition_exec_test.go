@@ -867,6 +867,9 @@ func TestDispatchTable_AC23_NonVerificationRowsTransitionToTarget(t *testing.T) 
 		if tr.From == NoStatus || tr.Restricted {
 			continue // T1: create は #9 の対象。T18 は専用の書き込みだけが使う制限つきの行（T18 の専用テストが検証する）
 		}
+		if tr.From == StatusAwaitingHuman && tr.Op == OpHold {
+			continue // T11 の保留を重ねる行は、止める範囲を渡す保留の行を作る共通の所が条件を確かめる（hold_scope_test.go が検証する）
+		}
 
 		s := newStoreForTest(t)
 		fixedActor(t, "alice")

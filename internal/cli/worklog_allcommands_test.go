@@ -144,7 +144,7 @@ func awaitingCompletionWithReleasesForCase(t *testing.T, ws string) string {
 func holdFromCase(from string) worklogCase {
 	// 計画承認待ちから入れるのは親が直接行う保留だけ。
 	extra := []string{}
-	after := map[string]any{"question": "q", "status": "awaiting_human", "version": 2.0}
+	after := map[string]any{"question": "q", "status": "awaiting_human", "version": 2.0, "hold_id": "H-1", "hold_scope": "challenge"}
 	if from == "awaiting_plan_approval" {
 		extra = []string{"--kind", "parent_direct"}
 		after["hold_kind"] = "parent_direct"
@@ -406,7 +406,7 @@ var worklogCases = []worklogCase{
 		want: func(string) []wantActivity {
 			return []wantActivity{{"challenge", "C-1", "verify_uncertain",
 				map[string]any{"status": "verifying"},
-				map[string]any{"question": "q", "status": "awaiting_human", "version": 2.0}}}
+				map[string]any{"question": "q", "status": "awaiting_human", "version": 2.0, "hold_id": "H-1", "hold_scope": "challenge"}}}
 		},
 	},
 	holdFromCase("unclassified"),
@@ -745,6 +745,9 @@ func TestWorklog_CasesCoverEveryTransitionTableRow(t *testing.T) {
 	for _, row := range core.Table {
 		if row.Restricted {
 			continue // T18 は専用の core の書き込み（本番反映の段・承認の ①）だけが使い、CLI のコマンドに対応しない。core のテストが作業ログを検証する。
+		}
+		if row.From == core.StatusAwaitingHuman && row.Op == core.OpHold {
+			continue // 保留を重ねる行は、止める範囲を渡せる core の書き込みだけが使い、CLI の hold には対応しない（core のテストが作業ログを検証する）。
 		}
 		if !covered[row] {
 			t.Errorf("transition %s (from %q, op %q) has no case in worklogCases", row.ID, row.From, row.Op)
