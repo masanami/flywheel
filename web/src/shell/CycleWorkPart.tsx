@@ -14,11 +14,14 @@ export function CycleWorkPart({
   workspacePath,
   work,
   cycleState,
+  hideStages = false,
 }: {
   workspace: string;
   workspacePath: string | undefined;
   work: CycleWork | undefined;
   cycleState: string;
+  // 段ごとの件数を、呼ぶ側が別の形で出すとき。
+  hideStages?: boolean;
 }) {
   const cycleGuide =
     workspacePath === undefined
@@ -35,7 +38,7 @@ export function CycleWorkPart({
         <span data-testid="cycle-work-total">{work ? work.total : "—"}</span>{" "}
         件）
       </h3>
-      {work && work.total > 0 ? (
+      {!hideStages && work && work.total > 0 ? (
         <ul className="now-stages" data-testid="cycle-stages">
           {CYCLE_WORK_STAGES.filter((s) => work.stages[s] > 0).map((s) => (
             <li key={s} data-stage={s}>

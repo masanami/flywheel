@@ -29,9 +29,21 @@ test("AC-437 #806: 幅 360px で、サイクルの画面は、ページ全体が
   await expect(
     page.getByRole("heading", { name: "サイクル", exact: true }),
   ).toBeVisible();
-  await expect(page.getByTestId("cycle-last-started")).toBeVisible();
+  await expect(page.getByTestId("cycle-running-started")).toBeVisible();
   await expect(page.getByTestId("cycle-work-total")).toHaveText("3");
   await noHorizontalScroll(page);
+});
+
+test("#1183: 走っているサイクルで「サイクルを止める」を押すと、止める指示を出した旨に変わる（偽のデータ）", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/cycle");
+  await expect(page.getByTestId("cycle-watching-row").first()).toBeVisible();
+  await page.getByRole("button", { name: "サイクルを止める" }).click();
+  await expect(page.getByTestId("cycle-stop-requested")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "サイクルを止める" }),
+  ).toHaveCount(0);
 });
 
 test("AC-438 #806: 幅 360px で、「すべて」の画面は、ページ全体が横にスクロールしない", async ({
