@@ -1321,8 +1321,9 @@ it("AC-164 #1185: 「スーパーバイザーの記録」に、手の数と、�
     ],
   });
   const sec = q(root).getByTestId("sv-records");
-  expect(within(sec).getByTestId("sv-records-count").textContent).toContain(
-    "2",
+  // 手の数は成った手だけ（断られた手は数えない）。行は全部出す。
+  expect(within(sec).getByTestId("sv-records-count").textContent).toBe(
+    "手の数: 1",
   );
   const rows = within(sec).getAllByTestId("sv-record");
   expect(rows).toHaveLength(2);

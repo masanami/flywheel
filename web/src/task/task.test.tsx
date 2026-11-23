@@ -1140,6 +1140,26 @@ it("AC-149 #1185: 意思決定の記録に、計画の承認の行が、承認�
   );
 });
 
+it("#1206: 計画を作り直して承認し直した課題では、計画の承認の行が、承認のたびに 1 行ずつ古い順に出る", async () => {
+  const { root } = await open(
+    withExtra(
+      {},
+      {
+        approvals: [
+          approval({ id: "AP-2", decided_at: "2026-11-01T03:00:00Z" }),
+          approval({ id: "AP-1", decided_at: "2026-11-01T01:00:00Z" }),
+        ],
+      },
+    ),
+  );
+  const rows = decisionRows(root);
+  expect(rows).toHaveLength(2);
+  expect(
+    rows.map((r) => r.querySelector("time")?.getAttribute("datetime")),
+  ).toEqual(["2026-11-01T01:00:00Z", "2026-11-01T03:00:00Z"]);
+  for (const r of rows) expect(r.textContent).toContain("計画を承認した");
+});
+
 it("AC-149 #1185: 取り替えられた承認・差し戻しは出ない", async () => {
   const { root } = await open(
     withExtra(

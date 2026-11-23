@@ -65,6 +65,11 @@ export function NowScreen({
   const [fresh, setFresh] = useState<readonly Question[] | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: 全体の値が変わったら、読み直した値は捨てる
   useEffect(() => setFresh(null), [live.questions]);
+  // ボタンの回答が通ると、その行は一覧から消える。押した結果が見えるよう、通った回答を画面に残す（次の回答まで）。
+  const [answered, setAnswered] = useState<{
+    challengeId: string;
+    label: string;
+  } | null>(null);
   const reloadQuestions = useCallback(() => {
     api.questions().then(
       (r) => setFresh(r.questions),
@@ -156,6 +161,21 @@ export function NowScreen({
 
       <section aria-labelledby="now-waiting-title" className="now-block">
         <h3 id="now-waiting-title">あなたを待っている（{rows.length} 件）</h3>
+        {answered !== null ? (
+          <output className="now-answered" data-testid="now-answered">
+            <a
+              href={hrefOf({
+                kind: "challenge",
+                name: agentName,
+                id: answered.challengeId,
+                view: "tree",
+              })}
+            >
+              「{titleOf(answered.challengeId)}」
+            </a>
+            の問いに「{answered.label}」で答えました。
+          </output>
+        ) : null}
         {rows.length === 0 ? (
           <p>{NO_WAITING_TEXT}</p>
         ) : (
@@ -167,7 +187,8 @@ export function NowScreen({
                 slotGuide={slotGuide}
                 agentName={agentName}
                 questions={questions}
-                onAnswered={reloadQuestions}
+                onChanged={reloadQuestions}
+                onAnswered={setAnswered}
               />
             ))}
           </ul>
@@ -236,13 +257,15 @@ function WaitingItem({
   slotGuide,
   agentName,
   questions,
+  onChanged,
   onAnswered,
 }: {
   row: WaitingRow;
   slotGuide: Guide | undefined;
   agentName: string;
   questions: readonly Question[];
-  onAnswered: () => void;
+  onChanged: () => void;
+  onAnswered: (a: { challengeId: string; label: string }) => void;
 }) {
   const group = waitingKindGroup(row.kind);
   return (
@@ -268,6 +291,7 @@ function WaitingItem({
           questions={questions.filter(
             (q) => q.challenge_id === row.challengeId,
           )}
+          onChanged={onChanged}
           onAnswered={onAnswered}
         />
       ) : null}
@@ -286,15 +310,28 @@ function AnswerButtons({
   agentName,
   challengeId,
   questions,
+  onChanged,
   onAnswered,
 }: {
   agentName: string;
   challengeId: string;
   questions: readonly Question[];
-  onAnswered: () => void;
+  onChanged: () => void;
+  onAnswered: (a: { challengeId: string; label: string }) => void;
 }) {
-  const state = useHoldAnswer(agentName, challengeId, onAnswered);
   const answerable = questions.filter((q) => hasOptions(q));
+  // 通った回答の、選択肢の語を親へ渡す（行が消えた後も出すため）。
+  const report = useCallback(
+    (holdId: string, option: string) => {
+      const label =
+        questions
+          .find((q) => q.hold_id === holdId)
+          ?.options.find((o) => o.id === option)?.label ?? option;
+      onAnswered({ challengeId, label });
+    },
+    [questions, challengeId, onAnswered],
+  );
+  const state = useHoldAnswer(agentName, challengeId, onChanged, report);
   return (
     <div data-testid="now-answer">
       {answerable.map((q) => (
