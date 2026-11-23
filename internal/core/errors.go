@@ -176,3 +176,16 @@ var (
 // ErrUpstreamFetchFailed は bind が上流から Issue を取得できなかった（404・移管以外の失敗）
 // ことを表す。CLI は upstream_unavailable へ写す。
 var ErrUpstreamFetchFailed = errors.New("core: could not fetch the upstream issue")
+
+// followupAwaitingOwnerError は、足す依頼がオーナー待ち（問いが回答待ち）のフォローアップを、捨てる・済みにしようとしたことを
+// 表す型。errors.Is(err, ErrValidation) が真（CLI は validation_failed へ写す）。メッセージは利用者に見える日本語の文。
+type followupAwaitingOwnerError struct{}
+
+func (followupAwaitingOwnerError) Error() string {
+	return "このフォローアップを指す足す依頼が、オーナーの回答を待っています。先に問いへ回答してください（足さずに進める選択肢を選べば、足す依頼が閉じます）。"
+}
+
+func (followupAwaitingOwnerError) Unwrap() error { return ErrValidation }
+
+// ErrFollowupAwaitingOwner は、フォローアップを指す足す依頼がオーナー待ちの間は、そのフォローアップを捨てる・済みにできないことを表す。
+var ErrFollowupAwaitingOwner error = followupAwaitingOwnerError{}

@@ -295,17 +295,16 @@ func (p *FollowupPromotePlan) sameAs(cur *FollowupPromotePlan) bool {
 func promoteFollowupToTask(ctx context.Context, tx *sql.Tx, rec *activityRecorder, att Attestation, f *Followup, p *FollowupPromotePlan) (*FollowupPromoteResult, error) {
 	cid, _ := parseChallengeID(p.TargetChallengeID)
 	if p.OverLimit() {
-		// 上げる指示が、上限の引き上げの承認を兼ねる。上限を足した後の見込みまで上げ、前の額・後の額・本人確認の方式を残す。
-		after := p.afterMicros
-		_, reason, err := challengeBudgetLimit(ctx, tx, cid)
+		// 上げる指示が、上限の引き上げの承認を兼ねる。上限を足した後の見込みまで上げ、承認の記録（種類 budget。--limit と同じ形）と
+		// 作業ログ（承認・budget_limit。前の額・後の額・本人確認の方式）を残す。
+		plan, ok, err := loadApprovedPlan(ctx, tx, cid)
 		if err != nil {
 			return nil, err
 		}
-		if err := setChallengeBudgetLimit(ctx, tx, cid, &after, reason); err != nil {
-			return nil, err
+		if !ok {
+			return nil, ErrInvalidTransition
 		}
-		if err := rec.record("challenge", cid, ActivityActionBudgetLimit, map[string]any{"limit_usd": microsToUSD(p.limitMicros)},
-			map[string]any{"limit_usd": microsToUSD(after), "verification": string(att.Verification())}); err != nil {
+		if _, err := raiseBudgetLimit(ctx, tx, rec, att, cid, plan.Version, p.limitMicros, p.afterMicros); err != nil {
 			return nil, err
 		}
 	}

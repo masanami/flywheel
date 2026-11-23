@@ -579,3 +579,24 @@ func TestFollowupPromote_AC95_AlreadyPromotedFailsBeforeConfirmation(t *testing.
 		t.Errorf("AC-95: challenge rows %s -> %s", before, got)
 	}
 }
+
+// オーナーの決定 2026-11-23: 足す依頼がオーナー待ちのフォローアップは、捨てる・済みにするを検証の誤りで断る。
+// 出力に、先に問いへ回答する旨が出る。何も書かない。
+func TestFollowupDropAndDone_AwaitingOwnerAdditionIsRefusedWithGuidanceAndChangesNothing(t *testing.T) {
+	t.Parallel()
+	ws := fuWorkspace(t)
+	coretest.InsertTaskAddition(t, ws, coretest.TaskAdditionRow{ChallengeID: 1, Origin: "followup", State: "awaiting_owner", FollowupID: 1, BudgetImplMicros: 1_000_000, BudgetReviewMicros: 1_000_000})
+	for _, args := range []string{"followup drop F-1 --reason r " + fuRelayed, "followup done F-1 --note n"} {
+		code, _, stderr := fuRun(t, ws, fuArgs(args)...)
+		fuWantCode(t, args, code, stderr, CodeValidationFailed)
+		if !strings.Contains(stderr, "先に問いへ回答") {
+			t.Errorf("%s: stderr = %s, want guidance to answer the question first", args, stderr)
+		}
+	}
+	if fuStatus(t, ws, 1) != "open" {
+		t.Error("F-1 changed")
+	}
+	if got := coretest.QueryRows(t, ws, `SELECT state FROM task_addition`)[0][0]; got != "awaiting_owner" {
+		t.Errorf("addition state = %v, want awaiting_owner", got)
+	}
+}
