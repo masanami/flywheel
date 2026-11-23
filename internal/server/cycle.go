@@ -296,8 +296,53 @@ func cycleStatusHandler(fleet *Fleet, w http.ResponseWriter, r *http.Request) {
 		writeCoreError(w, err)
 		return
 	}
-	// supervisor_actions・costs は、後続の課題が core の読み取りを足して埋める（それまでは空）。
-	writeJSON(w, http.StatusOK, view.NewCycleScreen(view.FromCycleStatus(cs), nil, nil))
+	ins, err := st.ReadCycleInsights(r.Context())
+	if err != nil {
+		writeCoreError(w, err)
+		return
+	}
+	refs := make([]titleRef, 0, len(ins.SupervisorActions))
+	for _, a := range ins.SupervisorActions {
+		ref := titleRef{challenge: a.ChallengeID}
+		if a.TaskID != nil {
+			ref.task = *a.TaskID
+		}
+		refs = append(refs, ref)
+	}
+	titles, err := loadTitles(r.Context(), st, refs)
+	if err != nil {
+		writeCoreError(w, err)
+		return
+	}
+	actions := make([]view.CycleSupervisorAction, 0, len(ins.SupervisorActions))
+	for _, a := range ins.SupervisorActions {
+		v := view.FromSupervisorAction(a)
+		ct := ""
+		if p := titles.challenge(a.ChallengeID); p != nil {
+			ct = *p
+		}
+		actions = append(actions, view.CycleSupervisorAction{
+			At: v.CreatedAt, ChallengeID: a.ChallengeID, ChallengeTitle: ct, Findings: a.Findings, Hand: v.Hand, ID: a.ID,
+			RejectReason: v.RejectReason, Result: v.Result, TaskID: a.TaskID, TaskTitle: taskTitleOf(a.TaskID, titles),
+		})
+	}
+	costs := make([]view.CycleCost, 0, len(ins.Costs))
+	for _, c := range ins.Costs {
+		var role *string
+		if c.Judgment != "" {
+			j := string(c.Judgment)
+			role = &j
+		}
+		costs = append(costs, view.CycleCost{CostUSD: float64(c.SpentMicros) / 1e6, Kind: string(c.Kind), Role: role})
+	}
+	writeJSON(w, http.StatusOK, view.NewCycleScreen(view.FromCycleStatus(cs), actions, costs))
+}
+
+func taskTitleOf(id *string, titles titleLookup) *string {
+	if id == nil {
+		return nil
+	}
+	return titles.task(*id)
 }
 
 // cycleStartHandler は、生きているロックがあれば起動せず 409 locked。heartbeat が回収の時間を過ぎた古いロックは走っていない扱いで、
