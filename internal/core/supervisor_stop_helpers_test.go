@@ -37,6 +37,20 @@ func wantLastHoldStop(t *testing.T, s *Store, want string) {
 	}
 }
 
+// wantLastHoldScopeNull は、いちばん新しい保留の止める範囲（hold.scope）が NULL（課題を止める保留）であることを確かめる（S4c-3）。
+func wantLastHoldScopeNull(t *testing.T, s *Store) {
+	t.Helper()
+	var scope sql.NullString
+	if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT scope FROM hold ORDER BY id DESC LIMIT 1`).Scan(&scope)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if scope.Valid {
+		t.Errorf("hold.scope = %q, want NULL (a hold that stops the challenge)", scope.String)
+	}
+}
+
 // 対象の止まり方の保留は、スーパーバイザー待ち（pending）。
 const (
 	stopPendingIntake = "intake_unverified/pending"

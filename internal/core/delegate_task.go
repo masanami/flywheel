@@ -121,6 +121,34 @@ func blockedPendingTasks(all []Task, byID map[string]Task) map[string]bool {
 //
 // 計画の検査（validateJ2Output）はここで掛けない（呼び出し側が、起動できるときだけ後で行う）。
 func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration, challengeID string, cid int64) (*launchSelection, error) {
+	sel, err := selectLaunchTasksOfChallenge(ctx, tx, conn, challengeID, cid)
+	if err != nil {
+		return nil, err
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, cid).Scan(&status); err != nil {
+		return nil, err
+	}
+	if Status(status) != StatusAwaitingHuman {
+		return sel, nil
+	}
+	// 人間対応待ちの課題（タスクを止める保留だけが開いているものだけが、ここへ来る）は、進めてよいタスクだけを選ぶ（述語 taskMayProceed）。
+	// 進めようが無い課題の保留（tasks_blocked）は、課題の状態で決めるので、着手中へ戻ってから行う（Blocked を返さない）。
+	out := &launchSelection{Busy: sel.Busy}
+	for _, t := range sel.Tasks {
+		ok, err := taskMayProceed(ctx, tx, cid, taskIntID(&t))
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out.Tasks = append(out.Tasks, t)
+		}
+	}
+	return out, nil
+}
+
+// selectLaunchTasksOfChallenge は selectLaunchTasks の、課題の状態を見ずに、起動できるタスクを選ぶ部分。
+func selectLaunchTasksOfChallenge(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration, challengeID string, cid int64) (*launchSelection, error) {
 	all, err := listTasks(ctx, tx, cid)
 	if err != nil {
 		return nil, err

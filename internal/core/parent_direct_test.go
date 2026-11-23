@@ -62,6 +62,7 @@ func TestHoldChallenge_KindDefaultsToHumanAndAcceptsParentDirect(t *testing.T) {
 		t.Fatalf("HoldChallenge(default) error = %v", err)
 	}
 	b := holdAsParentDirect(t, s, StatusClassified)
+	wantLastHoldScopeNull(t, s) // AC-11: 親が直接行う保留は、課題を止める保留
 
 	da, _ := s.GetChallenge(context.Background(), a.ID)
 	db, _ := s.GetChallenge(context.Background(), b.ID)

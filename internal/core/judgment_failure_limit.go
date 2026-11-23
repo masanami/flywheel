@@ -64,7 +64,7 @@ func loadJudgmentLimitHit(ctx context.Context, tx *sql.Tx, challengeID int64, ve
 			COALESCE(stop_kind = ? AND supervisor_action_id IN
 				(SELECT id FROM supervisor_action WHERE hand = 'retry' AND result = 'executed')
 			 AND run_id IN (SELECT id FROM run WHERE judgment = ?), 0)
-		 FROM hold WHERE challenge_id = ? ORDER BY id DESC LIMIT 1`, string(StopKindJudgmentFailed), string(j), challengeID).
+		 FROM hold WHERE challenge_id = ? AND `+holdNotOpenTaskScopedSQL+` ORDER BY id DESC LIMIT 1`, string(StopKindJudgmentFailed), string(j), challengeID).
 		Scan(&ref.ID, &runID, &answer, &raisedAtString, &ref.RetriedFailureLimit)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
