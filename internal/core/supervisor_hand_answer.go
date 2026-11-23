@@ -13,7 +13,7 @@ import (
 // recordSupervisorAnswer は、検査を通った答え（req.Output。手は answer）を、問い questions と合わせて、対処の記録（結果 executed）と
 // 作業ログに 1 つのトランザクションで書き、対処の記録の ID を返す。questions と答えの件数が合わなければ ErrValidation（何も書かない）。
 // 記録の basis には、答えごとの根拠をまとめて入れる（問いごとの根拠は questions に入る）。保留は指さない（hold_id は NULL）。
-// 判断の間に、そのタスクを進めてよくなくなっていたら（課題の取り下げ・そのタスクの保留など。述語は mayProceedOn）、答えを実行せず、同じ書き込みで断りの記録（rejected・state_changed）を残して
+// 判断の間に、そのタスクを進めてよくなくなっていたら（課題の取り下げ・そのタスクの保留など。述語は childQuestionTargetMayProceed）、答えを実行せず、同じ書き込みで断りの記録（rejected・state_changed）を残して
 // executed を偽で返す（呼び出し元は、委譲先へ答えを返さない）。
 func (s *Store) recordSupervisorAnswer(ctx context.Context, req supervisorHandRequest, questions []ChildQuestion) (id int64, executed bool, err error) {
 	o := req.Output
@@ -30,8 +30,11 @@ func (s *Store) recordSupervisorAnswer(ctx context.Context, req supervisorHandRe
 	in.HoldID = nil
 	in.Questions = recorded
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
-		var err error
-		executed, err = mayProceedOn(ctx, tx, req.Target.ChallengeID, req.Target.TaskID)
+		ch, err := loadChallenge(ctx, tx, req.Target.ChallengeID)
+		if err != nil {
+			return err
+		}
+		executed, err = childQuestionTargetMayProceed(ctx, tx, ch, req.Target.TaskID)
 		if err != nil {
 			return err
 		}

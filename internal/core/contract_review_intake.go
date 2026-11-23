@@ -231,17 +231,23 @@ func (s *Store) holdContractReviewWithOptions(ctx context.Context, rep *Contract
 func (s *Store) holdContractReviewWithOptionsReason(ctx context.Context, rep *ContractRunReport, question string, reason holdReason, opts HoldOptionsInput, extra func(ctx context.Context, tx *sql.Tx) error) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), rep.RunID, rep.ChallengeID, OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
-			if tc.current.Status != StatusInProgress {
-				return errReconcileNotEligible
-			}
 			taskID, err := contractRunTaskID(ctx, tc.tx, tc.id, rep.ExternalRunID)
 			if err != nil {
 				return err
+			}
+			// 着手中のほか、タスクを止める保留だけが開いている人間対応待ちでも、このタスクに保留が無ければ立てる。
+			if may, err := tcTaskMayProceed(ctx, tc, taskID); err != nil {
+				return err
+			} else if !may {
+				return errReconcileNotEligible
 			}
 			tc.taskID = taskID
 			scoped, err := taskStopOptions(ctx, tc, opts)
 			if err != nil {
 				return err
+			}
+			if tc.current.Status == StatusAwaitingHuman && scoped.Scope != HoldScopeTask {
+				return errReconcileNotEligible
 			}
 			if _, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", scoped); err != nil {
 				return err
