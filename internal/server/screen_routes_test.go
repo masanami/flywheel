@@ -13,8 +13,8 @@ import (
 
 // 区切り S4d-2 の土台（T1）: 足した 6 つの口は、いまの守り（CSRF）を通り、中身を置くまでは 404。誤りの対応づけは、後続が埋める枠の前提。
 
+// 回答の口は中身を置いた（hold_answer_test.go が確かめる）ので、この一覧には載せない。
 var screenPostRoutes = []string{
-	"/api/v1/workspaces/w/challenges/C-1/holds/H-1/answer",
 	"/api/v1/workspaces/w/ingest",
 	"/api/v1/workspaces/w/cycle/stop",
 	"/api/v1/workspaces/w/followups/done",
