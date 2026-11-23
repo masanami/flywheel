@@ -153,9 +153,10 @@ func TestShowJSON_RunsAndHoldsCarryTaskID(t *testing.T) {
 		in.Result = "succeeded"
 	})
 	coretest.Exec(t, ws, `UPDATE run SET task_id = 2 WHERE id = 2`)
+	// 開いている保留は、課題を止めるもの（task_id なし）とタスクを止めるもの（scope = 'task'）を 1 つずつまで。タスクの保留を先にタスクへ結び付けてから、課題の保留を足す。
 	coretest.InsertHold(t, ws, challengeIDToInternalID(t, id), "Q-TASK", "in_progress", "2026-09-28T00:00:00.000Z", nil)
+	coretest.Exec(t, ws, `UPDATE hold SET task_id = 3, scope = 'task' WHERE question = 'Q-TASK'`)
 	coretest.InsertHold(t, ws, challengeIDToInternalID(t, id), "Q-CHALLENGE", "in_progress", "2026-09-28T00:00:01.000Z", nil)
-	coretest.Exec(t, ws, `UPDATE hold SET task_id = 3 WHERE question = 'Q-TASK'`)
 
 	doc := runJSON(t, ws, "show", id)
 	runs := objectList(t, doc["runs"], "runs") // 新しい順

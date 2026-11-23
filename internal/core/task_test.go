@@ -605,6 +605,8 @@ func TestInsertHoldKindFromTask_WritesTaskIDAndTheExistingInsertLeavesItNull(t *
 	t.Parallel()
 	s := newStoreForTest(t)
 	cid := taskTestChallenge(t, s)
+	// 開いている保留は課題ごとに 1 つまで。task_id なしの保留は別の課題に立てる。
+	cidWithout := taskTestChallenge(t, s)
 	created := mustCreateTasks(t, s, cid, 1, []TaskInput{sampleTask("a")})
 	taskID, _ := parseTaskID(created[0].ID)
 	now := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
@@ -615,7 +617,8 @@ func TestInsertHoldKindFromTask_WritesTaskIDAndTheExistingInsertLeavesItNull(t *
 		if withTask, err = insertHoldKindFromTask(context.Background(), tc, "q1", HoldKindHuman, StatusInProgress, &taskID); err != nil {
 			return err
 		}
-		without, err = insertHoldKindFrom(context.Background(), tc, "q2", HoldKindHuman, StatusInProgress)
+		tcWithout := &transitionCtx{tx: tx, id: cidWithout, current: &Challenge{Status: StatusInProgress}, after: map[string]any{}, nowStr: formatTimestamp(now)}
+		without, err = insertHoldKindFrom(context.Background(), tcWithout, "q2", HoldKindHuman, StatusInProgress)
 		return err
 	}); err != nil {
 		t.Fatal(err)

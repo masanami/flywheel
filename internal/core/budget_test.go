@@ -85,8 +85,10 @@ func (f *delegateFixture) refreshInProgress(t *testing.T, id string) {
 	t.Helper()
 	cid, _ := parseChallengeID(id)
 	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE challenge SET status = 'in_progress', version = version + 1 WHERE id = ?`, cid)
-		return err
+		if _, err := tx.Exec(`UPDATE challenge SET status = 'in_progress', version = version + 1 WHERE id = ?`, cid); err != nil {
+			return err
+		}
+		return closeOpenHoldsUnlessHeld(tx, cid, "in_progress")
 	}); err != nil {
 		t.Fatal(err)
 	}

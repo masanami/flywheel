@@ -878,3 +878,36 @@ func TestImport_SupervisorActionAndHoldStateSurviveTheRoundTrip(t *testing.T) {
 		t.Errorf("after import: (%d %q %q %q %d %d %d), want (%d %q %q %q %d %d %d)", dn, ds, dk, df, dd, dt, dr, sn, ss, sk, sf, sd, st, sr)
 	}
 }
+
+// 版 38 で足した列（hold.scope）の値は、書き出し→空のストアへの再構築で保たれる（AC-138）。
+func TestImport_HoldScopeSurvivesTheRoundTrip(t *testing.T) {
+	t.Parallel()
+	src, _ := filledStore(t)
+	if err := src.db.Write(context.Background(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`UPDATE hold SET task_id = (SELECT id FROM task LIMIT 1) WHERE id = 1 AND task_id IS NULL`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`UPDATE hold SET scope = 'task' WHERE id = 1 AND task_id IS NOT NULL`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dst, _ := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), mustExport(t, src)); err != nil {
+		t.Fatal(err)
+	}
+	read := func(s *Store) (scope sql.NullString) {
+		if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+			return tx.QueryRow(`SELECT scope FROM hold WHERE id = 1`).Scan(&scope)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if s := read(src); s.String != "task" {
+		t.Fatalf("fixture did not set scope: %v", s)
+	}
+	if got := read(dst); got.String != "task" {
+		t.Errorf("after import scope = %v, want task", got)
+	}
+}
