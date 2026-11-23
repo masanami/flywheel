@@ -137,7 +137,7 @@ func statusHandler(fleet *Fleet, checks *checkCache) http.HandlerFunc {
 			writeCoreError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, view.FromOverview(ov))
+		writeJSON(w, http.StatusOK, view.FromOverviewForScreen(ov))
 	}
 }
 

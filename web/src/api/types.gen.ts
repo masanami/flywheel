@@ -118,6 +118,7 @@ export interface StatusNeedsHuman {
   budget_exhausted: BudgetExhausted[];
   challenges: Challenge[];
   discrepancies: Discrepancy[];
+  holds?: StatusHold[];
   operations: Operation[];
   slots: Slot[];
   triage: Triage[];
@@ -154,6 +155,21 @@ export interface Discrepancy {
   cycle_only?: boolean;
   kinds: string[];
   operation_id?: string;
+}
+
+export interface StatusHold {
+  challenge_id: string;
+  check: string;
+  hold_id: string;
+  options: HoldOption[];
+  task_title: string;
+}
+
+export interface HoldOption {
+  button?: boolean | null;
+  description: string;
+  id: string;
+  label: string;
 }
 
 export interface Slot {
@@ -348,13 +364,6 @@ export interface Hold {
   supervisor_recommendation: string | null;
   supervisor_state: string | null;
   task_id: string | null;
-}
-
-export interface HoldOption {
-  button?: boolean | null;
-  description: string;
-  id: string;
-  label: string;
 }
 
 export interface StagePair {
