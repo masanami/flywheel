@@ -51,6 +51,21 @@ func TestSpec_AC227_ChatPromptAndHelpSayToRecordTheOptionIdentifier(t *testing.T
 	}
 }
 
+// flywheel の使い方の出力の answer の行は、コマンドの定義にある保留への回答のフラグ（--hold・--option）を載せている。
+func TestUsage_AnswerLineListsTheHoldAndOptionFlags(t *testing.T) {
+	var line string
+	for _, l := range strings.Split(usageText, "\n") {
+		if strings.HasPrefix(l, "  answer <ID> ") {
+			line = l
+		}
+	}
+	for _, want := range []string{"--hold <H-ID>", "--option <識別>", "--answer <a>", "--replan", "--choice", "--text"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the answer line of the usage text lacks %q: %q", want, line)
+		}
+	}
+}
+
 // AC-228: 同じ 2 か所に、どの選択肢か決められないときは記録せずに確かめる旨の文がある。
 func TestSpec_AC228_ChatPromptAndHelpSayToAskWhenTheOptionIsUnclear(t *testing.T) {
 	for where, body := range map[string]string{"chat.md": promptText(t, "chat.md"), "usage": usageText} {

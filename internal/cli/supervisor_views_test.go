@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -151,17 +152,24 @@ func TestStatus_PendingMixedWithEscalatedOrNullStaysOwnerWaiting_AC237_AC238(t *
 	ws := initializedWorkspace(t)
 	var ids []string
 	for _, other := range []string{"escalated", ""} {
-		id := svHoldChallenge(t, ws, "pending", "", "")
+		id := createForCase(t, ws)
 		kind := "verify_uncertain"
 		if other == "" {
 			kind = ""
 		}
 		n := challengeIDToInternalID(t, id)
-		// 開いている保留は課題ごとに 1 つまで。pending の保留（課題を止める）に並べる 2 件目は、タスクを止める保留（scope = 'task'）にする。
+		// 仕様で起こりうる形にする: 課題を止める保留とタスクを止める保留は同時に開かないので、別々のタスクを止める保留を 2 つ並べる
+		// （着手中から立つ。1 つはスーパーバイザー待ち〔pending〕、もう 1 つは上げた〔escalated〕か印の無い保留）。
 		coretest.InsertApprovedPlan(t, ws, n, "BODY", showTasksSpec)
+		coretest.Exec(t, ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, stop_kind, supervisor_state, task_id, scope)
+			VALUES (?, 'どうしますか？', 'in_progress', ?, 'verify_uncertain', 'pending', (SELECT MIN(id) FROM task WHERE challenge_id = ?), 'task')`,
+			n, svRaisedAt, n)
 		coretest.Exec(t, ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, stop_kind, supervisor_state, supervisor_findings, supervisor_recommendation, task_id, scope)
-			VALUES (?, 'もう 1 件', 'verifying', ?, ?, ?, 'f', 'r', (SELECT MIN(id) FROM task WHERE challenge_id = ?), 'task')`,
+			VALUES (?, 'もう 1 件', 'in_progress', ?, ?, ?, 'f', 'r', (SELECT MAX(id) FROM task WHERE challenge_id = ?), 'task')`,
 			n, svRaisedAt, nilIfEmpty(kind), nilIfEmpty(other), n)
+		if rows := coretest.QueryRows(t, ws, `SELECT COUNT(DISTINCT task_id) FROM hold WHERE challenge_id = ? AND task_id IS NOT NULL`, n); len(rows) != 1 || fmt.Sprint(rows[0][0]) != "2" {
+			t.Fatalf("distinct tasks of the holds = %v, want 2 (the two holds must stop different tasks)", rows)
+		}
 		coretest.SetChallengeStatus(t, ws, n, "awaiting_human")
 		ids = append(ids, id)
 	}

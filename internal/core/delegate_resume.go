@@ -980,7 +980,8 @@ func (s *Store) slotStateOf(ctx context.Context, slotID string) (slotState, erro
 }
 
 // holdForFailureLimit は連続失敗の上限に達した課題を、委譲を起動せずに人間対応待ちにする
-// （原因の run は最後の失敗の run）。課題が着手中でなくなっていれば何もしない。
+// （原因の run は最後の失敗の run）。そのタスクを進めてよくなくなっていれば（述語 taskMayProceed。課題が着手中でも、
+// タスクを止める保留を重ねられる人間対応待ちでもない）何もしない。
 func (s *Store) holdForFailureLimit(ctx context.Context, dc *delegationContext, cycleID string) (*JudgmentAutoItem, *NotStarted, error) {
 	hit := dc.LimitHit
 	status, _, err := s.mapReconciliationStop(ctx, dc, hit.Last.ID, failureLimitQuestion(hit), holdReasonFailureLimit, cycleID, false, StopKindDelegateStopped)
@@ -988,14 +989,14 @@ func (s *Store) holdForFailureLimit(ctx context.Context, dc *delegationContext, 
 		return nil, nil, err
 	}
 	if status == nil {
-		return nil, nil, nil // 課題が着手中でなくなっていた
+		return nil, nil, nil // タスクを進めてよくなくなっていた（保留を書かなかった）
 	}
 	return nil, &NotStarted{ChallengeID: dc.Challenge.ID, Reason: NotStartedFailureLimit,
 		Detail: fmt.Sprintf("%d consecutive failures (limit %d)", hit.Count, hit.Limit)}, nil
 }
 
 // holdForReworkLimit は差し戻しの上限に達した課題を、委譲を起動せずに人間対応待ちにする
-// （原因の run は最後の J5 の run）。課題が着手中でなくなっていれば何もしない。
+// （原因の run は最後の J5 の run）。そのタスクを進めてよくなくなっていれば（述語 taskMayProceed）何もしない。
 func (s *Store) holdForReworkLimit(ctx context.Context, dc *delegationContext, cycleID string) (*JudgmentAutoItem, *NotStarted, error) {
 	hit := dc.ReworkHit
 	status, _, err := s.mapReconciliationStop(ctx, dc, hit.Last.ID, reworkLimitQuestion(hit), holdReasonReworkLimit, cycleID, false, StopKindReworkLimit)
@@ -1003,7 +1004,7 @@ func (s *Store) holdForReworkLimit(ctx context.Context, dc *delegationContext, c
 		return nil, nil, err
 	}
 	if status == nil {
-		return nil, nil, nil // 課題が着手中でなくなっていた
+		return nil, nil, nil // タスクを進めてよくなくなっていた（保留を書かなかった）
 	}
 	return nil, &NotStarted{ChallengeID: dc.Challenge.ID, Reason: NotStartedReworkLimit,
 		Detail: fmt.Sprintf("%d J5 rejections (limit %d)", hit.Count, hit.Limit)}, nil

@@ -273,6 +273,15 @@ func TestHoldAnswerTaskAddition_AddAfterTheEstimateGrewReissuesTheQuestionAndCha
 	if n := f.count(t, `SELECT COUNT(*) FROM activity WHERE entity = 'challenge' AND entity_id = ? AND action = ?`, f.cid(), ActivityActionHoldEdit); n != 1 {
 		t.Errorf("hold_edit activities = %d, want 1", n)
 	}
+	// 書き換えの作業ログの hold_id は、ほかの作業ログ（回答・スーパーバイザーの手）と同じ H-<番号> の文字列（整数にしない）。
+	if n := f.count(t, `SELECT COUNT(*) FROM activity WHERE entity = 'challenge' AND entity_id = ? AND action = ?
+		AND json_type(after, '$.hold_id') = 'text' AND json_extract(after, '$.hold_id') = ?`, f.cid(), ActivityActionHoldEdit, h.HoldID); n != 1 {
+		t.Errorf("hold_edit activities with hold_id %q as text = %d, want 1", h.HoldID, n)
+	}
+	// 出し直して返す保留も、保留の一覧の読みと同じ ID・止める範囲・タスクを持つ（足す依頼の問いは課題を止める保留）。
+	if hold.HoldID == "" || hold.HoldID != h.HoldID || hold.Scope != h.Scope || (hold.TaskID == nil) != (h.TaskID == nil) {
+		t.Errorf("returned hold id=%q scope=%q task=%v, want the same as the listed hold id=%q scope=%q task=%v", hold.HoldID, hold.Scope, hold.TaskID, h.HoldID, h.Scope, h.TaskID)
+	}
 	// 古い版を持った再送は、版の不一致で断られる。
 	if _, _, err := f.answerHoldFull(t, before, AnswerRequest{Option: taskAddOptionAdd}); !errors.Is(err, ErrConflict) {
 		t.Errorf("stale resend err = %v, want ErrConflict", err)

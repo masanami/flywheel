@@ -1137,8 +1137,9 @@ func contractStartFailedQuestion(result RunResult, errSummary, externalRunID, co
 	return q + "接続ツール側の run が残っていないかを確かめ、残っていれば止めてから回答する。自動では委譲し直さない。"
 }
 
-// holdForContract は課題が着手中なら、契約の run の結果に基づいて課題を保留にする。課題が着手中でなくなって
-// いれば何もしない（held は偽）。契約の run の記録とは別のトランザクションで行う。
+// holdForContract は、契約の run の結果に基づいて保留を立てる。立てるのは、課題が着手中のときと、人間対応待ちの課題に
+// タスクを止める保留として重ねられるときだけ（holdContractWithStop）。それ以外は何もしない（held は偽）。
+// 契約の run の記録とは別のトランザクションで行う。
 func (s *Store) holdForContract(ctx context.Context, c contractCall, question string) (bool, error) {
 	if c.StopNote != "" {
 		// 中止の理由（予算の超過・課題の取り下げ）を添えた保留は、止まり方を渡さない（スーパーバイザー待ちにしない）。
@@ -1147,7 +1148,8 @@ func (s *Store) holdForContract(ctx context.Context, c contractCall, question st
 	return s.holdReclaimedContractStart(ctx, formatRunID(c.RunIDInt), c.ChallengeID, question, c.Agent)
 }
 
-// holdReclaimedContractStart は runID を原因の run として、課題が着手中なら保留にする（着手中でなければ偽）。
+// holdReclaimedContractStart は runID を原因の run として保留を立てる。立てるのは、課題が着手中のときと、人間対応待ちの課題に
+// タスクを止める保留として重ねられるときだけ（それ以外は偽）。
 //
 // 契約の実行の終わり・回収の保留で、止まり方は delegate_stopped（agent は宣言の supervisor を見るために渡す。nil は宣言の既定と同じ扱い）。
 func (s *Store) holdReclaimedContractStart(ctx context.Context, runID, challengeID, question string, agent *AgentDeclaration) (bool, error) {
@@ -1548,7 +1550,9 @@ func (s *Store) sameTaskRunOpen(ctx context.Context, row *contractRunRow) (bool,
 // 作る前に回収されると contract_run を持たない。status の run との区別は「その課題の、先に始まった契約の run が
 // その run の開始時点で終わっていなかった」ことで行う。終わりと同じ時刻（ミリ秒）の run は start の run として扱う:
 // 契約の run を終わらせるのは成功した契約のコマンドの run（start・status・resume・cancel）で、成功以外の run は
-// 終わらせない。この条件は成功以外の run だけを選ぶから。課題が着手中でなくなっていれば（保留・取り下げ・完了）選ばない。
+// 終わらせない。この条件は成功以外の run だけを選ぶから。run のタスクを進めてよくなければ選ばない（述語 taskMayProceedSQL。
+// 選ぶのは、課題が着手中か、タスクを止める保留だけが開いた人間対応待ちで、そのタスクに開いている保留が無いとき。
+// 課題を止める保留・そのタスクの保留が開いている・取り下げ・完了は選ばない）。
 var reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND ` + taskMayProceedSQL("c", "r.task_id") + `
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND COALESCE(k.task_id, 0) = COALESCE(r.task_id, 0) AND k.start_run_id < r.id
