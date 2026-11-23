@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
 import type { ChallengeCard, Followup } from "../api/types.gen.ts";
@@ -115,7 +122,7 @@ it("AC-354 #812: 開くと、一覧の API が status=all を付けて 1 回だ�
   );
   expect(calls.map((r) => r.url)).toEqual([URL_ALL]);
   // 切り替えても読み直さない
-  fireEvent.click(screen.getByRole("button", { name: /済み/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^済み（/ }));
   expect(
     requests.filter((r) => r.url.includes("/alpha/followups")),
   ).toHaveLength(1);
@@ -139,7 +146,7 @@ it("AC-356 #812: 開いた直後は、未のフォローアップだけが出る
 
 it("AC-357 #812: 「済み」を押すと、済みのフォローアップだけが出る", async () => {
   await open();
-  fireEvent.click(screen.getByRole("button", { name: /済み/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^済み（/ }));
   expect(["F-4", "F-5"].every(hasTitle)).toBe(true);
   expect(["F-1", "F-2", "F-3", "F-6"].some(hasTitle)).toBe(false);
 });
@@ -147,7 +154,7 @@ it("AC-357 #812: 「済み」を押すと、済みのフォローアップだけ
 it("AC-358 #812: 「済み」を押すと、URL のハッシュの status が done になり、履歴は増えない", async () => {
   await open();
   const len = window.history.length;
-  fireEvent.click(screen.getByRole("button", { name: /済み/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^済み（/ }));
   expect(window.location.hash).toBe("#/a/alpha/followups?status=done");
   expect(window.history.length).toBe(len);
 });
@@ -244,7 +251,7 @@ it("AC-366 #812: 説明（detail）がある行に説明が出て、無い行に
 
 it("AC-367 #812: 済みの行に、確かめた結果（note）が出る", async () => {
   await open();
-  fireEvent.click(screen.getByRole("button", { name: /済み/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^済み（/ }));
   const notes = screen
     .getAllByTestId("followup-note")
     .map((n) => n.textContent);
@@ -264,7 +271,7 @@ it("AC-368 #812: 捨てたの行に、理由（reason）が出る", async () => 
 
 it("AC-369 #812: promoted_challenge_id がある行に、上げた先の課題の題名が詳細へのリンクで出る", async () => {
   await open();
-  fireEvent.click(screen.getByRole("button", { name: /済み/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^済み（/ }));
   const p = screen.getByTestId("followup-promoted");
   expect(within(p).getByRole("link", { name: "課題の二" })).toHaveAttribute(
     "href",
@@ -294,34 +301,23 @@ it("AC-372 #812: 未が 0 件のとき、「未のフォローアップはあり
   ).toBeInTheDocument();
 });
 
-it("AC-373 #812: 切り替えを除くボタンと、チェックの欄・入力欄は無い", async () => {
+it("AC-373 #812・AC-116: チェックは未の行にだけ出る（済み・捨てたの行には出ない）", async () => {
   await open();
-  for (const s of [/未/, /済み/, /捨てた/]) {
+  expect(screen.getAllByTestId("followup-check")).toHaveLength(3);
+  for (const s of [/^済み（/, /^捨てた（/]) {
     fireEvent.click(screen.getByRole("button", { name: s }));
-    const main = screen
-      .getByRole("heading", { name: "フォローアップ" })
-      .closest("section") as HTMLElement;
-    const buttons = within(main).getAllByRole("button");
-    expect(buttons.map((b) => b.textContent)).toEqual([
-      "未（3）",
-      "済み（2）",
-      "捨てた（1）",
-    ]);
-    expect(
-      main.querySelector('input, textarea, select, [role="checkbox"]'),
-    ).toBeNull();
+    expect(screen.queryAllByTestId("followup-check")).toHaveLength(0);
   }
 });
 
-it("AC-374 #812: 未の一覧の下に、flywheel followup done・drop・promote の案内が出る", async () => {
+it("AC-374 #812: 未の一覧の下に、タスクに上げる案内（対話で伝える・promote のコマンド）だけが出る", async () => {
   await open();
   const guide = screen.getByTestId("followup-guide");
   const text = guide.textContent ?? "";
-  expect(text).toContain("flywheel followup done");
-  expect(text).toContain("--note");
-  expect(text).toContain("flywheel followup drop");
-  expect(text).toContain("--reason");
+  expect(text).toContain("対話の欄で伝えます");
   expect(text).toContain("flywheel followup promote");
+  expect(text).not.toContain("flywheel followup done");
+  expect(text).not.toContain("flywheel followup drop");
   expect(text).toContain("--workspace '/w/alpha'");
   // 一覧より後ろ
   const list = screen.getAllByTestId("followup-group").at(-1) as HTMLElement;
@@ -329,8 +325,136 @@ it("AC-374 #812: 未の一覧の下に、flywheel followup done・drop・promote
     list.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   // 済みでは出さない
-  fireEvent.click(screen.getByRole("button", { name: /済み/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^済み（/ }));
   expect(screen.queryByTestId("followup-guide")).toBeNull();
+});
+
+it("AC-117: チェックが 0 件のとき、「済みにする」「捨てる」は押せない", async () => {
+  await open();
+  expect(screen.getByTestId("followup-done-button")).toBeDisabled();
+  expect(screen.getByTestId("followup-drop-button")).toBeDisabled();
+  fireEvent.click(screen.getAllByTestId("followup-check")[0] as HTMLElement);
+  expect(screen.getByTestId("followup-done-button")).toBeEnabled();
+  expect(screen.getByTestId("followup-drop-button")).toBeEnabled();
+});
+
+const URL_DONE = "/api/v1/workspaces/alpha/followups/done";
+const URL_DROP = "/api/v1/workspaces/alpha/followups/drop";
+const errorResponse = (status: number, code: string, message: string) => () =>
+  new Response(JSON.stringify({ error: { code, message } }), { status });
+
+async function openWith(
+  extra: Record<string, unknown>,
+  followups: Followup[] = DEFAULT,
+) {
+  window.location.hash = "#/a/alpha/followups";
+  const f = installFakes({
+    ...fixtures(),
+    "/api/v1/workspaces/alpha/challenges": { challenges: [] },
+    [URL_ALL]: { followups },
+    ...extra,
+  });
+  requests = f.requests;
+  render(<App />);
+  await act(async () => {
+    FakeEventSource.latest.open();
+  });
+  await screen.findByRole("group", { name: "フォローアップの状態" });
+}
+
+it("AC-118・AC-120: 「済みにする」は確かめた結果の欄を出し、空のままでは送れず、書くと選んだ ID と文を送って一覧を読み直す", async () => {
+  await openWith({ [`POST ${URL_DONE}`]: { followups: [] } });
+  const checks = screen.getAllByTestId("followup-check");
+  fireEvent.click(checks[0] as HTMLElement);
+  fireEvent.click(checks[2] as HTMLElement);
+  fireEvent.click(screen.getByTestId("followup-done-button"));
+  expect(screen.getByLabelText("確かめた結果")).toBeInTheDocument();
+  expect(screen.getByTestId("followup-submit")).toBeDisabled();
+  fireEvent.change(screen.getByTestId("followup-text"), {
+    target: { value: "  " },
+  });
+  expect(screen.getByTestId("followup-submit")).toBeDisabled();
+  fireEvent.change(screen.getByTestId("followup-text"), {
+    target: { value: "確かめた" },
+  });
+  const before = requests.filter((r) => r.url === URL_ALL).length;
+  fireEvent.click(screen.getByTestId("followup-submit"));
+  await waitFor(() =>
+    expect(requests.filter((r) => r.url === URL_ALL).length).toBe(before + 1),
+  );
+  const post = requests.find((r) => r.method === "POST");
+  expect(post?.url).toBe(URL_DONE);
+  expect(JSON.parse(post?.body ?? "{}")).toEqual({
+    ids: ["F-1", "F-3"],
+    note: "確かめた",
+  });
+  expect(screen.queryByTestId("followup-text")).toBeNull();
+});
+
+it("AC-119・AC-120: 「捨てる」は理由の欄を出し、空のままでは送れず、書くと ids と reason を drop の口へ送る", async () => {
+  await openWith({ [`POST ${URL_DROP}`]: { followups: [] } });
+  fireEvent.click(screen.getAllByTestId("followup-check")[1] as HTMLElement);
+  fireEvent.click(screen.getByTestId("followup-drop-button"));
+  expect(screen.getByLabelText("捨てる理由")).toBeInTheDocument();
+  expect(screen.getByTestId("followup-submit")).toBeDisabled();
+  fireEvent.change(screen.getByTestId("followup-text"), {
+    target: { value: "不要" },
+  });
+  const before = requests.filter((r) => r.url === URL_ALL).length;
+  fireEvent.click(screen.getByTestId("followup-submit"));
+  await waitFor(() =>
+    expect(requests.filter((r) => r.url === URL_ALL).length).toBe(before + 1),
+  );
+  const post = requests.find((r) => r.method === "POST");
+  expect(post?.url).toBe(URL_DROP);
+  expect(JSON.parse(post?.body ?? "{}")).toEqual({
+    ids: ["F-2"],
+    reason: "不要",
+  });
+});
+
+it("AC-121: 口が誤りを返すと理由を出し、チェックと書いた文は残す", async () => {
+  await openWith({
+    [`POST ${URL_DONE}`]: errorResponse(
+      400,
+      "validation_failed",
+      "未ではないものが含まれています",
+    ),
+  });
+  const checks = screen.getAllByTestId("followup-check");
+  fireEvent.click(checks[0] as HTMLElement);
+  fireEvent.click(screen.getByTestId("followup-done-button"));
+  fireEvent.change(screen.getByTestId("followup-text"), {
+    target: { value: "確かめた" },
+  });
+  fireEvent.click(screen.getByTestId("followup-submit"));
+  expect(await screen.findByTestId("followup-error")).toHaveTextContent(
+    "未ではないものが含まれています",
+  );
+  expect(screen.getAllByTestId("followup-check")[0]).toBeChecked();
+  expect(screen.getByTestId("followup-text")).toHaveValue("確かめた");
+});
+
+it("AC-122: 403 のときは、再読み込みの案内を出す", async () => {
+  await openWith({
+    [`POST ${URL_DROP}`]: errorResponse(403, "forbidden_origin", "拒否"),
+  });
+  fireEvent.click(screen.getAllByTestId("followup-check")[0] as HTMLElement);
+  fireEvent.click(screen.getByTestId("followup-drop-button"));
+  fireEvent.change(screen.getByTestId("followup-text"), {
+    target: { value: "不要" },
+  });
+  fireEvent.click(screen.getByTestId("followup-submit"));
+  expect(await screen.findByTestId("followup-error")).toHaveTextContent(
+    "再読み込み",
+  );
+});
+
+it("AC-123: タスクに上げるボタンは置かない", async () => {
+  await open();
+  expect(
+    screen.queryByRole("button", { name: /上げる|タスクにする|課題にする/ }),
+  ).toBeNull();
 });
 
 // AC-375（案内の雛形のコマンドとフラグが flywheel に実在する）は Go のテスト internal/cli/ui_guidance_test.go が確かめる。

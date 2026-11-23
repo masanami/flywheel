@@ -29,9 +29,21 @@ test("AC-437 #806: 幅 360px で、サイクルの画面は、ページ全体が
   await expect(
     page.getByRole("heading", { name: "サイクル", exact: true }),
   ).toBeVisible();
-  await expect(page.getByTestId("cycle-last-started")).toBeVisible();
+  await expect(page.getByTestId("cycle-running-started")).toBeVisible();
   await expect(page.getByTestId("cycle-work-total")).toHaveText("3");
   await noHorizontalScroll(page);
+});
+
+test("#1183: 走っているサイクルで「サイクルを止める」を押すと、止める指示を出した旨に変わる（偽のデータ）", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/cycle");
+  await expect(page.getByTestId("cycle-watching-row").first()).toBeVisible();
+  await page.getByRole("button", { name: "サイクルを止める" }).click();
+  await expect(page.getByTestId("cycle-stop-requested")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "サイクルを止める" }),
+  ).toHaveCount(0);
 });
 
 test("AC-438 #806: 幅 360px で、「すべて」の画面は、ページ全体が横にスクロールしない", async ({
@@ -113,4 +125,26 @@ test.describe("中身（既定の幅）", () => {
       page.getByRole("heading", { name: "いま進められること" }),
     ).toBeVisible();
   });
+});
+
+test("#1183: 走っているサイクルに、見ているタスク・構造の図・スーパーバイザーの記録・費用の内訳が出る（偽のデータ）", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/cycle");
+  await expect(page.getByTestId("cycle-running-cost")).toContainText("上限");
+  await expect(page.getByTestId("cycle-watching-row")).toHaveCount(2);
+  await expect(page.getByTestId("cycle-structure")).toBeVisible();
+  await expect(page.getByTestId("cycle-waiting")).toBeVisible();
+  await expect(page.getByTestId("cycle-supervisor-row")).toHaveCount(2);
+  await expect(page.getByTestId("cycle-cost-row")).toHaveCount(2);
+});
+
+test("#1183: 走っていないエージェントでは、止めるボタンが出ず、最後のサイクルの終わりが出る（偽のデータ）", async ({
+  page,
+}) => {
+  await page.goto("/#/a/beta/cycle");
+  await expect(page.getByTestId("cycle-last-ended")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "サイクルを止める" }),
+  ).toHaveCount(0);
 });

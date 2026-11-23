@@ -48,8 +48,8 @@ describe("読み取り（types.gen.ts の形）", () => {
       "state",
       "supervisor_actions",
     ]);
-    expect(c.supervisor_actions).toEqual([]);
-    expect(c.costs).toEqual([]);
+    expect(Array.isArray(c.supervisor_actions)).toBe(true);
+    expect(Array.isArray(c.costs)).toBe(true);
     expect((await api.cycle("beta")).state).toBe("idle");
   });
   it("読めないワークスペースは state のコードで失敗する", async () => {
@@ -63,17 +63,10 @@ describe("画面のボタンの口の枠（区切り S4d-2 の土台。中身は
     expect(await api.notices("alpha")).toEqual({ notices: [] });
     expect(await codeOf(api.notices("nope"))).toBe("not_found");
   });
-  it("書き込みの 4 つの口は、中身を置くまでは not_found で失敗する", async () => {
+  it("取り込みの口は、中身を置くまでは not_found で失敗する", async () => {
     expect(await codeOf(api.ingest("alpha", { items: ["1"] }))).toBe(
       "not_found",
     );
-    expect(await codeOf(api.cycleStop("alpha"))).toBe("not_found");
-    expect(
-      await codeOf(api.followupsDone("alpha", { ids: ["F-1"], note: "n" })),
-    ).toBe("not_found");
-    expect(
-      await codeOf(api.followupsDrop("alpha", { ids: ["F-1"], reason: "r" })),
-    ).toBe("not_found");
   });
 });
 
