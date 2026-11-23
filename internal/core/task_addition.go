@@ -13,6 +13,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -105,6 +106,25 @@ type TaskAddition struct {
 	DecidedAt *time.Time
 	// TaskIDs はこの足す依頼で足したタスクの ID（task.addition_id が指すもの。ID の昇順。無ければ空のスライス）。
 	TaskIDs []string
+}
+
+// TaskTitles は足す依頼の中身（Spec）の、足すタスクの題名（並びの順）。中身が無い・読めないときは空のスライス。
+// 足した後はタスクの行が持つ題名と同じ。足す前（上限を超えて問い中・足さなかった）の依頼の題名は、ここからしか読めない。
+func (a TaskAddition) TaskTitles() []string {
+	out := []string{}
+	if a.Spec == nil {
+		return out
+	}
+	var tasks []struct {
+		Title string `json:"title"`
+	}
+	if json.Unmarshal([]byte(*a.Spec), &tasks) != nil {
+		return out
+	}
+	for _, t := range tasks {
+		out = append(out, t.Title)
+	}
+	return out
 }
 
 // TaskAdditionInput は createTaskAdditionTx の入力。状態は仕様待ち（pending）で作る。

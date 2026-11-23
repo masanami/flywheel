@@ -19,13 +19,13 @@ func TestRegistryPermits_PerEntryActionSets(t *testing.T) {
 	t.Parallel()
 	all := []attestedAction{
 		actionApprovePlan, actionApproveCompletion, actionApproveCompletionHold, actionReject,
-		actionAnswer, actionAnswerPlan, actionBudget, actionOperationApprove, actionOperationReject, actionFollowupDrop, actionFollowupPromote,
+		actionAnswer, actionAnswerPlan, actionWithdraw, actionBudget, actionOperationApprove, actionOperationReject, actionFollowupDrop, actionFollowupPromote,
 	}
 	for _, a := range all {
 		if !registryPermits(ChannelCLI, VerificationTTYConfirm, a) {
 			t.Errorf("(cli, tty_confirm) must permit %q", a)
 		}
-		want := a == actionApprovePlan || a == actionApproveCompletionHold
+		want := a == actionApprovePlan || a == actionApproveCompletionHold || a == actionAnswer || a == actionFollowupDrop
 		if got := registryPermits(ChannelUI, VerificationNone, a); got != want {
 			t.Errorf("(ui, none) permit %q = %v, want %v", a, got, want)
 		}
@@ -119,33 +119,6 @@ func TestExecuteApproval_UICompletionHoldOKButReleaseApprovalAndRejectRefused(t 
 		if a.Kind == ApprovalKindRelease {
 			t.Fatalf("unexpected release approval via ui: %+v", a)
 		}
-	}
-}
-
-func TestExecuteAnswer_UIRefused(t *testing.T) {
-	t.Parallel()
-	s := newStoreForTest(t)
-	fixedActor(t, "alice")
-	c := createAndAdvance(t, s, StatusUnclassified)
-	if _, err := s.HoldChallenge(context.Background(), ChannelCLI, c.ID, HoldInput{Question: "why?"}); err != nil {
-		t.Fatal(err)
-	}
-	prev, err := s.PrepareAnswer(context.Background(), c.ID, "because")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = s.ExecuteAnswer(context.Background(), AnswerRequest{
-		ChallengeID: c.ID, ExpectedVersion: prev.Version, Answer: "because",
-	}, uiAttestationForTest(t, c.ID))
-	if !errors.Is(err, ErrVerificationRejected) {
-		t.Fatalf("err = %v, want ErrVerificationRejected", err)
-	}
-	after, err := s.GetChallenge(context.Background(), c.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.Status != StatusAwaitingHuman || after.Version != prev.Version {
-		t.Fatalf("state changed: %+v", after)
 	}
 }
 

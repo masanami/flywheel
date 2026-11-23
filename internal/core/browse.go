@@ -88,6 +88,13 @@ type UnansweredHold struct {
 	RunID       *string
 	// TaskID は保留が付いているタスクの ID（"T-<n>"）。タスクに付いていなければ nil。
 	TaskID *string
+	// Options・OptionButtons・Check は、画面のボタンで答えるための値（Hold の同名の欄と同じ。選択肢が無ければ Options は nil）。
+	Options       []HoldOption
+	OptionButtons []bool
+	Check         string
+	// SupervisorFindings・SupervisorRecommendation は、スーパーバイザーがオーナーへ上げたときに残した調べたことと推奨（無ければ空）。
+	SupervisorFindings       string
+	SupervisorRecommendation string
 }
 
 // ListUnansweredHolds は未回答の保留を raised_at の古い順（同時刻は課題の ID の
@@ -96,7 +103,8 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 	out := []UnansweredHold{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx,
-			`SELECT h.id, h.scope, h.challenge_id, c.title, h.question, h.raised_at, h.from_status, h.run_id, h.task_id
+			`SELECT h.id, h.scope, h.challenge_id, c.title, h.question, h.raised_at, h.from_status, h.run_id, h.task_id,
+			        h.options, h.option_required, h.reason, h.supervisor_findings, h.supervisor_recommendation
 			 FROM hold h JOIN challenge c ON c.id = h.challenge_id
 			 WHERE h.answer IS NULL AND h.closed_at IS NULL AND h.kind = ?
 			 ORDER BY h.raised_at, h.challenge_id, h.id`, string(HoldKindHuman))
@@ -113,11 +121,26 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 				fromStatus string
 				runID      sql.NullInt64
 				taskID     sql.NullInt64
+				optsJSON   sql.NullString
+				optReq     int
+				reason     sql.NullString
+				supFind    sql.NullString
+				supRec     sql.NullString
 				h          UnansweredHold
 			)
-			if err := rows.Scan(&hid, &scope, &cid, &h.Title, &h.Question, &raisedAt, &fromStatus, &runID, &taskID); err != nil {
+			if err := rows.Scan(&hid, &scope, &cid, &h.Title, &h.Question, &raisedAt, &fromStatus, &runID, &taskID, &optsJSON, &optReq, &reason, &supFind, &supRec); err != nil {
 				return err
 			}
+			if optsJSON.Valid {
+				opts, err := parseHoldOptions(&optsJSON.String)
+				if err != nil {
+					return err
+				}
+				h.Options = opts
+			}
+			h.Check = holdCheckValue(h.Question, h.Options, optReq == 1)
+			h.OptionButtons = holdOptionButtons(holdReason(reason.String), h.Options)
+			h.SupervisorFindings, h.SupervisorRecommendation = supFind.String, supRec.String
 			t, err := parseTimestamp(raisedAt)
 			if err != nil {
 				return err

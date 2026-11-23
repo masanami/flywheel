@@ -179,17 +179,31 @@ func FromApprovals(as []core.Approval) []Approval {
 }
 
 // HoldOption は保留の選択肢 1 つの形。説明が無い選択肢の description は空文字。
+// button は、画面のボタンで選べるか（core が、保留の理由と選択肢の識別だけで決める。画面は、この値のとおりに出す）。API だけが入れ、CLI の --json には出さない
+// （FromHoldOptions は入れない。画面の口は FromHoldOptionsForScreen を使う）。
 type HoldOption struct {
+	Button      *bool  `json:"button,omitempty"`
 	Description string `json:"description"`
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 }
 
-// FromHoldOptions は保留の選択肢の並びを変換する。選択肢が無い（nil）ときは、null ではなく空の配列にする。
+// FromHoldOptions は保留の選択肢の並びを変換する。選択肢が無い（nil）ときは、null ではなく空の配列にする。button は入れない。
 func FromHoldOptions(opts []core.HoldOption) []HoldOption {
 	out := make([]HoldOption, 0, len(opts))
 	for _, o := range opts {
 		out = append(out, HoldOption{Description: o.Description, ID: o.ID, Label: o.Label})
+	}
+	return out
+}
+
+// FromHoldOptionsForScreen は FromHoldOptions に、選択肢ごとの button を足す。buttons は opts と同じ並びの「ボタンで選べるか」（core が決めた値。
+// 長さが足りない分は選べない扱い）。
+func FromHoldOptionsForScreen(opts []core.HoldOption, buttons []bool) []HoldOption {
+	out := FromHoldOptions(opts)
+	for i := range out {
+		b := i < len(buttons) && buttons[i]
+		out[i].Button = &b
 	}
 	return out
 }
@@ -203,9 +217,12 @@ type Hold struct {
 	AnsweredBy           *string `json:"answered_by"`
 	AnsweredChannel      *string `json:"answered_channel"`
 	AnsweredVerification *string `json:"answered_verification"`
-	ClosedAt             *string `json:"closed_at"`
-	FromStatus           string  `json:"from_status"`
-	FromStatusLabel      string  `json:"from_status_label"`
+	// Check は保留の照合の値（問いの文と選択肢から core が作る。画面のボタンの回答は、読んだときの値をそのまま送る）。API だけが入れ、CLI の --json には出さない
+	// （FromHold は入れない。画面の口は FromHoldsForScreen を使う）。
+	Check           *string `json:"check,omitempty"`
+	ClosedAt        *string `json:"closed_at"`
+	FromStatus      string  `json:"from_status"`
+	FromStatusLabel string  `json:"from_status_label"`
 	// HoldID は保留の表示用の ID（"H-<番号>"）。閉じた保留・過去の保留も同じ形で出る。
 	HoldID string `json:"hold_id"`
 	// Kind は保留の種類（human＝人の対応を待つ・parent_direct＝親が直接行う）。
@@ -262,6 +279,24 @@ func FromHold(h core.Hold) Hold {
 		SupervisorRecommendation: strOrNil(h.SupervisorRecommendation),
 		SupervisorState:          strOrNil(string(h.SupervisorState)),
 	}
+}
+
+// FromHoldForScreen は FromHold に、画面のボタンで答えるための値（照合の値・選択肢ごとの button）を足す。
+func FromHoldForScreen(h core.Hold) Hold {
+	out := FromHold(h)
+	check := h.Check
+	out.Check = &check
+	out.Options = FromHoldOptionsForScreen(h.Options, h.OptionButtons)
+	return out
+}
+
+// FromHoldsForScreen は保留の一覧を FromHoldForScreen で変換する。
+func FromHoldsForScreen(hs []core.Hold) []Hold {
+	out := make([]Hold, 0, len(hs))
+	for _, h := range hs {
+		out = append(out, FromHoldForScreen(h))
+	}
+	return out
 }
 
 // FromHolds は保留の一覧を変換する。

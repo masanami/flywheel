@@ -205,19 +205,12 @@ func TestDropFollowups_NeedsAttestationOverSortedTargetAndRecordsEvidence(t *tes
 	if one, _ := FollowupAttestationTarget([]string{f2.ID}); one != "F-2" {
 		t.Errorf("single target = %q", one)
 	}
-	// 別の対象向けの本人確認・画面の経路・ゼロ値は受けない。
+	// 別の対象向けの本人確認・ゼロ値は受けない（画面の経路は受ける。TestFollowupDropFromTheScreen）。
 	if _, err := s.DropFollowups(ctx, []string{f1.ID, f3.ID}, "r", fuAtt(t, "F-3,F-1")); !errors.Is(err, ErrVerificationRejected) {
 		t.Errorf("unsorted target: %v", err)
 	}
 	if _, err := s.DropFollowups(ctx, []string{f1.ID}, "r", Attestation{}); !errors.Is(err, ErrVerificationRejected) {
 		t.Errorf("zero attestation: %v", err)
-	}
-	ui, err := Verify(ChannelUI, &fakeVerifier{method: VerificationNone, actor: "alice"}, "s", f1.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.DropFollowups(ctx, []string{f1.ID}, "r", ui); !errors.Is(err, ErrVerificationRejected) {
-		t.Errorf("ui none: %v", err)
 	}
 	if _, err := s.DropFollowups(ctx, []string{f1.ID, f3.ID}, " ", fuAtt(t, target)); !errors.Is(err, ErrValidation) {
 		t.Errorf("empty reason: %v", err)

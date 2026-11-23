@@ -26,6 +26,8 @@ const (
 	CodeRunInProgress        = "run_in_progress"
 	CodeBudgetExceeded       = "budget_exceeded"
 	CodeSlotUnavailable      = "slot_unavailable"
+	// CodeUpstreamUnavailable は上流（GitHub）を読めなかった（取り込みの口。502）。CLI も同じコードを持つ（CLI の写像は internal/cli）。この API では、取り込めるものでない指定（ErrValidation）を先に 400 にするため、CodeForCoreErr の前で判定する。
+	CodeUpstreamUnavailable = "upstream_unavailable"
 )
 
 // errorStatus はエラーコードから HTTP の状態コードを決める（閉集合の表。表に無いものは 500）。
@@ -41,6 +43,8 @@ func errorStatus(code string) int {
 		return http.StatusForbidden
 	case CodeStoreTooNew, CodeStoreBusy, CodeStoreError, CodeEngineUnavailable:
 		return http.StatusServiceUnavailable
+	case CodeUpstreamUnavailable:
+		return http.StatusBadGateway
 	default:
 		return http.StatusInternalServerError
 	}
@@ -95,7 +99,14 @@ func CodeForCoreErr(err error) string {
 // apiCodeForCoreErr は API の失敗の本文に載せる code。§IF / API の表に列挙した値だけを通し、
 // 表に無いコード（CLI の tty_required・config_*・run_in_progress・budget_exceeded・
 // slot_unavailable、今後 CodeForCoreErr に足されるものを含む）は internal_error に寄せる。
+//
+// 画面のボタンの口（回答・取り込み・フォローアップ）の誤りは、この表で次の状態コードになる: 問いか選択肢が変わった・保留が閉じていた（core.ErrConflict）は 409、
+// ボタンで受けない操作（core.ErrVerificationRejected）は 403、保留に無い識別・識別なし・添え書きつき・取り込めるものでない指定（core.ErrValidation）は 400、
+// 保留が無い・ほかの課題の保留（core.ErrNotFound）は 404、上流を読めない（core.ErrUpstreamFetchFailed）は 502。
 func apiCodeForCoreErr(err error) string {
+	if errors.Is(err, core.ErrUpstreamFetchFailed) && !errors.Is(err, core.ErrValidation) {
+		return CodeUpstreamUnavailable
+	}
 	switch code := CodeForCoreErr(err); code {
 	case CodeNotFound, CodeStoreNotFound, CodeValidationFailed, CodeUsageError,
 		CodeInvalidTransition, CodeTerminalState, CodeConflict, CodeLocked,
@@ -111,4 +122,9 @@ func apiCodeForCoreErr(err error) string {
 func writeCoreError(w http.ResponseWriter, err error) {
 	code := apiCodeForCoreErr(err)
 	writeError(w, errorStatus(code), code, err.Error())
+}
+
+// notImplementedPost は、経路を登録しただけで中身を置いていない書き込みの口の応答。中身を置くまでは、ルートが無いときと同じ 404 を返す。
+func notImplementedPost(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusNotFound, CodeNotFound, "not found")
 }

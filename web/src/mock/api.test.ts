@@ -39,18 +39,45 @@ describe("読み取り（types.gen.ts の形）", () => {
     const c = await api.cycle("alpha");
     expect(c.state).toBe("running");
     expect(Object.keys(c).sort()).toEqual([
+      "costs",
       "last_end_reason",
       "last_ended_at",
       "last_result",
       "last_started_at",
       "running",
       "state",
+      "supervisor_actions",
     ]);
+    expect(c.supervisor_actions).toEqual([]);
+    expect(c.costs).toEqual([]);
     expect((await api.cycle("beta")).state).toBe("idle");
   });
   it("読めないワークスペースは state のコードで失敗する", async () => {
     expect(await codeOf(api.status("gamma"))).toBe("store_not_found");
     expect(await codeOf(api.status("nope"))).toBe("not_found");
+  });
+});
+
+describe("画面のボタンの口の枠（区切り S4d-2 の土台。中身は後続）", () => {
+  it("知らせは 0 件で返り、読めないワークスペースは失敗する", async () => {
+    expect(await api.notices("alpha")).toEqual({ notices: [] });
+    expect(await codeOf(api.notices("nope"))).toBe("not_found");
+  });
+  it("書き込みの 5 つの口は、中身を置くまでは not_found で失敗する", async () => {
+    const hold = { check: "c", option: "o1" };
+    expect(await codeOf(api.answerHold("alpha", "C-8", "H-1", hold))).toBe(
+      "not_found",
+    );
+    expect(await codeOf(api.ingest("alpha", { items: ["1"] }))).toBe(
+      "not_found",
+    );
+    expect(await codeOf(api.cycleStop("alpha"))).toBe("not_found");
+    expect(
+      await codeOf(api.followupsDone("alpha", { ids: ["F-1"], note: "n" })),
+    ).toBe("not_found");
+    expect(
+      await codeOf(api.followupsDrop("alpha", { ids: ["F-1"], reason: "r" })),
+    ).toBe("not_found");
   });
 });
 

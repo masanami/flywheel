@@ -20,8 +20,14 @@ import type {
   WorkspaceList,
 } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT } from "../labels.ts";
+import { answerMock } from "./answer.ts";
+import type { MockContext } from "./context.ts";
+import { cycleMock, cycleScreenExtras } from "./cycle.ts";
+import { followupActionsMock } from "./followup-actions.ts";
 import { ALPHA_FOLLOWUPS } from "./followups.ts";
+import { ingestMock } from "./ingest.ts";
 import { alphaLogExtras } from "./log.ts";
+import { noticesMock } from "./notices.ts";
 import { RICH_PLANS } from "./plan.ts";
 import {
   type MockChallenge,
@@ -165,7 +171,15 @@ export function createMockApi(
     return chats[name];
   };
 
+  // 口ごとのファイル（answer・ingest・cycle・followup-actions・notices）へ振り分ける。
+  const ctx: MockContext = { store, wait, wsOf, itemOf };
+
   const api: ApiClient = {
+    ...answerMock(ctx),
+    ...ingestMock(ctx),
+    ...cycleMock(ctx),
+    ...followupActionsMock(ctx),
+    ...noticesMock(ctx),
     async chat(name): Promise<ChatResponse> {
       await wait();
       const c = chatOf(name);
@@ -331,12 +345,16 @@ export function createMockApi(
               )
               .map((h) => ({
                 challenge_id: m.c.id,
+                check: h.check ?? "",
                 from_status: h.from_status,
                 hold_id: h.hold_id,
+                options: h.options,
                 question: h.question,
                 raised_at: h.raised_at,
                 run_id: null,
                 scope: h.scope,
+                supervisor_findings: h.supervisor_findings,
+                supervisor_recommendation: h.supervisor_recommendation,
                 task_id: null,
                 title: m.c.title,
                 workspace: w.meta.name,
@@ -468,7 +486,7 @@ export function createMockApi(
     },
     async cycle(name) {
       await wait();
-      return wsOf(name).cycle;
+      return { ...wsOf(name).cycle, ...cycleScreenExtras(ctx, name) };
     },
   };
   return api;
