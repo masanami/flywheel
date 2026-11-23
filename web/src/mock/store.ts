@@ -101,7 +101,7 @@ export const STATUS_LABEL: Record<string, string> = {
 const T0 = Date.parse("2026-10-12T09:00:00Z");
 const iso = (minAgo: number) => new Date(T0 - minAgo * 60_000).toISOString();
 
-function mk(
+export function mk(
   id: string,
   title: string,
   status: string,
@@ -884,11 +884,14 @@ export const toCard = (m: MockChallenge): ChallengeCard => ({
 
 // 取り込めるものの偽のデータ（`ingestable=true` を付けた問い合わせにだけ返す。alpha だけが持つ）。
 // 子のある親・既存の課題の下に入る子・単独の 3 件。
+// 画面のボタンで取り込んだ指定（偽の取り込みの口が足す）。取り込めるものの一覧から外す。
+export const INGESTED_KEYS = new Set<string>();
+
 export function ingestableOf(name: string): Ingestable {
   if (name !== "alpha") return { error: null, items: [] };
   const url = (n: number) => `https://example.invalid/issues/${n}`;
   const ext = (n: number) => `example/repo#${n}`;
-  return {
+  const all: Ingestable = {
     error: null,
     items: [
       {
@@ -927,6 +930,10 @@ export function ingestableOf(name: string): Ingestable {
         url: url(904),
       },
     ],
+  };
+  return {
+    error: all.error,
+    items: all.items.filter((it) => !INGESTED_KEYS.has(it.external_key)),
   };
 }
 
@@ -1055,6 +1062,7 @@ export class MockStore {
   workspaces: Record<string, MockWorkspace>;
   constructor(workspaces: Record<string, MockWorkspace> = seed()) {
     this.workspaces = workspaces;
+    INGESTED_KEYS.clear();
   }
   private listeners = new Set<(ws: string) => void>();
 

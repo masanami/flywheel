@@ -1205,3 +1205,27 @@ a.task-box:hover {
 .conflict-fix {
   overflow-wrap: anywhere;
 }
+
+/* 知らせ（最近起きたこと・対話の欄）。幅の狭い画面でも語が枠からはみ出さない。 */
+.notice-item {
+  overflow-wrap: anywhere;
+  list-style: none;
+}
+.notice-badge {
+  display: inline-block;
+  padding: 0 0.4em;
+  border: 1px solid currentColor;
+  border-radius: 0.6em;
+  font-size: 0.8em;
+}
+.now-ingest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5em;
+  margin-top: 0.5em;
+}
+.now-ingest-actions button {
+  max-width: 100%;
+  white-space: normal;
+}

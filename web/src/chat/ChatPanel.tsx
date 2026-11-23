@@ -1,19 +1,64 @@
 import { useEffect, useRef, useState } from "react";
+import { NoticeItem } from "../NoticeItem.tsx";
 import { api } from "../api/client.ts";
 import { ApiError } from "../api/error.ts";
 import type { ChatMessage, ChatPostRequest } from "../api/types.gen.ts";
 import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
+import { type NoticeLine, noticeLine } from "../notices.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
+import { useNotices } from "../useNotices.ts";
 import {
   CHAT_EMPTY_TEXT,
   CHAT_ENGINE_MISSING_TEXT,
   CHAT_FULL_TOOLS_TEXT,
+  CHAT_NOTICE_LIMIT,
   CHAT_REPLYING_TEXT,
   CHAT_STATE_TEXTS,
   chatCost,
 } from "./texts.ts";
+
+type Entry =
+  | { kind: "message"; message: ChatMessage }
+  | { kind: "notice"; line: NoticeLine };
+
+// 欄に出す知らせ。会話が開いている（started_at がある）ときは、会話の始まりより後のものだけ。
+// 会話が無いときは、直近の CHAT_NOTICE_LIMIT 件まで。どちらも時刻の古い順に返す。
+export function noticesForPanel(
+  lines: readonly NoticeLine[],
+  startedAt: string | null,
+): NoticeLine[] {
+  const t = (l: NoticeLine) => Date.parse(l.at);
+  const byTime = [...lines].sort((a, b) => t(a) - t(b));
+  if (startedAt !== null) {
+    const start = Date.parse(startedAt);
+    return byTime.filter((l) => t(l) > start);
+  }
+  return byTime.slice(-CHAT_NOTICE_LIMIT);
+}
+
+// 発言（id の順）の間へ、知らせを時刻の順に差し込む。知らせは発言の表に書かず、画面の側で並べるだけ。
+function interleave(
+  messages: readonly ChatMessage[],
+  notices: readonly NoticeLine[],
+): Entry[] {
+  const out: Entry[] = [];
+  let i = 0;
+  for (const m of messages) {
+    while (
+      i < notices.length &&
+      Date.parse((notices[i] as NoticeLine).at) < Date.parse(m.created_at)
+    ) {
+      out.push({ kind: "notice", line: notices[i++] as NoticeLine });
+    }
+    out.push({ kind: "message", message: m });
+  }
+  while (i < notices.length) {
+    out.push({ kind: "notice", line: notices[i++] as NoticeLine });
+  }
+  return out;
+}
 
 // いま見ているもの（開いている課題かタスク）。どちらも開いていなければ呼び出し側が null にする。
 export interface Viewing {
@@ -100,6 +145,7 @@ export function ChatPanel({
   const { result, reload } = useScreenData(live, agentName, () =>
     api.chat(agentName),
   );
+  const notices = useNotices(live, agentName);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +168,13 @@ export function ChatPanel({
 
   const chat = result.state === "ready" ? result.data : null;
   const messages = chat ? [...chat.messages].sort((a, b) => a.id - b.id) : [];
+  const entries = interleave(
+    messages,
+    noticesForPanel(
+      notices.map((n) => noticeLine(n, agentName)),
+      chat?.started_at ?? null,
+    ),
+  );
   const replying =
     chat !== null &&
     (chat.state === "replying" || messages.some((m) => m.state === "replying"));
@@ -192,11 +245,15 @@ export function ChatPanel({
           <p data-testid="chat-load-error">{errorText(result.error)}</p>
         ) : null}
         {chat && messages.length === 0 ? <p>{CHAT_EMPTY_TEXT}</p> : null}
-        {messages.length > 0 ? (
+        {entries.length > 0 ? (
           <ol className="chat-messages">
-            {messages.map((m) => (
-              <MessageView key={m.id} m={m} />
-            ))}
+            {entries.map((e) =>
+              e.kind === "message" ? (
+                <MessageView key={e.message.id} m={e.message} />
+              ) : (
+                <NoticeItem key={e.line.key} line={e.line} badge />
+              ),
+            )}
           </ol>
         ) : null}
         {replying && !messages.some((m) => m.state === "replying") ? (
