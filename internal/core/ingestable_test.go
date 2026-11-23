@@ -254,7 +254,7 @@ func TestOverview_AC249_AC250_AC251_FollowupsOpenCount(t *testing.T) {
 	if count() != 2 {
 		t.Fatalf("followups.open = %d, want 2 (AC-249)", count())
 	}
-	ca, _, err := s.PromoteFollowup(ctx, a.ID, fuAtt(t, a.ID))
+	ca, _, err := promoteViaPlan(ctx, s, a.ID, fuAtt(t, a.ID))
 	if err != nil {
 		t.Fatal(err)
 	}

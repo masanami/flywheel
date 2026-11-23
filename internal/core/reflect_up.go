@@ -572,6 +572,16 @@ func (s *Store) obsoleteContractRun(ctx context.Context, row *contractRunRow) (s
 				stale = true
 				return nil
 			}
+			// フォローアップをタスクとして上げた足す依頼が閉じていない間は、上げる依頼を残さない（足したタスクが統合先に入った後に始め直す）。
+			var openFollowupAdditions int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_addition WHERE challenge_id = ? AND origin = ? AND state IN (?, ?)`, row.ChallengeID,
+				string(TaskAdditionOriginFollowup), string(TaskAdditionPending), string(TaskAdditionAwaitingOwner)).Scan(&openFollowupAdditions); err != nil {
+				return err
+			}
+			if openFollowupAdditions > 0 {
+				stale = true
+				return nil
+			}
 			var startPlan sql.NullInt64
 			if err := tx.QueryRowContext(ctx, `SELECT plan_version FROM run WHERE id = ?`, row.StartRunID).Scan(&startPlan); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
@@ -586,7 +596,7 @@ func (s *Store) obsoleteContractRun(ctx context.Context, row *contractRunRow) (s
 		if err = classifyReadWriteErr(err); err != nil || !stale {
 			return "", err
 		}
-		return "計画を作り直して承認し直したため、統合先から反映先へ上げる依頼の中止を依頼した（新しい計画のタスクが済んだら、上げる依頼を始め直す）。", nil
+		return "計画を作り直して承認し直した、またはフォローアップをタスクとして上げたため、統合先から反映先へ上げる依頼の中止を依頼した（足したタスクが済んだら、上げる依頼を始め直す）。", nil
 	case contractRunKindTask:
 		if row.TaskID == nil {
 			return "", nil

@@ -137,6 +137,9 @@ func evaluateTaskAddition(ctx context.Context, tx *sql.Tx, cid, additionID int64
 	if !ready {
 		return taskAdditionEval{}, fmt.Errorf("%w: the challenge has no approved plan to add tasks to", ErrValidation)
 	}
+	if err := st.useAdditionOrigin(ctx, tx, additionID); err != nil {
+		return taskAdditionEval{}, err
+	}
 	v, ok := validateJ2ExpandOutput([]byte(`{"verdict":"add","tasks":`+*add.Spec+`}`), st.j2ExpandValidationContext)
 	if !ok {
 		return taskAdditionEval{}, fmt.Errorf("%w: the saved output no longer passes validation; choose skip or replan", ErrValidation)

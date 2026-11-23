@@ -265,7 +265,7 @@ func TestPromoteFollowup_MakesUnclassifiedChallengeAndKeepsFollowupOpen(t *testi
 	attached := fuCreate(t, s, parent.ID, "属する", "説明あり")
 	loose := fuCreate(t, s, "", "属さない", "")
 
-	c, f, err := s.PromoteFollowup(ctx, attached.ID, fuAtt(t, attached.ID))
+	c, f, err := promoteViaPlan(ctx, s, attached.ID, fuAtt(t, attached.ID))
 	if err != nil {
 		t.Fatalf("Promote: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestPromoteFollowup_MakesUnclassifiedChallengeAndKeepsFollowupOpen(t *testi
 		t.Errorf("origin = %v, followup_of = %v, err = %v", origin, followupOf, err)
 	}
 
-	c2, _, err := s.PromoteFollowup(ctx, loose.ID, relayedAttestation(t, loose.ID, "s", "q"))
+	c2, _, err := promoteViaPlan(ctx, s, loose.ID, relayedAttestation(t, loose.ID, "s", "q"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,14 +315,14 @@ func TestPromoteFollowup_RejectsBadStatesAndAttestations(t *testing.T) {
 	s := newFollowupStore(t)
 	ctx := context.Background()
 	f := fuCreate(t, s, "", "x", "")
-	if _, _, err := s.PromoteFollowup(ctx, "F-99", fuAtt(t, "F-99")); !errors.Is(err, ErrNotFound) {
+	if _, _, err := promoteViaPlan(ctx, s, "F-99", fuAtt(t, "F-99")); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing: %v", err)
 	}
-	if _, _, err := s.PromoteFollowup(ctx, f.ID, fuAtt(t, "F-2")); !errors.Is(err, ErrVerificationRejected) {
+	if _, _, err := promoteViaPlan(ctx, s, f.ID, fuAtt(t, "F-2")); !errors.Is(err, ErrVerificationRejected) {
 		t.Errorf("other target: %v", err)
 	}
 	ui, _ := Verify(ChannelUI, &fakeVerifier{method: VerificationNone, actor: "alice"}, "s", f.ID)
-	if _, _, err := s.PromoteFollowup(ctx, f.ID, ui); !errors.Is(err, ErrVerificationRejected) {
+	if _, _, err := promoteViaPlan(ctx, s, f.ID, ui); !errors.Is(err, ErrVerificationRejected) {
 		t.Errorf("ui: %v", err)
 	}
 	var n int
@@ -330,17 +330,17 @@ func TestPromoteFollowup_RejectsBadStatesAndAttestations(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("rejected promotions made %d challenges", n)
 	}
-	c, _, err := s.PromoteFollowup(ctx, f.ID, fuAtt(t, f.ID))
+	c, _, err := promoteViaPlan(ctx, s, f.ID, fuAtt(t, f.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// 上げた先が取り下げでないうちは、上げ直せない。
-	if _, _, err := s.PromoteFollowup(ctx, f.ID, fuAtt(t, f.ID)); !errors.Is(err, ErrValidation) {
+	if _, _, err := promoteViaPlan(ctx, s, f.ID, fuAtt(t, f.ID)); !errors.Is(err, ErrValidation) {
 		t.Errorf("re-promote while alive: %v", err)
 	}
 	// 取り下げになれば、新しい課題に置き換えて上げ直せる。
 	setChallengeStatus(t, s, mustParseChallengeID(t, c.ID), StatusWithdrawn)
-	c2, f2, err := s.PromoteFollowup(ctx, f.ID, fuAtt(t, f.ID))
+	c2, f2, err := promoteViaPlan(ctx, s, f.ID, fuAtt(t, f.ID))
 	if err != nil {
 		t.Fatalf("re-promote after withdraw: %v", err)
 	}
@@ -352,14 +352,14 @@ func TestPromoteFollowup_RejectsBadStatesAndAttestations(t *testing.T) {
 	if _, err := s.DropFollowups(ctx, []string{h.ID}, "r", fuAtt(t, h.ID)); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.PromoteFollowup(ctx, h.ID, fuAtt(t, h.ID)); !errors.Is(err, ErrValidation) {
+	if _, _, err := promoteViaPlan(ctx, s, h.ID, fuAtt(t, h.ID)); !errors.Is(err, ErrValidation) {
 		t.Errorf("promote dropped: %v", err)
 	}
 	g := fuCreate(t, s, "", "y", "")
 	if _, err := s.CompleteFollowups(ctx, ChannelCLI, []string{g.ID}, "n"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.PromoteFollowup(ctx, g.ID, fuAtt(t, g.ID)); !errors.Is(err, ErrValidation) {
+	if _, _, err := promoteViaPlan(ctx, s, g.ID, fuAtt(t, g.ID)); !errors.Is(err, ErrValidation) {
 		t.Errorf("promote done: %v", err)
 	}
 }
@@ -376,7 +376,7 @@ func TestPromotedChallengeCompletion_CompletesOpenFollowupsOnT13AndT14(t *testin
 			ctx := context.Background()
 			f := fuCreate(t, s, "", "上げる", "")
 			dropped := fuCreate(t, s, "", "捨てた", "")
-			c, _, err := s.PromoteFollowup(ctx, f.ID, fuAtt(t, f.ID))
+			c, _, err := promoteViaPlan(ctx, s, f.ID, fuAtt(t, f.ID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -431,7 +431,7 @@ func TestPromotedChallengeWithdrawal_LeavesFollowupOpen(t *testing.T) {
 	s := newFollowupStore(t)
 	ctx := context.Background()
 	f := fuCreate(t, s, "", "x", "")
-	c, _, err := s.PromoteFollowup(ctx, f.ID, fuAtt(t, f.ID))
+	c, _, err := promoteViaPlan(ctx, s, f.ID, fuAtt(t, f.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +462,7 @@ func TestCountOpenFollowupsToTriage_ExcludesPromotedAndAliveOnes(t *testing.T) {
 	if count() != 4 {
 		t.Fatalf("count = %d, want 4", count())
 	}
-	ca, _, err := s.PromoteFollowup(ctx, a.ID, fuAtt(t, a.ID))
+	ca, _, err := promoteViaPlan(ctx, s, a.ID, fuAtt(t, a.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +484,7 @@ func TestCountOpenFollowupsToTriage_ExcludesPromotedAndAliveOnes(t *testing.T) {
 		t.Errorf("after done/drop = %d, want 2", count())
 	}
 	// 一覧は状態だけで数える（上げてあっても未のうち）。
-	if _, _, err := s.PromoteFollowup(ctx, a.ID, fuAtt(t, a.ID)); err != nil {
+	if _, _, err := promoteViaPlan(ctx, s, a.ID, fuAtt(t, a.ID)); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.ListFollowups(ctx, FollowupFilter{Status: "open"}); len(got) != 2 {
@@ -585,23 +585,23 @@ func TestPrepareFollowupPromote_SameRulesAsPromoteAndReadOnly(t *testing.T) {
 		return len(cs)
 	}
 	before := challenges()
-	if f, err := s.PrepareFollowupPromote(ctx, open.ID); err != nil || f.ID != open.ID {
+	if f, err := s.PrepareFollowupPromote(ctx, open.ID, FollowupPromoteOptions{}, nil); err != nil || f.Followup.ID != open.ID {
 		t.Fatalf("PrepareFollowupPromote(open) = %+v, %v", f, err)
 	}
-	if _, err := s.PrepareFollowupPromote(ctx, done.ID); !errors.Is(err, ErrValidation) {
+	if _, err := s.PrepareFollowupPromote(ctx, done.ID, FollowupPromoteOptions{}, nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("PrepareFollowupPromote(done) error = %v, want ErrValidation", err)
 	}
-	if _, err := s.PrepareFollowupPromote(ctx, "F-999"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.PrepareFollowupPromote(ctx, "F-999", FollowupPromoteOptions{}, nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("PrepareFollowupPromote(missing) error = %v, want ErrNotFound", err)
 	}
 	if got := challenges(); got != before {
 		t.Errorf("challenges %d → %d, want unchanged (prepare is read-only)", before, got)
 	}
 	// 上げてある（上げた先が取り下げでない）ものは、上げ直せない。
-	if _, _, err := s.PromoteFollowup(ctx, open.ID, fuAtt(t, open.ID)); err != nil {
+	if _, _, err := promoteViaPlan(ctx, s, open.ID, fuAtt(t, open.ID)); err != nil {
 		t.Fatalf("PromoteFollowup: %v", err)
 	}
-	if _, err := s.PrepareFollowupPromote(ctx, open.ID); !errors.Is(err, ErrValidation) {
+	if _, err := s.PrepareFollowupPromote(ctx, open.ID, FollowupPromoteOptions{}, nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("PrepareFollowupPromote(already promoted) error = %v, want ErrValidation", err)
 	}
 }

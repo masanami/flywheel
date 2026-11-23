@@ -26,14 +26,15 @@ import (
 // TaskAdditionOrigin は足す依頼の出どころの閉集合。
 type TaskAdditionOrigin string
 
-// 足す依頼の出どころ。followup（フォローアップを上げた）は S4c-2 から。
+// 足す依頼の出どころ。followup はフォローアップをタスクとして上げた（S4c-2）。
 const (
-	TaskAdditionOriginExpand TaskAdditionOrigin = "expand"
+	TaskAdditionOriginExpand   TaskAdditionOrigin = "expand"
+	TaskAdditionOriginFollowup TaskAdditionOrigin = "followup"
 )
 
 // TaskAdditionOriginValues は TaskAdditionOrigin の閉集合の写しを返す。
 func TaskAdditionOriginValues() []TaskAdditionOrigin {
-	return []TaskAdditionOrigin{TaskAdditionOriginExpand}
+	return []TaskAdditionOrigin{TaskAdditionOriginExpand, TaskAdditionOriginFollowup}
 }
 
 // TaskAdditionState は足す依頼の状態の閉集合。
@@ -96,6 +97,8 @@ type TaskAddition struct {
 	Spec          *string
 	TotalAfterUSD *float64
 	LimitUSD      *float64
+	// FollowupID は出どころが followup の足す依頼の、元のフォローアップの ID（"F-<n>"）。出どころが expand なら nil。
+	FollowupID *string
 	// HoldID は足す依頼から立てた保留（task_add_over_limit・task_add_question）の内部整数 ID。無ければ nil。
 	HoldID    *int64
 	CreatedAt time.Time
@@ -121,7 +124,7 @@ type TaskAdditionUpdate struct {
 	HoldID        *int64
 }
 
-const taskAdditionSelect = `SELECT id, challenge_id, origin, origin_task_id, state, spec, total_after_micros, limit_micros, hold_id, created_at, decided_at FROM task_addition`
+const taskAdditionSelect = `SELECT id, challenge_id, origin, origin_task_id, state, spec, total_after_micros, limit_micros, hold_id, created_at, decided_at, followup_id FROM task_addition`
 
 func scanTaskAddition(row interface{ Scan(...any) error }) (*TaskAddition, error) {
 	var (
@@ -131,10 +134,11 @@ func scanTaskAddition(row interface{ Scan(...any) error }) (*TaskAddition, error
 		originTask, limit sql.NullInt64
 		spec, decided     sql.NullString
 		holdID            sql.NullInt64
+		followupID        sql.NullInt64
 		created           string
 		ta                TaskAddition
 	)
-	if err := row.Scan(&id, &cid, &origin, &originTask, &state, &spec, &total, &limit, &holdID, &created, &decided); err != nil {
+	if err := row.Scan(&id, &cid, &origin, &originTask, &state, &spec, &total, &limit, &holdID, &created, &decided, &followupID); err != nil {
 		return nil, err
 	}
 	ta.ID, ta.ChallengeID, ta.Origin, ta.State = formatTaskAdditionID(id), formatChallengeID(cid), TaskAdditionOrigin(origin), TaskAdditionState(state)
@@ -157,6 +161,10 @@ func scanTaskAddition(row interface{ Scan(...any) error }) (*TaskAddition, error
 	if holdID.Valid {
 		v := holdID.Int64
 		ta.HoldID = &v
+	}
+	if followupID.Valid {
+		v := formatFollowupID(followupID.Int64)
+		ta.FollowupID = &v
 	}
 	var err error
 	if ta.CreatedAt, err = parseTimestamp(created); err != nil {
@@ -437,7 +445,7 @@ func supersedeOpenTaskAdditions(ctx context.Context, tx *sql.Tx, rec *activityRe
 
 // fillTaskAdded は課題 cid のタスク tasks の Added を、task.addition_id が指す足す依頼から埋める（計画の承認で作ったタスクは nil のまま）。
 func fillTaskAdded(ctx context.Context, tx *sql.Tx, cid int64, tasks []Task) error {
-	rows, err := tx.QueryContext(ctx, `SELECT t.id, a.origin, a.origin_task_id FROM task t JOIN task_addition a ON a.id = t.addition_id WHERE t.challenge_id = ?`, cid)
+	rows, err := tx.QueryContext(ctx, `SELECT t.id, a.origin, a.origin_task_id, a.followup_id FROM task t JOIN task_addition a ON a.id = t.addition_id WHERE t.challenge_id = ?`, cid)
 	if err != nil {
 		return err
 	}
@@ -445,8 +453,8 @@ func fillTaskAdded(ctx context.Context, tx *sql.Tx, cid int64, tasks []Task) err
 	for rows.Next() {
 		var id int64
 		var origin string
-		var originTask sql.NullInt64
-		if err := rows.Scan(&id, &origin, &originTask); err != nil {
+		var originTask, followupID sql.NullInt64
+		if err := rows.Scan(&id, &origin, &originTask, &followupID); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -454,6 +462,10 @@ func fillTaskAdded(ctx context.Context, tx *sql.Tx, cid int64, tasks []Task) err
 		if originTask.Valid {
 			v := formatTaskID(originTask.Int64)
 			a.OriginTaskID = &v
+		}
+		if followupID.Valid {
+			v := formatFollowupID(followupID.Int64)
+			a.FollowupID = &v
 		}
 		added[formatTaskID(id)] = a
 	}

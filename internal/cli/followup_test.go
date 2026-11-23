@@ -52,7 +52,7 @@ func TestFollowupList_AC32_AC33_AC34_RootKeyElementKeysAndIDShape(t *testing.T) 
 	if len(list) == 0 {
 		t.Fatal("no followups returned")
 	}
-	want := []string{"challenge_id", "created_at", "detail", "id", "note", "promoted_challenge_id", "reason", "source", "status", "title", "updated_at"}
+	want := []string{"challenge_id", "created_at", "detail", "id", "note", "promoted_challenge_id", "promoted_task_id", "reason", "source", "status", "title", "updated_at"}
 	for _, e := range list {
 		m := e.(map[string]any)
 		if got := keysOf2(m); !reflect.DeepEqual(got, want) { // AC-33

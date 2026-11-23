@@ -426,14 +426,20 @@ func defaultCommands() []Command {
 			Run:           runFollowupDrop,
 		},
 		{
-			// 課題に上げる（1 回に 1 件）。本人確認つき（端末か --relayed）。
+			// 課題かタスクに上げる（1 回に 1 件）。本人確認つき（端末か --relayed）。
 			Path:          []string{"followup", "promote"},
-			StartsCycle:   startsCycle(core.CycleTriggerFollowupPromote),
+			StartsCycle:   followupPromoteStartsCycle,
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			Flags:         relayedFlags(),
-			Run:           runFollowupPromote,
+			Flags: append([]flagDef{
+				{Name: "preview", HasValue: false},
+				{Name: "new-challenge", HasValue: false},
+				{Name: "budget-impl-usd", HasValue: true},
+				{Name: "budget-review-usd", HasValue: true},
+				{Name: "raise-limit", HasValue: true},
+			}, relayedFlags()...),
+			Run: runFollowupPromote,
 		},
 		{
 			Path:          []string{"status"},

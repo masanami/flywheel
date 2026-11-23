@@ -1121,6 +1121,9 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`UPDATE challenge SET budget_limit_micros = 40000000, budget_limit_reason = '続きを足す分を見込む "quoted"' WHERE id = 1`, nil},
 			{`INSERT INTO task_addition (challenge_id, origin, origin_task_id, state, spec, total_after_micros, limit_micros, hold_id, created_at, decided_at)
 			  VALUES (1, 'expand', 1, 'applied', '{"tasks":[]}', 9000000, 40000000, 1, ?, ?)`, []any{at, at}},
+			{`INSERT INTO task_addition (challenge_id, origin, origin_task_id, state, followup_id, budget_impl_micros, budget_review_micros, created_at)
+			  VALUES (1, 'followup', NULL, 'pending', 1, 2000000, 1000000, ?)`, []any{at}},
+			{`UPDATE followup SET promoted_task_id = 2 WHERE id = 1`, nil},
 			{`UPDATE task SET addition_id = 1, expand_after = 1 WHERE id = 2`, nil},
 			{`UPDATE contract_run SET verified_ref = 'deadbeef' WHERE id = 1`, nil},
 			{`UPDATE contract_run SET fix_pending_ref = 'pending01', fix_verified_ref = 'verified02', fix_rejected_ref = 'rejected03' WHERE id = 1`, nil},
@@ -1224,6 +1227,8 @@ type FollowupRow struct {
 	Note                string
 	Reason              string
 	PromotedChallengeID int
+	// PromotedTaskID は上げた先のタスクの内部整数 ID（0 なら NULL）。
+	PromotedTaskID int
 }
 
 // InsertFollowup はテスト専用のフィクスチャとして、フォローアップを 1 行と、その作成の作業ログ（create）を 1 件挿入し、
@@ -1253,8 +1258,8 @@ func InsertFollowup(t *testing.T, workspace string, r FollowupRow) int64 {
 	defer func() { _ = db.Close() }()
 	var id int64
 	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
-		res, err := tx.Exec(`INSERT INTO followup (challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			nullInt(r.ChallengeID), r.Title, nullStr(r.Detail), r.Source, r.Status, nullStr(r.Note), nullStr(r.Reason), nullInt(r.PromotedChallengeID), at, at)
+		res, err := tx.Exec(`INSERT INTO followup (challenge_id, title, detail, source, status, note, reason, promoted_challenge_id, promoted_task_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			nullInt(r.ChallengeID), r.Title, nullStr(r.Detail), r.Source, r.Status, nullStr(r.Note), nullStr(r.Reason), nullInt(r.PromotedChallengeID), nullInt(r.PromotedTaskID), at, at)
 		if err != nil {
 			return err
 		}
@@ -1340,6 +1345,11 @@ type TaskAdditionRow struct {
 	HoldID           int64
 	// DecidedAt は閉じた日時。空なら NULL。
 	DecidedAt string
+	// FollowupID は出どころが followup のときの元のフォローアップの内部整数 ID（0 なら NULL）。
+	// BudgetImplMicros・BudgetReviewMicros はそのときの枠（0 なら NULL）。
+	FollowupID         int64
+	BudgetImplMicros   int64
+	BudgetReviewMicros int64
 }
 
 // InsertTaskAddition はテスト専用のフィクスチャとして、足す依頼（task_addition）を 1 行直接置き、内部整数 ID を返す
@@ -1369,9 +1379,10 @@ func InsertTaskAddition(t *testing.T, workspace string, r TaskAdditionRow) int64
 	defer func() { _ = db.Close() }()
 	var id int64
 	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
-		res, err := tx.Exec(`INSERT INTO task_addition (challenge_id, origin, origin_task_id, state, spec, total_after_micros, limit_micros, hold_id, created_at, decided_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			r.ChallengeID, r.Origin, nullInt(int64(r.OriginTaskID)), r.State, nullStr(r.Spec), nullInt(r.TotalAfterMicros), nullInt(r.LimitMicros), nullInt(r.HoldID), at, nullStr(r.DecidedAt))
+		res, err := tx.Exec(`INSERT INTO task_addition (challenge_id, origin, origin_task_id, state, spec, total_after_micros, limit_micros, hold_id, created_at, decided_at, followup_id, budget_impl_micros, budget_review_micros)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.ChallengeID, r.Origin, nullInt(int64(r.OriginTaskID)), r.State, nullStr(r.Spec), nullInt(r.TotalAfterMicros), nullInt(r.LimitMicros), nullInt(r.HoldID), at, nullStr(r.DecidedAt),
+			nullInt(r.FollowupID), nullInt(r.BudgetImplMicros), nullInt(r.BudgetReviewMicros))
 		if err != nil {
 			return err
 		}

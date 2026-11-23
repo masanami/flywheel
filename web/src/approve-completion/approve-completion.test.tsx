@@ -125,6 +125,7 @@ function followup(id: string, status: string) {
     id,
     note: null,
     promoted_challenge_id: null,
+    promoted_task_id: null,
     reason: null,
     source: "agent",
     status,

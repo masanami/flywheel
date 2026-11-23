@@ -15,6 +15,7 @@ const fu = (id: string, p: Partial<Followup> = {}): Followup => ({
   id,
   note: null,
   promoted_challenge_id: null,
+  promoted_task_id: null,
   reason: null,
   source: "サイクルの振り返り",
   status: "open",
@@ -58,6 +59,7 @@ const DEFAULT: Followup[] = [
     status: "done",
     note: "確かめた: 5",
     promoted_challenge_id: "C-2",
+    promoted_task_id: null,
   }),
   fu("F-6", { status: "dropped", reason: "理由 6", detail: "説明 6" }),
 ];
@@ -333,3 +335,15 @@ it("AC-374 #812: 未の一覧の下に、flywheel followup done・drop・promote
 
 // AC-375（案内の雛形のコマンドとフラグが flywheel に実在する）は Go のテスト internal/cli/ui_guidance_test.go が確かめる。
 // AC-422（偽のデータが未・済み・捨てたを持つ）は web/src/mock/api.test.ts、AC-428・AC-434 は web/e2e/followups.spec.ts が確かめる。
+
+it("#1140: 上げた先のタスクがあれば、タスクを出し、課題のリンクは出さない", async () => {
+  await open([
+    fu("F-1", {
+      challenge_id: "C-1",
+      promoted_challenge_id: "C-2",
+      promoted_task_id: "T-7",
+    }),
+  ]);
+  expect(screen.getByTestId("followup-promoted-task")).toHaveTextContent("T-7");
+  expect(screen.queryByTestId("followup-promoted")).toBeNull();
+});
