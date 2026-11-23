@@ -85,6 +85,7 @@ describe("ボタンの回答の偽の口", () => {
       ?.holds[0];
     if (!h) throw new Error("種の保留が無い");
     h.check = "c";
+    h.options = [];
     expect(
       await codeOf(
         a.answerHold("alpha", "C-8", "H-1", { check: "", option: "o" }),
