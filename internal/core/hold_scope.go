@@ -30,6 +30,9 @@ var holdIDPattern = regexp.MustCompile(`^H-[1-9][0-9]*$`)
 // formatHoldID は保留の表示用の ID（H-<番号>）。番号は保留の行の番号と同じで、列は持たない。過去の保留・閉じた保留も同じ形で読める。
 func formatHoldID(id int64) string { return fmt.Sprintf("H-%d", id) }
 
+// FormatHoldID は保留の行の番号から表示用の ID（H-<番号>）を作る（view が使う）。
+func FormatHoldID(id int64) string { return formatHoldID(id) }
+
 // parseHoldID は H-<番号> を保留の行の番号として読む。形式が違えば ok=false。
 func parseHoldID(s string) (int64, bool) {
 	if !holdIDPattern.MatchString(s) {
@@ -183,4 +186,15 @@ func mayProceedOn(ctx context.Context, tx *sql.Tx, challengeID int64, taskID *in
 		return false, err
 	}
 	return Status(status) == StatusInProgress, nil
+}
+
+// mayProceedOnNow は mayProceedOn を、読み取りのトランザクションで返す。
+func (s *Store) mayProceedOnNow(ctx context.Context, challengeID int64, taskID *int64) (bool, error) {
+	var may bool
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		var err error
+		may, err = mayProceedOn(ctx, tx, challengeID, taskID)
+		return err
+	})
+	return may, classifyReadWriteErr(err)
 }

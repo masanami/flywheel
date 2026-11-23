@@ -480,7 +480,7 @@ export interface SupervisorAction {
   cycle_id: string;
   findings: string;
   hand: string | null;
-  hold_id: number | null;
+  hold_id: string | null;
   id: number;
   note: string;
   questions: SupervisorQuestion[];

@@ -791,9 +791,9 @@ func canRouteToSupervisor(j JudgmentInvoker, decl *AgentDeclaration) bool {
 
 // answerSupervisorWait は、契約の run が回答を待っていて、スーパーバイザーが先に受ける待ち（waitsForSupervisor）のとき、判断点 SV を呼ぶ。
 // 答えたら宣言の resume で答えを返し（選択肢があれば選んだ選択肢、無ければ文）、保留は作らない。
-// 上げる判定・判断点の失敗・答えを返せなかったとき・再開の上限は、オーナーの保留（止まり方 child_question）にする。課題が着手中でなければ何もしない。
+// 上げる判定・判断点の失敗・答えを返せなかったとき・再開の上限は、オーナーの保留（止まり方 child_question）にする。そのタスクを進めてよくなければ（mayProceedOn）何もしない。
 func (s *Store) answerSupervisorWait(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, rep *ContractRunReport) (*ContractRunReport, error) {
-	if inProgress, err := s.challengeInProgress(ctx, row.ChallengeID); err != nil || !inProgress {
+	if may, err := s.mayProceedOnNow(ctx, row.ChallengeID, row.TaskID); err != nil || !may {
 		return rep, err
 	}
 	ra := rep.RequestedAction

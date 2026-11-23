@@ -58,7 +58,7 @@ func TestFromSupervisorAction_ShapeAndNulls(t *testing.T) {
 		Findings: "f", Note: "n", Basis: []core.SupervisorBasis{{Path: "docs/a.md", Locator: "節"}},
 		Conditions: []core.SupervisorCondition{{Number: 1, Text: "条件"}}, Result: core.ActionExecuted, CreatedAt: time.Unix(0, 0).UTC(),
 	})
-	want := `{"basis":[{"locator":"節","path":"docs/a.md"}],"challenge_id":"C-1","conditions":[{"number":1,"text":"条件"}],"created_at":"1970-01-01T00:00:00.000Z","cycle_id":"Y-1","findings":"f","hand":"split_followup","hold_id":7,"id":3,"note":"n","questions":[],"reject_reason":null,"result":"executed","run_id":null,"stop_kind":"verify_uncertain","task_id":"T-2"}`
+	want := `{"basis":[{"locator":"節","path":"docs/a.md"}],"challenge_id":"C-1","conditions":[{"number":1,"text":"条件"}],"created_at":"1970-01-01T00:00:00.000Z","cycle_id":"Y-1","findings":"f","hand":"split_followup","hold_id":"H-7","id":3,"note":"n","questions":[],"reject_reason":null,"result":"executed","run_id":null,"stop_kind":"verify_uncertain","task_id":"T-2"}`
 	if got := marshal(t, a); got != want {
 		t.Errorf("action:\n got %s\nwant %s", got, want)
 	}
