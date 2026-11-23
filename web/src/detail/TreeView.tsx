@@ -46,7 +46,13 @@ export function TreeView({
           ) : null}
         </h3>
         <TaskTree
-          tasks={show.tree.tasks}
+          tasks={show.tree.tasks.map((n) => ({
+            ...n,
+            // 後から足したタスクの印は、タスクの added（core が返した値）から引く
+            added:
+              n.id !== null &&
+              show.tasks.find((t) => t.id === n.id)?.added != null,
+          }))}
           taskHref={(taskId) =>
             hrefOf({ kind: "task", name: agentName, id, taskId })
           }

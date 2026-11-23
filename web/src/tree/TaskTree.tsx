@@ -1,4 +1,9 @@
-import { PHASE_LABELS, TASK_PROGRESS_LABELS, label } from "../labels.ts";
+import {
+  PHASE_LABELS,
+  TASK_ADDED_TREE_MARK,
+  TASK_PROGRESS_LABELS,
+  label,
+} from "../labels.ts";
 import {
   BOX_H,
   BOX_W,
@@ -62,6 +67,7 @@ function TaskBox({ box, href }: { box: PlacedTask; href: string | null }) {
     className: "task-box",
     "data-testid": "task-box",
     "data-phase": task.phase,
+    "data-added": task.added === true ? "true" : undefined,
     "data-col": box.col + 1,
     style: { left: box.x, top: box.y, width: BOX_W, height: BOX_H },
   };
@@ -75,6 +81,14 @@ function TaskBox({ box, href }: { box: PlacedTask; href: string | null }) {
             {" ・ "}
             <span className="task-progress" data-testid="task-progress">
               {label(TASK_PROGRESS_LABELS, task.progress)}
+            </span>
+          </>
+        ) : null}
+        {task.added === true ? (
+          <>
+            {" ・ "}
+            <span className="task-added-mark" data-testid="task-box-added">
+              {TASK_ADDED_TREE_MARK}
             </span>
           </>
         ) : null}
