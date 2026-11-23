@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // docs/features/core-redesign-s4d.md S4d-1「欄から受ける承認・回答」（AC-107・109・112〜118・130・132〜139・142）。
@@ -453,6 +454,58 @@ func TestChatApproval_MarkCheckAppliesToWithdrawAndFollowups(t *testing.T) {
 	}
 	if _, err := s.DropFollowups(context.Background(), []string{"F-1"}, "r", f.mark(t, "F-1")); !errors.Is(err, ErrVerificationRejected) {
 		t.Errorf("drop followups error = %v, want ErrVerificationRejected", err)
+	}
+}
+
+// S4d-2 の AC-191: 知らせが出ている（知らせの元の記録がある）ときも、欄からの承認の印の検査の結果は変わらない。
+// 最後のオーナーの発言への返事が進行中なら通り、そうでなければ断る。知らせは発言の表に入らないので、「最後の発言」を動かさない。
+func TestChatApproval_MarkCheckIsUnchangedWhileNoticesExist(t *testing.T) {
+	t.Parallel()
+	for _, inProgress := range []bool{true, false} {
+		name := "返事が進行中でない"
+		if inProgress {
+			name = "返事が進行中"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s := newStoreForTest(t)
+			fixedActor(t, "alice")
+			c := createAndAdvance(t, s, StatusUnclassified)
+			f := newChatFix(t, s)
+			// 発言の後に、知らせの元の記録（理由つきで終わったサイクル）を作る。
+			end := statusBase.Add(time.Minute)
+			cycle := seedCycle(t, s, statusBase, &end, CycleResultCompleted)
+			if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
+				_, err := tx.Exec(`UPDATE cycle SET end_reason = 'budget' WHERE id = ?`, cycle)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			notices, err := s.ListNotices(context.Background())
+			if err != nil || len(notices) != 1 {
+				t.Fatalf("notices = %+v, %v; want 1", notices, err)
+			}
+			if !inProgress {
+				if err := s.FinishChatReply(context.Background(), f.turn.ReplyMessageID, ChatStateDone, 0); err != nil {
+					t.Fatal(err)
+				}
+			}
+			prev, err := s.PrepareWithdraw(context.Background(), c.ID, "やめる")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.ExecuteWithdraw(context.Background(), WithdrawRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Reason: "やめる"}, f.mark(t, c.ID))
+			_, st := challengeVersion(t, s, c.ID)
+			if inProgress {
+				if err != nil || st == StatusUnclassified {
+					t.Errorf("withdraw with notices = %v (status %q), want accepted", err, st)
+				}
+				return
+			}
+			if !errors.Is(err, ErrChatMarkInvalid) || st != StatusUnclassified {
+				t.Errorf("withdraw with notices = %v (status %q), want ErrChatMarkInvalid and unchanged", err, st)
+			}
+		})
 	}
 }
 

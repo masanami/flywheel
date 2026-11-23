@@ -298,10 +298,33 @@ it("AC-129・AC-131・AC-132: 見ているタスクを、題名・様子（言�
   expect(rows[0]).toHaveTextContent("作業中");
   expect(rows[0]).toHaveTextContent("2.25 USD");
   expect(rows[1]).toHaveTextContent("あなたの回答か承認待ち");
+  // 実行の始まりは、行ごとの値を時刻として出す。
+  expect(rows[0]).toHaveTextContent(
+    `実行の始まり: ${new Date("2026-10-17T02:05:00Z").toLocaleString()}`,
+  );
+  expect(rows[1]).toHaveTextContent(
+    `実行の始まり: ${new Date("2026-10-17T02:06:00Z").toLocaleString()}`,
+  );
   const hrefs = rows.map((r) => r.querySelector("a")?.getAttribute("href"));
   expect(hrefs[0]).toContain("T-1");
   expect(hrefs[1]).toContain("C-2");
   expect(hrefs[1]).not.toContain("T-");
+});
+
+it("AC-130: 見ているタスクの様子は、検証中も言葉で出す", async () => {
+  await openAgents([runningAgent], "#/a/alpha/cycle", {
+    [URL_CYCLE]: screenBody({
+      running: {
+        ...RUNNING,
+        watching: [{ ...RUNNING.watching[0], state: "verifying" }],
+      },
+    }),
+  });
+  const rows = await screen.findAllByTestId("cycle-watching-row");
+  expect(rows).toHaveLength(1);
+  expect(
+    within(rows[0] as HTMLElement).getByTestId("cycle-watching-state"),
+  ).toHaveTextContent("検証中");
 });
 
 it("AC-140: 構造の図に承認待ち・回答待ちの件数が出る（承認は計画・完了・不可逆操作の合計）", async () => {
