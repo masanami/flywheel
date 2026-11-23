@@ -201,10 +201,12 @@ type j2ValidationContext struct {
 // `uncertain` は question 以外を null または空にしてよいので、必須は verdict だけ
 // にする（plan の必須の組は core が検査し直す）。
 func j2OutputSchema() []byte {
-	// 文字数の上限は core の検査（checkJ2TaskTexts）と同じ定数から書く（型で通って検査で落ちる隙間を作らない）。
+	// core が文字数を検査する文字列には、検査と同じ定数の上限を型にも書く（型で通って検査で落ちる出力を作らせない）。
 	boundedString := func(maxRunes int) map[string]any {
 		return map[string]any{"type": "string", "maxLength": maxRunes}
 	}
+	stageString := boundedString(MaxStageRunes)
+	nullableStageString := map[string]any{"type": []string{"string", "null"}, "maxLength": MaxStageRunes}
 	verdicts := make([]string, 0, len(J2VerdictValues))
 	for _, v := range J2VerdictValues {
 		verdicts = append(verdicts, string(v))
@@ -215,14 +217,14 @@ func j2OutputSchema() []byte {
 	questionSchema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"question": map[string]any{"type": "string"},
+			"question": stageString,
 			"options": map[string]any{
 				"type": "array",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"label":   map[string]any{"type": "string"},
-						"example": nullableString,
+						"label":   stageString,
+						"example": nullableStageString,
 					},
 					"required":             []string{"label"},
 					"additionalProperties": false,
@@ -239,8 +241,8 @@ func j2OutputSchema() []byte {
 		"items": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"title":    map[string]any{"type": "string"},
-				"decision": map[string]any{"type": "string"},
+				"title":    stageString,
+				"decision": stageString,
 				"questions": map[string]any{
 					"type":     "array",
 					"maxItems": MaxQuestionsPerTopic,
@@ -262,7 +264,7 @@ func j2OutputSchema() []byte {
 				"title":         boundedString(MaxStageRunes),
 				"body":          boundedString(MaxTaskBodyRunes),
 				"done_criteria": boundedString(MaxStageRunes),
-				"non_goals":     map[string]any{"type": []string{"array", "null"}, "maxItems": MaxNonGoals, "items": map[string]any{"type": "string"}},
+				"non_goals":     map[string]any{"type": []string{"array", "null"}, "maxItems": MaxNonGoals, "items": stageString},
 				"depends_on":    stringArray,
 				"repo":          map[string]any{"type": "string"},
 				"operation":     map[string]any{"type": "string"},
@@ -283,9 +285,9 @@ func j2OutputSchema() []byte {
 			"type": "object",
 			"properties": map[string]any{
 				"kind":   map[string]any{"type": "string", "enum": expectedKindStrings()},
-				"scene":  map[string]any{"type": "string"},
-				"before": map[string]any{"type": "string"},
-				"after":  map[string]any{"type": "string"},
+				"scene":  stageString,
+				"before": stageString,
+				"after":  stageString,
 			},
 			"required":             []string{"kind", "scene", "before", "after"},
 			"additionalProperties": false,
@@ -294,7 +296,7 @@ func j2OutputSchema() []byte {
 	nonGoalsSchema := map[string]any{
 		"type":     []string{"array", "null"},
 		"maxItems": MaxNonGoals,
-		"items":    map[string]any{"type": "string"},
+		"items":    stageString,
 	}
 	schema := map[string]any{
 		"type": "object",
@@ -313,7 +315,7 @@ func j2OutputSchema() []byte {
 			"budget_impl_usd":     nullableNumber,
 			"budget_review_usd":   nullableNumber,
 			"budget_limit_usd":    nullableNumber,
-			"budget_limit_reason": nullableString,
+			"budget_limit_reason": nullableStageString,
 			"cross_repo":          map[string]any{"type": []string{"boolean", "null"}},
 			"related_repos":       stringArray,
 			"question":            nullableString,
@@ -470,12 +472,20 @@ func validateJ2Output(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, 
 	return v, reason == ""
 }
 
+// j2ReasonBadShape は、出力が受け口の形に読めなかったときの理由（JSON の誤りの文は、出力の中身を含みうるので写さない）。
+const j2ReasonBadShape = "output does not match the expected shape"
+
+// validationReason は検査の誤り err を、実行の記録に残す理由の文にする（ErrValidation の前置きを外し、理由の形をそろえる）。
+func validationReason(err error) string {
+	return strings.TrimPrefix(err.Error(), ErrValidation.Error()+": ")
+}
+
 // validateJ2OutputReason は validateJ2Output の本体。検査を通れば理由は空、落ちれば、どの検査で落ちたかの短い文を返す
 // （実行の記録の誤りの欄に残す。判断点の出力の中身は写さない）。
 func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOutput, string) {
 	var raw j2RawOutput
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, "output does not match the expected shape"
+		return nil, j2ReasonBadShape
 	}
 
 	switch J2Verdict(raw.Verdict) {
@@ -586,16 +596,16 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 
 	expected, err := NormalizeExpected(raw.Expected)
 	if err != nil {
-		return nil, err.Error()
+		return nil, validationReason(err)
 	}
 	nonGoals, err := NormalizeNonGoals(raw.NonGoals)
 	if err != nil {
-		return nil, err.Error()
+		return nil, validationReason(err)
 	}
 	// figure は空文字・空白だけを不正とする（消すときは null）。
 	if raw.Figure != nil {
 		if err := CheckFigure(*raw.Figure); err != nil {
-			return nil, err.Error()
+			return nil, validationReason(err)
 		}
 	}
 
@@ -653,12 +663,12 @@ func validateJ2Tasks(in []j2RawTask, vc j2ValidationContext) ([]j2Task, string) 
 		// source は、あれば上流で開いている子の記録にある値で、タスクをまたいで重ならない。
 		if t.Source != "" {
 			if strings.TrimSpace(t.Source) != t.Source || usedSource[t.Source] || (vc.CheckSource && !openChild[t.Source]) {
-				return nil, fmt.Sprintf("tasks[%d].source is not an open child, or is used twice", i)
+				return nil, fmt.Sprintf("tasks[%d].source has surrounding whitespace, is used twice, or is not an open child", i)
 			}
 			usedSource[t.Source] = true
 		}
 		if err := checkJ2TaskTexts(i, t); err != nil {
-			return nil, err.Error()
+			return nil, validationReason(err)
 		}
 		if _, dup := byKey[t.Key]; dup {
 			return nil, fmt.Sprintf("tasks[%d].key is used twice", i)
@@ -729,7 +739,7 @@ func validateJ2TaskFields(t j2RawTask, vc j2ValidationContext, requireBudgets bo
 	}
 	nonGoals, err := NormalizeNonGoals(t.NonGoals)
 	if err != nil {
-		return j2Task{}, err.Error()
+		return j2Task{}, validationReason(err)
 	}
 	// タスクの枠は、書いたら正で、実装の枠は 1 回の実行の上限額以下。タスクが 2 個以上の計画では、両方を必ず書く。
 	for _, b := range []*float64{t.BudgetImplUSD, t.BudgetReviewUSD} {
@@ -767,7 +777,7 @@ func validateJ2BudgetLimit(raw j2RawOutput, tasks []j2Task, impl, review float64
 	if raw.BudgetLimitReason != nil {
 		if r := strings.TrimSpace(*raw.BudgetLimitReason); r != "" {
 			if err := checkText("budget_limit_reason", r, MaxStageRunes); err != nil {
-				return nil, nil, err.Error()
+				return nil, nil, validationReason(err)
 			}
 			reason = &r
 		}
@@ -803,17 +813,17 @@ func validateJ2Topics(in []j2RawTopic) ([]j2Topic, string) {
 	out := make([]j2Topic, 0, len(in))
 	for i, t := range in {
 		if err := checkText(fmt.Sprintf("topics[%d].title", i), t.Title, MaxStageRunes); err != nil {
-			return nil, err.Error()
+			return nil, validationReason(err)
 		}
 		if err := checkText(fmt.Sprintf("topics[%d].decision", i), t.Decision, MaxStageRunes); err != nil {
-			return nil, err.Error()
+			return nil, validationReason(err)
 		}
 		if len(t.Questions) > MaxQuestionsPerTopic {
 			return nil, fmt.Sprintf("topics[%d].questions must have at most %d items", i, MaxQuestionsPerTopic)
 		}
 		for _, q := range t.Questions {
 			if err := checkStageQuestion(q); err != nil {
-				return nil, fmt.Sprintf("topics[%d]: %s", i, err.Error())
+				return nil, fmt.Sprintf("topics[%d]: %s", i, validationReason(err))
 			}
 		}
 		out = append(out, j2Topic(t))

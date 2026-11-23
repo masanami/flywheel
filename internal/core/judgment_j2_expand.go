@@ -77,7 +77,7 @@ func j2ExpandOutputSchemaFor(origin TaskAdditionOrigin) []byte {
 		"properties": map[string]any{
 			"verdict":  map[string]any{"type": "string", "enum": verdicts},
 			"tasks":    map[string]any{"type": []string{"array", "null"}, "items": tasks["items"], "maxItems": maxTasks},
-			"question": map[string]any{"type": []string{"string", "null"}},
+			"question": map[string]any{"type": []string{"string", "null"}, "maxLength": MaxStageRunes},
 			"options":  map[string]any{"type": []string{"array", "null"}, "items": map[string]any{"type": "string"}},
 		},
 		"required":             []string{"verdict"},

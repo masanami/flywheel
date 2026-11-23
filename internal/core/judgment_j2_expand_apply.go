@@ -58,36 +58,49 @@ type j2ExpandValidationContext struct {
 //     前提が自分自身・足すタスクの鍵でもいまある（取りやめでない）タスクの鍵でもない・足すタスクどうしの前提に輪がある・
 //     リポジトリがいまあるタスクと同じ 1 つでない・宣言に無い／起動できない操作・枠（実装・レビュー対応）が無い・不正
 func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2ExpandValidated, bool) {
+	v, reason := validateJ2ExpandOutputReason(data, vc)
+	return v, reason == ""
+}
+
+// validateJ2ExpandOutputReason は validateJ2ExpandOutput の本体。検査を通れば理由は空、落ちれば、どの検査で落ちたかの短い文を返す
+// （実行の記録の誤りの欄に残す。判断点の出力の中身は写さない）。
+func validateJ2ExpandOutputReason(data []byte, vc j2ExpandValidationContext) (*j2ExpandValidated, string) {
 	raw, ok := parseJ2ExpandOutput(data)
 	if !ok {
-		return nil, false
+		return nil, j2ReasonBadShape
 	}
 	v := &j2ExpandValidated{Verdict: j2ExpandVerdict(raw.Verdict)}
 	switch v.Verdict {
 	case j2ExpandNone:
 		if vc.Origin == TaskAdditionOriginFollowup {
-			return nil, false // フォローアップを足す依頼は、足さないを選べない（足すか問うか）
+			return nil, "a followup addition cannot choose none" // フォローアップを足す依頼は、足さないを選べない（足すか問うか）
 		}
-		return v, true
+		return v, ""
 	case j2ExpandAsk:
-		if raw.Question == nil || checkText("question", *raw.Question, MaxStageRunes) != nil {
-			return nil, false
+		if raw.Question == nil {
+			return nil, "ask requires a question"
+		}
+		if err := checkText("question", *raw.Question, MaxStageRunes); err != nil {
+			return nil, validationReason(err)
 		}
 		v.Question = *raw.Question
 		v.Options = raw.Options
-		return v, true
+		return v, ""
 	}
 	// add
 	in := append([]j2RawTask(nil), raw.Tasks...)
-	if len(in) < MinPlanTasks || len(in) > MaxPlanTasks || len(vc.Repos) != 1 {
-		return nil, false
+	if len(in) < MinPlanTasks || len(in) > MaxPlanTasks {
+		return nil, fmt.Sprintf("tasks must have %d-%d items", MinPlanTasks, MaxPlanTasks)
+	}
+	if len(vc.Repos) != 1 {
+		return nil, "the existing tasks do not target exactly one repo"
 	}
 	// 出どころが followup のときは、枠を足す依頼の額で置き換える（出力の枠は読まない）。足す依頼の額は、タスクの枠の検査
 	// （0 超・実装の枠が 1 回の上限以下）にかけない。検査は代わりの値で通し、通した後に足す依頼の額を入れる。
 	followup := vc.Origin == TaskAdditionOriginFollowup
 	if followup {
 		if len(in) != 1 {
-			return nil, false
+			return nil, "a followup addition must add exactly one task"
 		}
 		placeholderImpl, placeholderReview := followupPlaceholderBudgetUSD, followupPlaceholderBudgetUSD
 		if vc.FrameImpl != nil {
@@ -100,34 +113,34 @@ func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2Expan
 	byKey := make(map[string]int, len(in))
 	inputs := make([]TaskInput, len(in))
 	for i, t := range in {
-		if checkJ2TaskTexts(i, t) != nil {
-			return nil, false
+		if err := checkJ2TaskTexts(i, t); err != nil {
+			return nil, validationReason(err)
 		}
 		if _, dup := byKey[t.Key]; dup || vc.TakenKeys[t.Key] {
-			return nil, false
+			return nil, fmt.Sprintf("tasks[%d].key is already used", i)
 		}
 		byKey[t.Key] = i
 		inputs[i] = TaskInput{Key: t.Key, DependsOn: t.DependsOn}
 	}
-	for _, t := range in {
+	for i, t := range in {
 		for _, k := range t.DependsOn {
 			if _, own := byKey[k]; (own && k != t.Key) || (!own && vc.DepKeys[k]) {
 				continue
 			}
-			return nil, false
+			return nil, fmt.Sprintf("tasks[%d].depends_on names itself or a key that cannot be depended on", i)
 		}
 	}
 	if hasDependencyCycle(inputs, byKey) {
-		return nil, false
+		return nil, "tasks.depends_on has a cycle"
 	}
 	jc := j2ValidationContext{Agent: vc.Agent, Conn: vc.Conn, HasSource: vc.HasSource}
-	for _, t := range in {
+	for i, t := range in {
 		if t.Repo != vc.Repos[0] {
-			return nil, false
+			return nil, fmt.Sprintf("tasks[%d].repo differs from the repo of the existing tasks", i)
 		}
 		jt, reason := validateJ2TaskFields(t, jc, true)
 		if reason != "" {
-			return nil, false
+			return nil, fmt.Sprintf("tasks[%d]: %s", i, reason)
 		}
 		if followup {
 			applyFollowupFrames(&jt, vc)
@@ -137,10 +150,10 @@ func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2Expan
 	}
 	spec, err := json.Marshal(in)
 	if err != nil {
-		return nil, false
+		return nil, j2ReasonBadShape
 	}
 	v.Spec = string(spec)
-	return v, true
+	return v, ""
 }
 
 // followupPlaceholderBudgetUSD は、出どころが followup のタスクの枠の検査を通すための代わりの値（検査の後に足す依頼の額へ置き換える）。
@@ -180,11 +193,11 @@ func (s *Store) finalizeJ2ExpandOutput(ctx context.Context, in J2AutoInput, runI
 		return j2ExpandFinalized{}, err
 	}
 	res := j2ExpandFinalized{Result: RunResultSucceeded}
-	invalid := false
+	invalidReason := ""
 	err = s.mutateAsRun(ctx, actor, ChannelInvoker, VerificationNone, &runInt, func(tx *sql.Tx, rec *activityRecorder) error {
 		raw, ok := parseJ2ExpandOutput(structuredOutput)
 		if !ok {
-			invalid = true
+			invalidReason = j2ReasonBadShape
 			return nil
 		}
 		res.Outcome = raw.Verdict
@@ -218,9 +231,9 @@ func (s *Store) finalizeJ2ExpandOutput(ctx context.Context, in J2AutoInput, runI
 		if err := vc.useAdditionOrigin(ctx, tx, additionID); err != nil {
 			return err
 		}
-		v, ok := validateJ2ExpandOutput(structuredOutput, vc.j2ExpandValidationContext)
-		if !ok {
-			invalid = true
+		v, reason := validateJ2ExpandOutputReason(structuredOutput, vc.j2ExpandValidationContext)
+		if reason != "" {
+			invalidReason = reason
 			return nil
 		}
 		hold := func(question string, reason holdReason, opts HoldOptionsInput) (int64, error) {
@@ -259,8 +272,8 @@ func (s *Store) finalizeJ2ExpandOutput(ctx context.Context, in J2AutoInput, runI
 	if err != nil {
 		return j2ExpandFinalized{}, err
 	}
-	if invalid {
-		if err := s.invalidateRunOutput(ctx, runIDDisplay); err != nil {
+	if invalidReason != "" {
+		if err := s.invalidateRunOutputWithReason(ctx, runIDDisplay, "invalid J2 expand output: "+invalidReason); err != nil {
 			return j2ExpandFinalized{}, err
 		}
 		return j2ExpandFinalized{Result: RunResultInvalidOutput}, nil

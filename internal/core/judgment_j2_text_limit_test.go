@@ -27,8 +27,8 @@ func TestValidateJ2Output_TaskBodyLimitIs6000Runes(t *testing.T) {
 		t.Errorf("body of 6000 runes: want valid, got %q", reason)
 	}
 	_, reason := validateJ2OutputReason(j2PlanWithTaskField("body", strings.Repeat("あ", 6001)), vc)
-	if !strings.Contains(reason, "tasks[0].body exceeds 6000 characters") {
-		t.Errorf("body of 6001 runes: reason = %q, want the field and the limit", reason)
+	if reason != "tasks[0].body exceeds 6000 characters" {
+		t.Errorf("body of 6001 runes: reason = %q, want the field and the limit only", reason)
 	}
 }
 
@@ -41,7 +41,7 @@ func TestValidateJ2Output_OtherTaskTextLimitsStayAt2000Runes(t *testing.T) {
 			t.Errorf("%s of 2000 runes: want valid, got %q", field, reason)
 		}
 		_, reason := validateJ2OutputReason(j2PlanWithTaskField(field, strings.Repeat("あ", 2001)), vc)
-		if !strings.Contains(reason, "tasks[0]."+field+" exceeds 2000 characters") {
+		if reason != "tasks[0]."+field+" exceeds 2000 characters" {
 			t.Errorf("%s of 2001 runes: reason = %q, want the field and the limit", field, reason)
 		}
 	}
@@ -67,8 +67,8 @@ func TestValidateJ2ExpandOutput_TaskBodyLimitIs6000Runes(t *testing.T) {
 	if _, ok := validateJ2ExpandOutput(j2ExpandAddWithBody(t, strings.Repeat("あ", 6000)), vc); !ok {
 		t.Error("body of 6000 runes: want valid")
 	}
-	if _, ok := validateJ2ExpandOutput(j2ExpandAddWithBody(t, strings.Repeat("あ", 6001)), vc); ok {
-		t.Error("body of 6001 runes: want invalid")
+	if _, reason := validateJ2ExpandOutputReason(j2ExpandAddWithBody(t, strings.Repeat("あ", 6001)), vc); reason != "tasks[0].body exceeds 6000 characters" {
+		t.Errorf("body of 6001 runes: reason = %q, want the field and the limit only", reason)
 	}
 }
 
@@ -106,7 +106,19 @@ func TestPlanAutoJ2_InvalidOutputRecordsWhichCheckFailed(t *testing.T) {
 	t.Parallel()
 	f := newJ2Fixture(t)
 	ch := f.newClassified(t, "target", "P1")
-	res, err := f.run(t, succeededInvoker(j2PlanWithTaskField("body", strings.Repeat("あ", 6001))), idPtr(ch.ID))
+	// 取り込み元の無い課題で起動できる操作のタスクにし、本文の長さだけを変える（6,000 文字なら通ることを先に確かめる）。
+	withBody := func(n int) []byte {
+		return j2OutputFor(false, func(m map[string]any) {
+			task := j2TestTask("t1", "harness-repo", "brief")
+			task["body"] = strings.Repeat("あ", n)
+			m["tasks"] = []any{task}
+		})
+	}
+	okCh := f.newClassified(t, "at the limit", "P1")
+	if res, err := f.run(t, succeededInvoker(withBody(6000)), idPtr(okCh.ID)); err != nil || res.Items[0].Result != RunResultSucceeded {
+		t.Fatalf("body of 6000 runes: result = %+v, err = %v, want succeeded", res, err)
+	}
+	res, err := f.run(t, succeededInvoker(withBody(6001)), idPtr(ch.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +132,49 @@ func TestPlanAutoJ2_InvalidOutputRecordsWhichCheckFailed(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("runs = %d, want 1", len(runs))
 	}
-	if want := "invalid J2 output: "; !strings.HasPrefix(runs[0].Error, want) || !strings.Contains(runs[0].Error, "tasks[0].body exceeds 6000 characters") {
-		t.Errorf("run error = %q, want the J2 prefix and the failed check", runs[0].Error)
+	// 理由は、判断点の名前と落ちた検査だけ（内部の前置きも、判断点の出力の中身も入らない）。
+	if got, want := runs[0].Error, "invalid J2 output: tasks[0].body exceeds 6000 characters"; got != want {
+		t.Errorf("run error = %q, want %q", got, want)
+	}
+}
+
+// flywheel#1210: core が文字数を検査するほかの文字列（論点・問い・予想・やらないこと・上限の理由）も、型に同じ上限を持つ。
+func TestJ2OutputSchema_OtherCheckedStringsCarryTheStageLimit(t *testing.T) {
+	t.Parallel()
+	root := j2SchemaRoot(t)
+	at := func(path ...string) map[string]any {
+		cur := root
+		for _, k := range path {
+			cur = cur[k].(map[string]any)
+		}
+		return cur
+	}
+	topic := []string{"topics", "items", "properties"}
+	question := append(append([]string{}, topic...), "questions", "items", "properties")
+	option := append(append([]string{}, question...), "options", "items", "properties")
+	expected := []string{"expected", "items", "properties"}
+	for name, node := range map[string]map[string]any{
+		"topics.title":             at(append(append([]string{}, topic...), "title")...),
+		"topics.decision":          at(append(append([]string{}, topic...), "decision")...),
+		"question":                 at(append(append([]string{}, question...), "question")...),
+		"question.options.label":   at(append(append([]string{}, option...), "label")...),
+		"question.options.example": at(append(append([]string{}, option...), "example")...),
+		"expected.scene":           at(append(append([]string{}, expected...), "scene")...),
+		"expected.before":          at(append(append([]string{}, expected...), "before")...),
+		"expected.after":           at(append(append([]string{}, expected...), "after")...),
+		"non_goals":                at("non_goals", "items"),
+		"tasks.non_goals":          at("tasks", "items", "properties", "non_goals", "items"),
+		"budget_limit_reason":      at("budget_limit_reason"),
+	} {
+		if got := node["maxLength"]; got != float64(MaxStageRunes) {
+			t.Errorf("%s maxLength = %v, want %d", name, got, MaxStageRunes)
+		}
+	}
+	var expand map[string]any
+	if err := json.Unmarshal(j2ExpandOutputSchema(), &expand); err != nil {
+		t.Fatal(err)
+	}
+	if got := expand["properties"].(map[string]any)["question"].(map[string]any)["maxLength"]; got != float64(MaxStageRunes) {
+		t.Errorf("expand question maxLength = %v, want %d", got, MaxStageRunes)
 	}
 }
