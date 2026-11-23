@@ -301,7 +301,7 @@ it("AC-372 #812: 未が 0 件のとき、「未のフォローアップはあり
   ).toBeInTheDocument();
 });
 
-it("AC-373 #812・AC-116: チェックは未の行にだけ出る（済み・捨てたの行には出ない）", async () => {
+it("AC-373 #812・AC-116・AC-117: チェックは未の行にだけ出る（済み・捨てたの行には出ない）", async () => {
   await open();
   expect(screen.getAllByTestId("followup-check")).toHaveLength(3);
   for (const s of [/^済み（/, /^捨てた（/]) {
@@ -329,7 +329,7 @@ it("AC-374 #812: 未の一覧の下に、タスクに上げる案内（対話で
   expect(screen.queryByTestId("followup-guide")).toBeNull();
 });
 
-it("AC-117: チェックが 0 件のとき、「済みにする」「捨てる」は押せない", async () => {
+it("AC-118: チェックが 0 件のとき、「済みにする」「捨てる」は押せない", async () => {
   await open();
   expect(screen.getByTestId("followup-done-button")).toBeDisabled();
   expect(screen.getByTestId("followup-drop-button")).toBeDisabled();
@@ -362,7 +362,7 @@ async function openWith(
   await screen.findByRole("group", { name: "フォローアップの状態" });
 }
 
-it("AC-118・AC-120: 「済みにする」は確かめた結果の欄を出し、空のままでは送れず、書くと選んだ ID と文を送って一覧を読み直す", async () => {
+it("AC-119・AC-121: 「済みにする」は確かめた結果の欄を出し、空のままでは送れず、書くと選んだ ID と文を送って一覧を読み直す", async () => {
   await openWith({ [`POST ${URL_DONE}`]: { followups: [] } });
   const checks = screen.getAllByTestId("followup-check");
   fireEvent.click(checks[0] as HTMLElement);
@@ -391,7 +391,7 @@ it("AC-118・AC-120: 「済みにする」は確かめた結果の欄を出し�
   expect(screen.queryByTestId("followup-text")).toBeNull();
 });
 
-it("AC-119・AC-120: 「捨てる」は理由の欄を出し、空のままでは送れず、書くと ids と reason を drop の口へ送る", async () => {
+it("AC-120・AC-122: 「捨てる」は理由の欄を出し、空のままでは送れず、書くと ids と reason を drop の口へ送る", async () => {
   await openWith({ [`POST ${URL_DROP}`]: { followups: [] } });
   fireEvent.click(screen.getAllByTestId("followup-check")[1] as HTMLElement);
   fireEvent.click(screen.getByTestId("followup-drop-button"));
@@ -413,7 +413,7 @@ it("AC-119・AC-120: 「捨てる」は理由の欄を出し、空のままで�
   });
 });
 
-it("AC-121: 口が誤りを返すと理由を出し、チェックと書いた文は残す", async () => {
+it("AC-123: 口が誤りを返すと理由を出し、チェックと書いた文は残す", async () => {
   await openWith({
     [`POST ${URL_DONE}`]: errorResponse(
       400,
@@ -435,7 +435,7 @@ it("AC-121: 口が誤りを返すと理由を出し、チェックと書いた�
   expect(screen.getByTestId("followup-text")).toHaveValue("確かめた");
 });
 
-it("AC-122: 403 のときは、再読み込みの案内を出す", async () => {
+it("AC-123: 403 のときは、再読み込みの案内を出す", async () => {
   await openWith({
     [`POST ${URL_DROP}`]: errorResponse(403, "forbidden_origin", "拒否"),
   });
@@ -450,7 +450,7 @@ it("AC-122: 403 のときは、再読み込みの案内を出す", async () => {
   );
 });
 
-it("AC-123: タスクに上げるボタンは置かない", async () => {
+it("AC-124: タスクに上げるボタンは置かない", async () => {
   await open();
   expect(
     screen.queryByRole("button", { name: /上げる|タスクにする|課題にする/ }),

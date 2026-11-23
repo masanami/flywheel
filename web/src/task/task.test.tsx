@@ -908,7 +908,7 @@ const okAnswer = (h: Hold): Response =>
     { status: 200 },
   );
 
-it("AC-95 #1182: 待っている問いに、ボタンで選べる選択肢の数だけボタンが出て、選べないものは案内が出る", async () => {
+it("AC-95・AC-98 #1182: 待っている問いに、ボタンで選べる選択肢の数だけボタンが出て、選べないものは案内が出る", async () => {
   const h = hold({ hold_id: "H-50", options: opts2, check: "k1" });
   const { root } = await open(
     show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
@@ -922,7 +922,7 @@ it("AC-95 #1182: 待っている問いに、ボタンで選べる選択肢の数
   expect(item.textContent).toContain("対話で伝えてください");
 });
 
-it("AC-96 #1182: 選択肢を持たない問いには、ボタンが出ず、いまの案内（ターミナルのコマンド）が出る", async () => {
+it("AC-99 #1182: 選択肢を持たない問いには、ボタンが出ず、いまの案内（ターミナルのコマンド）が出る", async () => {
   const { root } = await open(
     show({
       holds: [hold({ hold_id: "H-51" })],
@@ -934,7 +934,7 @@ it("AC-96 #1182: 選択肢を持たない問いには、ボタンが出ず、い
   expect(within(waiting).getByLabelText("承認方法の案内")).toBeTruthy();
 });
 
-it("AC-98 #1182: ボタンを押すと確かめが出て、確かめる前には送らず、確かめた後に保留の ID・選択肢・照合の値を送る", async () => {
+it("AC-100・AC-101 #1182: ボタンを押すと確かめが出て、確かめる前には送らず、確かめた後に保留の ID・選択肢・照合の値を送る", async () => {
   const h = hold({ hold_id: "H-52", options: opts2, check: "k52" });
   const { root, requests } = await open(
     show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
@@ -958,7 +958,7 @@ it("AC-98 #1182: ボタンを押すと確かめが出て、確かめる前には
   });
 });
 
-it("AC-98 #1182: 確かめをやめると、送らない", async () => {
+it("AC-100 #1182: 確かめをやめると、送らない", async () => {
   const h = hold({ hold_id: "H-53", options: opts2, check: "k" });
   const { root, requests } = await open(
     show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
@@ -971,7 +971,7 @@ it("AC-98 #1182: 確かめをやめると、送らない", async () => {
   expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
 });
 
-it("AC-99 #1182: 確かめて送った直後から、応答が返るまで、選択肢のボタンは押せない", async () => {
+it("AC-102 #1182: 確かめて送った直後から、応答が返るまで、選択肢のボタンは押せない", async () => {
   const h = hold({ hold_id: "H-54", options: opts2, check: "k" });
   const { root, requests } = await open(
     show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
@@ -987,7 +987,7 @@ it("AC-99 #1182: 確かめて送った直後から、応答が返るまで、選
   expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
 });
 
-it("AC-100 #1182: 409 で断られたら、問いが変わった旨を出し、問いを読み直す", async () => {
+it("AC-103 #1182: 409 で断られたら、問いが変わった旨を出し、問いを読み直す", async () => {
   const h = hold({ hold_id: "H-55", options: opts2, check: "old" });
   const { root, requests } = await open(
     show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
@@ -1018,7 +1018,7 @@ it("AC-100 #1182: 409 で断られたら、問いが変わった旨を出し、�
   await waitFor(() => expect(gets()).toBeGreaterThan(before));
 });
 
-it("AC-101 #1182: スーパーバイザーが上げた問いには、調べたことと推奨が出る。関わっていない問いには出ない", async () => {
+it("AC-147・AC-148 #1182: スーパーバイザーが上げた問いには、調べたことと推奨が出る。関わっていない問いには出ない", async () => {
   const sv = hold({
     hold_id: "H-56",
     question: "SV の問い",
@@ -1050,7 +1050,7 @@ it("AC-95 #1182: すべての問いがボタンで答えられるとき、ター
   expect(within(root).queryByLabelText("承認方法の案内")).toBeNull();
 });
 
-it("AC-100 #1182: 409 以外の断りは、その文を出す", async () => {
+it("AC-103 #1182: 409 以外の断りは、その文を出す", async () => {
   const h = hold({ hold_id: "H-71", options: opts2, check: "k" });
   const { root } = await open(
     show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
