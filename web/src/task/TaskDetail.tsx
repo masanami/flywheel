@@ -30,13 +30,20 @@ import {
 import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { ApprovalGuide } from "../parts/ApprovalGuide.tsx";
+import {
+  HoldAnswerNotices,
+  HoldOptions,
+  SupervisorNote,
+  hasOptions,
+  useHoldAnswer,
+} from "../parts/HoldOptions.tsx";
 import { safeHref } from "../safeHref.ts";
 import { NotFound } from "../shell/NotFound.tsx";
 import { hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
 import { usd } from "../usd.ts";
 import { shortTime } from "../when.ts";
-import { whoOf } from "../who.ts";
+import { WHO_ME_UI_BUTTON, whoOf } from "../who.ts";
 
 // 委譲の実行（報告の API を呼ぶ対象）の種類。
 const DELEGATION_KINDS = ["delegate", "contract"];
@@ -57,7 +64,7 @@ export function TaskDetail({
   taskId: string;
 }) {
   const chat = useChat();
-  const { result } = useScreenData(
+  const { result, reload } = useScreenData(
     live,
     agentName,
     () => api.challenge(agentName, id),
@@ -94,6 +101,7 @@ export function TaskDetail({
       node={node}
       agentName={agentName}
       workspacePath={workspacePath}
+      reload={reload}
     />
   );
 }
@@ -107,14 +115,17 @@ function TaskView({
   node,
   agentName,
   workspacePath,
+  reload,
 }: {
   show: ShowCardResponse;
   task: Task;
   node: TreeTask;
   agentName: string;
   workspacePath: string;
+  reload: () => void;
 }) {
   const id = show.challenge.id;
+  const answerState = useHoldAnswer(agentName, id, reload);
   const link = (t: { id: string; title: string }) => {
     const phase = show.tree.tasks.find((n) => n.id === t.id)?.phase;
     return (
@@ -271,21 +282,37 @@ function TaskView({
               data-testid="task-hold-question"
             >
               <p data-testid="task-hold-id">保留: {h.hold_id}</p>
+              <SupervisorNote
+                findings={h.supervisor_findings}
+                recommendation={h.supervisor_recommendation}
+              />
               <Markdown text={h.question} />
+              {hasOptions(h) ? (
+                <HoldOptions
+                  key={`${h.hold_id}:${h.check ?? ""}`}
+                  hold={h}
+                  state={answerState}
+                />
+              ) : null}
             </div>
           ))}
-          <ApprovalGuide
-            challengeId={id}
-            actions={["answer_question"]}
-            workspacePath={workspacePath}
-            openHoldIds={openHolds.map((h) => h.hold_id)}
-            needsHold={
-              openHolds.length > 0 &&
-              show.holds.filter(
-                (h) => h.answer === null && h.closed_at === null,
-              ).length >= 2
-            }
-          />
+          <HoldAnswerNotices state={answerState} />
+          {openHolds.length === 0 || openHolds.some((h) => !hasOptions(h)) ? (
+            <ApprovalGuide
+              challengeId={id}
+              actions={["answer_question"]}
+              workspacePath={workspacePath}
+              openHoldIds={openHolds
+                .filter((h) => !hasOptions(h))
+                .map((h) => h.hold_id)}
+              needsHold={
+                openHolds.length > 0 &&
+                show.holds.filter(
+                  (h) => h.answer === null && h.closed_at === null,
+                ).length >= 2
+              }
+            />
+          ) : null}
         </section>
       ) : null}
       <section aria-label="やること" data-testid="task-body">
@@ -465,11 +492,14 @@ function VerificationSection({
   );
 }
 
-// 誰が答えたか。経緯の行と同じ決め方（経路と本人確認の方式）。
+// 誰が答えたか。経路と本人確認の方式で決める（経路 ui だけは、保留への回答なのでボタンと出す）。
+// 画面のボタンで答えた回答（経路 ui）は「あなた（画面のボタン）」と出す。
 const answeredBy = (h: Hold): string | null =>
   h.answered_channel === null
     ? null
-    : whoOf(h.answered_channel, h.answered_verification);
+    : h.answered_channel === "ui"
+      ? WHO_ME_UI_BUTTON
+      : whoOf(h.answered_channel, h.answered_verification);
 
 function Holds({ holds }: { holds: Hold[] }) {
   return (

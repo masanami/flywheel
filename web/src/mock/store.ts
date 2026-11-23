@@ -383,7 +383,28 @@ export function seed(): Record<string, MockWorkspace> {
           from_status: "in_progress",
           from_status_label: "着手中",
           kind: "human",
-          options: [],
+          // 画面のボタンで答えられる選択肢（ボタンの回答の画面の通しの試験が使う）。
+          check: "seed-h1",
+          options: [
+            {
+              id: "include",
+              label: "含める",
+              description: "3 万件増えます",
+              button: true,
+            },
+            {
+              id: "exclude",
+              label: "含めない",
+              description: "",
+              button: true,
+            },
+            {
+              id: "talk",
+              label: "別の方法で決める",
+              description: "",
+              button: false,
+            },
+          ],
           question:
             "旧テーブルの deleted_at が NULL の行を移行対象に含めてよいですか？ 含めると 3 万件増えます。",
           raised_at: iso(90),
