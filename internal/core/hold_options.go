@@ -30,6 +30,9 @@ type HoldOptionsInput struct {
 	StopKind          StopKind
 	SupervisorEnabled bool
 	Escalation        *HoldEscalation
+	// Scope は止める範囲（stop_kind と同じ渡し方で、呼び出し元が保留と一緒に渡す）。空は課題を止める保留（hold.scope は NULL）。
+	// HoldScopeTask はタスクを止める保留で、保留が結び付くタスク（hold.task_id）が要る（無ければ ErrValidation）。
+	Scope HoldScope
 }
 
 // HoldEscalation は、子の問いをスーパーバイザーが上げた保留に残す値（調べたこと・推奨・対処の記録の ID）。

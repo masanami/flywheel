@@ -471,13 +471,13 @@ func TestTransitionCommands_UndefinedStatusCombinationsAreRejected(t *testing.T)
 		}
 	}
 	// 12 コマンド（#13 で approveHoldRelease、M4.5 S4 で withdraw、#452 で completeDirect、T19 で answerPlan を追加）× 9 状態 = 108 組のうち、
-	// 遷移表にある組（T2=1・T3/T4=2・T7=1・T8=1・T11=5・approve=2〈T5・T13〉・
+	// 遷移表にある組（T2=1・T3/T4=2・T7=1・T8=1・T11=6・approve=2〈T5・T13〉・
 	// reject=2〈T6・T15〉・answer=1〈T12〉・approveHoldRelease=1〈T14〉・withdraw=7〈T16〉・
-	// completeDirect=1〈T17〉・answerPlan=1〈T19〉の計 25）と、
+	// completeDirect=1〈T17〉・answerPlan=1〈T19〉の計 26）と、
 	// この汎用枠組みでは検証できない1組（approveHoldRelease/計画承認待ち。
-	// usage_error であり、専用テストが担う）を除いた 82 組を回したことを固定する。
-	if tested != 82 {
-		t.Fatalf("tested %d undefined (command, status) combinations, want 82", tested)
+	// usage_error であり、専用テストが担う）を除いた 81 組を回したことを固定する。
+	if tested != 81 {
+		t.Fatalf("tested %d undefined (command, status) combinations, want 81", tested)
 	}
 }
 

@@ -595,7 +595,11 @@ func (s *Store) mapReconciliationOptions(ctx context.Context, dc *delegationCont
 		if op == OpHold {
 			// 委譲の子の問い・停止で作る保留は、起動したタスクに結び付ける。
 			tc.taskID = taskID
-			_, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, cycleID, opts)
+			scoped, err := taskStopOptions(ctx, tc, opts)
+			if err != nil {
+				return err
+			}
+			_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, cycleID, scoped)
 			return err
 		}
 		// 委譲の結果で課題が検証中へ進むとき、タスクも検証中にする（課題の遷移と同じトランザクション）。

@@ -268,7 +268,11 @@ func (s *Store) applyJ5Task(ctx context.Context, runIDDisplay, challengeIDDispla
 			}
 			mapped = true
 			tc.taskID = &tid
-			if err := insertHoldStop(ctx, tc, *v.Question, stopHoldOptions(StopKindVerifyUncertain, agent)); err != nil {
+			scoped, err := taskStopOptions(ctx, tc, stopHoldOptions(StopKindVerifyUncertain, agent))
+			if err != nil {
+				return err
+			}
+			if err := insertHoldStop(ctx, tc, *v.Question, scoped); err != nil {
 				return err
 			}
 			if err := tc.rec.record("task", tid, ActivityActionTaskVerify, nil, after); err != nil {
@@ -371,7 +375,11 @@ func (s *Store) holdForTaskVerifyLimit(ctx context.Context, runIDDisplay, challe
 		}
 		question := fmt.Sprintf("タスクの検証が連続して「満たしていない」と判定され、差し戻しの上限に達したため、委譲先へ差し戻さず止めた（上限の種類: 差し戻し、回数: %d、上限: %d）。\n"+
 			"直近の検証: %s。回答すると、連続の数えを 0 から数え直して続ける。", streak, agent.ReworkLimit, runIDDisplay)
-		_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonReworkLimit, "", HoldOptionsInput{StopKind: StopKindReworkLimit, SupervisorEnabled: agent.Supervisor})
+		scoped, err := taskStopOptions(ctx, tc, HoldOptionsInput{StopKind: StopKindReworkLimit, SupervisorEnabled: agent.Supervisor})
+		if err != nil {
+			return err
+		}
+		_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonReworkLimit, "", scoped)
 		return err
 	})
 	if err != nil {

@@ -235,7 +235,11 @@ func (s *Store) holdContractReviewWithOptionsReason(ctx context.Context, rep *Co
 				return err
 			}
 			tc.taskID = taskID
-			if _, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", opts); err != nil {
+			scoped, err := taskStopOptions(ctx, tc, opts)
+			if err != nil {
+				return err
+			}
+			if _, err := s.insertHoldWithOccurrenceOptions(ctx, tc, question, reason, "", scoped); err != nil {
 				return err
 			}
 			if extra != nil {
