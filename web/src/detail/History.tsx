@@ -41,6 +41,7 @@ const CHALLENGE_KINDS: Record<string, Kind> = {
   hold: "question",
   answer: "question",
   answer_plan: "question",
+  hold_edit: "question",
   submit: "verify",
   verify_met: "verify",
   verify_not_met: "verify",

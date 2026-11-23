@@ -62,6 +62,8 @@ export const emptyStatus = {
   waiting_external: { challenges: [] },
 };
 
+export const emptyNotices = { notices: [] };
+
 export function fixtures(): Record<string, unknown> {
   const ws = (name: string) => ({
     error: null,
@@ -74,17 +76,24 @@ export function fixtures(): Record<string, unknown> {
     "/api/v1/workspaces/alpha/status": emptyStatus,
     "/api/v1/workspaces/alpha/challenges": { challenges: [] },
     "/api/v1/workspaces/alpha/cycle": {
+      costs: [],
       last_ended_at: "2026-10-17T01:00:00Z",
       last_result: "completed",
       last_started_at: "2026-10-17T00:50:00Z",
       state: "running",
+      supervisor_actions: [],
     },
     "/api/v1/workspaces/beta/cycle": {
+      costs: [],
       last_ended_at: null,
       last_result: null,
       last_started_at: null,
       state: "idle",
+      supervisor_actions: [],
     },
+    // 起きたことの知らせ（区切り S4d-2）。既定は 0 件。
+    "/api/v1/workspaces/alpha/notices": emptyNotices,
+    "/api/v1/workspaces/beta/notices": emptyNotices,
     "/api/v1/workspaces/beta/status": emptyStatus,
     "/api/v1/workspaces/beta/challenges": { challenges: [] },
     "/api/v1/needs-human": { unreadable_workspaces: [], workspaces: [] },

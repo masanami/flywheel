@@ -7,9 +7,11 @@ import { ConflictFixesView } from "../parts/ConflictFixesView.tsx";
 import { NotFound } from "../shell/NotFound.tsx";
 import { CHALLENGE_VIEWS, type ChallengeView, hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
+import { Additions } from "./Additions.tsx";
 import { History } from "./History.tsx";
 import { Items } from "./Items.tsx";
 import { PlanView } from "./PlanView.tsx";
+import { SupervisorRecords } from "./SupervisorRecords.tsx";
 import { TreeView } from "./TreeView.tsx";
 import { Waiting } from "./Waiting.tsx";
 
@@ -36,7 +38,7 @@ export function ChallengeDetail({
   view: ChallengeView;
 }) {
   const chat = useChat();
-  const { result } = useScreenData(
+  const { result, reload } = useScreenData(
     live,
     agentName,
     () => api.challenge(agentName, id),
@@ -74,12 +76,15 @@ export function ChallengeDetail({
         show={show}
         agentName={agentName}
         workspacePath={workspacePath}
+        reload={reload}
       />
       <ConflictFixesView
         fixes={show.conflict_fixes}
         titleOfTask={(tid) => show.tasks.find((t) => t.id === tid)?.title}
         showAt
       />
+      <Additions show={show} />
+      <SupervisorRecords show={show} agentName={agentName} />
       <nav aria-label="課題の詳細の切り替え" className="detail-switch">
         {CHALLENGE_VIEWS.map((v) => (
           <a

@@ -64,14 +64,30 @@ func FromDiscrepancies(ds []core.Discrepancy) []Discrepancy {
 	return out
 }
 
+// StatusHold は status.needs_human.holds の要素（needs_human.challenges の課題の、いま開いている保留）。status の画面の口
+// （FromOverviewForScreen）だけが入れる。CLI の --json と、画面のほかの口（needs-human）には出さない（FromOverview は入れない）。
+// check は保留の照合の値、options[].button は選択肢ごとの「ボタンで選べるか」（どちらも core が決めた値）。回答の口へ送る値だけを持ち、
+// 問いの文は課題の詳細・questions の口から読む。
+type StatusHold struct {
+	ChallengeID string       `json:"challenge_id"`
+	Check       string       `json:"check"`
+	HoldID      string       `json:"hold_id"`
+	Options     []HoldOption `json:"options"`
+	// TaskTitle は保留が結び付くタスクの題名（結び付かなければ空）。
+	TaskTitle string `json:"task_title"`
+}
+
 // StatusNeedsHuman は status.needs_human。
 type StatusNeedsHuman struct {
 	BudgetExhausted []BudgetExhausted `json:"budget_exhausted"`
 	Challenges      []Challenge       `json:"challenges"`
 	Discrepancies   []Discrepancy     `json:"discrepancies"`
-	Operations      []Operation       `json:"operations"`
-	Slots           []Slot            `json:"slots"`
-	Triage          []Triage          `json:"triage"`
+	// Holds は needs_human.challenges の課題の、いま開いている保留（課題の ID・保留の番号の昇順）。status の画面の口だけが入れる。
+	// 開いている保留が 0 件のときと、CLI の --json・画面のほかの口では、キーごと省く。
+	Holds      []StatusHold `json:"holds,omitempty"`
+	Operations []Operation  `json:"operations"`
+	Slots      []Slot       `json:"slots"`
+	Triage     []Triage     `json:"triage"`
 }
 
 // StatusParentAgent は status.parent_agent（親のエージェントが動く番）。状態は人間対応待ちのままで、
@@ -264,4 +280,19 @@ func FromOverview(ov *core.Overview) StatusResponse {
 		SupervisorChecking: StatusSupervisorChecking{Challenges: FromChallenges(ov.SupervisorCheckingChallenges), Count: len(ov.SupervisorCheckingChallenges)},
 		WaitingExternal:    StatusWaitingExternal{Challenges: waiting},
 	}
+}
+
+// FromOverviewForScreen は FromOverview に、画面のボタンで答えるための保留の値（照合の値・選択肢ごとの button）を足す。
+// 載せるのは needs_human.challenges の課題（オーナー待ち）の保留だけ。親のエージェントが動く番・スーパーバイザーが確認中の課題は
+// needs_human の外の区画なので、その保留は載せない（ターミナルの status の表示と同じ範囲）。
+func FromOverviewForScreen(ov *core.Overview) StatusResponse {
+	out := FromOverview(ov)
+	var holds []StatusHold
+	for _, c := range ov.NeedsHumanChallenges {
+		for _, h := range ov.OpenHolds[c.ID] {
+			holds = append(holds, StatusHold{ChallengeID: c.ID, Check: h.Check, HoldID: h.HoldID, Options: FromHoldOptionsForScreen(h.Options, h.OptionButtons), TaskTitle: h.TaskTitle})
+		}
+	}
+	out.NeedsHuman.Holds = holds
+	return out
 }

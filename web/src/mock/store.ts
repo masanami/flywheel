@@ -101,7 +101,7 @@ export const STATUS_LABEL: Record<string, string> = {
 const T0 = Date.parse("2026-10-12T09:00:00Z");
 const iso = (minAgo: number) => new Date(T0 - minAgo * 60_000).toISOString();
 
-function mk(
+export function mk(
   id: string,
   title: string,
   status: string,
@@ -383,7 +383,28 @@ export function seed(): Record<string, MockWorkspace> {
           from_status: "in_progress",
           from_status_label: "着手中",
           kind: "human",
-          options: [],
+          // 画面のボタンで答えられる選択肢（ボタンの回答の画面の通しの試験が使う）。
+          check: "seed-h1",
+          options: [
+            {
+              id: "include",
+              label: "含める",
+              description: "3 万件増えます",
+              button: true,
+            },
+            {
+              id: "exclude",
+              label: "含めない",
+              description: "",
+              button: true,
+            },
+            {
+              id: "talk",
+              label: "別の方法で決める",
+              description: "",
+              button: false,
+            },
+          ],
           question:
             "旧テーブルの deleted_at が NULL の行を移行対象に含めてよいですか？ 含めると 3 万件増えます。",
           raised_at: iso(90),
@@ -863,11 +884,14 @@ export const toCard = (m: MockChallenge): ChallengeCard => ({
 
 // 取り込めるものの偽のデータ（`ingestable=true` を付けた問い合わせにだけ返す。alpha だけが持つ）。
 // 子のある親・既存の課題の下に入る子・単独の 3 件。
+// 画面のボタンで取り込んだ指定（偽の取り込みの口が足す）。取り込めるものの一覧から外す。
+export const INGESTED_KEYS = new Set<string>();
+
 export function ingestableOf(name: string): Ingestable {
   if (name !== "alpha") return { error: null, items: [] };
   const url = (n: number) => `https://example.invalid/issues/${n}`;
   const ext = (n: number) => `example/repo#${n}`;
-  return {
+  const all: Ingestable = {
     error: null,
     items: [
       {
@@ -906,6 +930,10 @@ export function ingestableOf(name: string): Ingestable {
         url: url(904),
       },
     ],
+  };
+  return {
+    error: all.error,
+    items: all.items.filter((it) => !INGESTED_KEYS.has(it.external_key)),
   };
 }
 
@@ -1034,6 +1062,7 @@ export class MockStore {
   workspaces: Record<string, MockWorkspace>;
   constructor(workspaces: Record<string, MockWorkspace> = seed()) {
     this.workspaces = workspaces;
+    INGESTED_KEYS.clear();
   }
   private listeners = new Set<(ws: string) => void>();
 

@@ -293,7 +293,7 @@ function awaitingApproval(): Record<string, unknown> {
   };
 }
 
-it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POST …/cycle だけ、EventSource は events の購読だけ", async () => {
+it("AC-221: 全画面を操作しても fetch は GET と許可表の POST（承認・サイクル・対話の欄・画面のボタンの 5 つの口）だけ、EventSource は events の購読だけ", async () => {
   document.head.innerHTML = '<meta name="flywheel-csrf" content="tok">';
   const mermaid: MermaidLike = {
     initialize: vi.fn(),
@@ -356,6 +356,11 @@ it("AC-221: 全画面を操作しても fetch は GET と POST …/approve・POS
     /^\/api\/v1\/workspaces\/[^/]+\/cycle$/,
     // 対話の欄（#1002）の書き込み
     /^\/api\/v1\/workspaces\/[^/]+\/chat\/(messages|stop|new)$/,
+    // 画面のボタンで受ける操作（区切り S4d-2）: 選ぶだけの回答・取り込み・サイクルを止める・フォローアップを済みにする／捨てる
+    /^\/api\/v1\/workspaces\/[^/]+\/challenges\/[^/]+\/holds\/[^/]+\/answer$/,
+    /^\/api\/v1\/workspaces\/[^/]+\/ingest$/,
+    /^\/api\/v1\/workspaces\/[^/]+\/cycle\/stop$/,
+    /^\/api\/v1\/workspaces\/[^/]+\/followups\/(done|drop)$/,
   ];
   for (const r of requests) {
     if (r.method === "GET") continue;

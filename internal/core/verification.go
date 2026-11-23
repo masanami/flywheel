@@ -163,14 +163,14 @@ type verificationRegistryEntry struct {
 // verificationRegistry は許可した (経路, 本人確認の方式) の組の登録簿
 // （§クリティカル設計決定 1）。データ（テーブル）として持ち、組ごとに受けられる
 // 操作の集合を持つ（M4P23。検査は core に置き、server を通らない経路でも範囲が
-// 崩れないようにする）。(cli, tty_confirm)・(cli, relayed) は全操作、(ui, none) は計画の承認と
-// 本番反映の保留つきの完了の承認だけ（差し戻し・回答・計画の問いへの答え・予算の増額・不可逆操作・
-// 保留を外した完了の承認は受けない）。
+// 崩れないようにする）。(cli, tty_confirm)・(cli, relayed) は全操作、(ui, none) は計画の承認・
+// 本番反映の保留つきの完了の承認・選ぶだけの回答（経路 ui の回答の限りは checkUIAnswer）・フォローアップを捨てるだけ（差し戻し・計画の問いへの答え・予算の増額・
+// 不可逆操作・保留を外した完了の承認・フォローアップをタスクに上げるは受けない）。
 var verificationRegistry = []verificationRegistryEntry{
 	{Channel: ChannelCLI, Verification: VerificationTTYConfirm, anyAction: true},
 	{Channel: ChannelCLI, Verification: VerificationRelayed, anyAction: true},
 	{Channel: ChannelChat, Verification: VerificationRelayed, anyAction: true},
-	{Channel: ChannelUI, Verification: VerificationNone, actions: []attestedAction{actionApprovePlan, actionApproveCompletionHold}},
+	{Channel: ChannelUI, Verification: VerificationNone, actions: []attestedAction{actionApprovePlan, actionApproveCompletionHold, actionAnswer, actionFollowupDrop}},
 }
 
 // registryAllows は (ch, v) の組が登録簿にあるかを判定する。

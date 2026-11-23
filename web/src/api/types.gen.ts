@@ -118,6 +118,7 @@ export interface StatusNeedsHuman {
   budget_exhausted: BudgetExhausted[];
   challenges: Challenge[];
   discrepancies: Discrepancy[];
+  holds?: StatusHold[];
   operations: Operation[];
   slots: Slot[];
   triage: Triage[];
@@ -154,6 +155,21 @@ export interface Discrepancy {
   cycle_only?: boolean;
   kinds: string[];
   operation_id?: string;
+}
+
+export interface StatusHold {
+  challenge_id: string;
+  check: string;
+  hold_id: string;
+  options: HoldOption[];
+  task_title: string;
+}
+
+export interface HoldOption {
+  button?: boolean | null;
+  description: string;
+  id: string;
+  label: string;
 }
 
 export interface Slot {
@@ -224,6 +240,7 @@ export interface TaskAddition {
   origin_task_id: string | null;
   state: string;
   task_ids: string[];
+  task_titles: string[];
   total_after_usd: number | null;
 }
 
@@ -328,6 +345,7 @@ export interface Hold {
   answered_by: string | null;
   answered_channel: string | null;
   answered_verification: string | null;
+  check?: string | null;
   closed_at: string | null;
   from_status: string;
   from_status_label: string;
@@ -346,12 +364,6 @@ export interface Hold {
   supervisor_recommendation: string | null;
   supervisor_state: string | null;
   task_id: string | null;
-}
-
-export interface HoldOption {
-  description: string;
-  id: string;
-  label: string;
 }
 
 export interface StagePair {
@@ -743,12 +755,16 @@ export interface QuestionsResponse {
 
 export interface Question {
   challenge_id: string;
+  check: string;
   from_status: string;
   hold_id: string;
+  options: HoldOption[];
   question: string;
   raised_at: string;
   run_id: string | null;
   scope: string;
+  supervisor_findings: string | null;
+  supervisor_recommendation: string | null;
   task_id: string | null;
   title: string;
   workspace: string;
@@ -984,6 +1000,94 @@ export interface PhaseNotStarted {
   reason: string;
 }
 
+export interface HoldAnswerRequest {
+  check: string;
+  option: string;
+}
+
+export interface HoldAnswerResponse {
+  cycle: CycleStart;
+  hold: Hold;
+}
+
+export interface IngestRequest {
+  items: string[];
+}
+
+export interface IngestAcceptedResponse {
+  cycle: CycleStart;
+  ingested: IngestedItem[];
+}
+
+export interface IngestedItem {
+  challenge_id: string;
+  children: number;
+  external_key: string;
+}
+
+export interface CycleStopResponse {
+  cycle_id: string | null;
+  requested: boolean;
+  running: boolean;
+}
+
+export interface FollowupDoneRequest {
+  ids: string[];
+  note: string;
+}
+
+export interface FollowupDropRequest {
+  ids: string[];
+  reason: string;
+}
+
+export interface CycleScreen {
+  costs: CycleCost[];
+  last_end_reason: string | null;
+  last_ended_at: string | null;
+  last_result: string | null;
+  last_started_at: string | null;
+  running: CycleRunning | null;
+  state: string;
+  supervisor_actions: CycleSupervisorAction[];
+}
+
+export interface CycleCost {
+  cost_usd: number;
+  kind: string;
+  role: string | null;
+}
+
+export interface CycleSupervisorAction {
+  at: string;
+  challenge_id: string;
+  challenge_title: string;
+  findings: string;
+  hand: string | null;
+  id: number;
+  reject_reason: string | null;
+  result: string;
+  task_id: string | null;
+  task_title: string | null;
+}
+
+export interface NoticesResponse {
+  notices: Notice[];
+}
+
+export interface Notice {
+  added_count: number | null;
+  at: string;
+  challenge_id: string | null;
+  challenge_title: string | null;
+  cycle_id: string | null;
+  end_reason: string | null;
+  kind: string;
+  origin: string | null;
+  task_id: string | null;
+  task_title: string | null;
+}
+
 export const CARD_ACTION_CODES = [
   "approve_plan",
   "approve_completion",
@@ -1118,6 +1222,13 @@ export const CYCLE_END_REASON_CODES = [
   "stalled",
   "error",
   "interrupted",
+] as const;
+
+export const NOTICE_KIND_CODES = [
+  "task_added",
+  "released",
+  "cycle_ended",
+  "supervisor_escalated",
 ] as const;
 
 export const WATCH_STATE_CODES = [

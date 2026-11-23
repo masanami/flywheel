@@ -16,7 +16,7 @@ test("AC-426 #810: 課題の画面から課題の詳細、タスクの詳細の�
 }) => {
   await page.goto("/#/a/alpha/challenges");
   await expect(page.getByTestId("challenge-frame").first()).toBeVisible();
-  await page.getByRole("link", { name: C28 }).click();
+  await page.getByRole("link", { name: C28, exact: true }).click();
   await expect(page.getByTestId("challenge-detail")).toBeVisible();
   await page
     .getByTestId("task-box")

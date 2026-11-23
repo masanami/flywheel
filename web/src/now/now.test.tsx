@@ -11,9 +11,11 @@ import { App } from "../App.tsx";
 import type {
   Ingestable,
   IngestableItem,
+  Notice,
   Question,
   StatusResponse,
 } from "../api/types.gen.ts";
+
 import { RELOAD_TEXT } from "../labels.ts";
 import { POLL_MS } from "../live/useLive.ts";
 import {
@@ -71,6 +73,9 @@ interface Setup {
   cycle?: string;
   ingestable?: Ingestable | FakeResponder;
   post?: unknown;
+  notices?: Partial<Notice>[];
+  ingestPost?: unknown;
+  noticesResponder?: FakeResponder;
 }
 
 function setup(s: Setup = {}) {
@@ -92,6 +97,12 @@ function setup(s: Setup = {}) {
     "/api/v1/questions": {
       questions: (s.questions ?? []).map((q) => ({
         challenge_id: "C-1",
+        check: "",
+        hold_id: "H-1",
+        options: [],
+        scope: "challenge",
+        supervisor_findings: null,
+        supervisor_recommendation: null,
         from_status: "in_progress",
         question: "問い",
         raised_at: "2026-11-01T00:00:00Z",
@@ -112,7 +123,24 @@ function setup(s: Setup = {}) {
       state: s.cycle ?? "idle",
     },
     [`POST ${P}/cycle`]: s.post ?? { started: true },
+    [`${P}/notices`]: {
+      notices: (s.notices ?? []).map((n) => ({
+        added_count: null,
+        at: "2026-11-23T00:00:00Z",
+        challenge_id: null,
+        challenge_title: null,
+        cycle_id: null,
+        end_reason: null,
+        kind: "task_added",
+        origin: null,
+        task_id: null,
+        task_title: null,
+        ...n,
+      })),
+    },
   };
+  if (s.noticesResponder) bodies[`${P}/notices`] = s.noticesResponder;
+  if (s.ingestPost !== undefined) bodies[`POST ${P}/ingest`] = s.ingestPost;
   const ing = s.ingestable ?? { error: null, items: [] };
   bodies[`${P}/status?ingestable=true`] =
     typeof ing === "function" ? ing : { ...status, ingestable: ing };
@@ -136,6 +164,10 @@ const rowOf = (kind: string) =>
     (_, el) => el?.getAttribute("data-kind") === kind,
     { selector: "li" },
   );
+const ingestLoaded = () =>
+  waitFor(() =>
+    expect(screen.getByTestId("count-ingestable")).toHaveTextContent(/\d+ 件/),
+  );
 const ingestCalls = (requests: { url: string }[]) =>
   requests.filter((r) => r.url.includes("ingestable=true"));
 
@@ -154,7 +186,7 @@ afterEach(() => {
 describe("取り込めるものを読むとき", () => {
   it("AC-115 #805: 変化の合図を受けても、ingestable=true の状況の API は呼ばれない", async () => {
     const { requests } = await openNow();
-    await screen.findByText("取り込みは、ターミナルか対話で行います。");
+    await ingestLoaded();
     expect(ingestCalls(requests)).toHaveLength(1);
     await act(async () => {
       FakeEventSource.latest.send({
@@ -173,7 +205,7 @@ describe("取り込めるものを読むとき", () => {
   it("AC-116 #805: 60 秒ごとの読み直しでも、ingestable=true の状況の API は呼ばれない", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { requests } = await openNow();
-    await screen.findByText("取り込みは、ターミナルか対話で行います。");
+    await ingestLoaded();
     const before = requests.filter((r) => r.url === `${P}/cycle`).length;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(POLL_MS + 100);
@@ -186,7 +218,7 @@ describe("取り込めるものを読むとき", () => {
 
   it("AC-156 #805: 画面を開くと、ingestable=true の状況の API が 1 回呼ばれる", async () => {
     const { requests } = await openNow();
-    await screen.findByText("取り込みは、ターミナルか対話で行います。");
+    await ingestLoaded();
     expect(ingestCalls(requests)).toHaveLength(1);
   });
 
@@ -624,15 +656,6 @@ describe("取り込めるもの", () => {
       ).toBeInTheDocument();
     }
   });
-  it("AC-154 #805: 行に、取り込むコマンド（flywheel ingest と external_key）が出る", async () => {
-    await openNow({ ingestable: two });
-    const row = (await screen.findByText("取り込み元 2")).closest("li");
-    expect(
-      within(row as HTMLElement).getByText(
-        "flywheel ingest 'o/r#2' --workspace '/w/alpha'",
-      ),
-    ).toBeInTheDocument();
-  });
   it("AC-155 #805: parent_challenge_id がある行に、その課題の題名が出る", async () => {
     await openNow({ ingestable: two, ...withTitles });
     const row = (await screen.findByText("取り込み元 2")).closest("li");
@@ -650,26 +673,6 @@ describe("取り込めるもの", () => {
     });
     expect(await screen.findByText("一部が読めません")).toBeInTheDocument();
     expect(screen.getByText("取り込み元 1")).toBeInTheDocument();
-  });
-  it("AC-161 #805: 取り込めるものの区分に、「取り込みは、ターミナルか対話で行います。」が出る", async () => {
-    await openNow();
-    const block = screen
-      .getByRole("heading", { name: /^取り込めるもの/ })
-      .closest("section") as HTMLElement;
-    expect(
-      within(block).getByText("取り込みは、ターミナルか対話で行います。"),
-    ).toBeInTheDocument();
-  });
-  it("AC-162 #805: 取り込めるものの区分に、ボタンとチェックの欄は無い（「読み直す」を除く）", async () => {
-    await openNow({ ingestable: two });
-    const row = (await screen.findByText("取り込み元 1")).closest(
-      "section",
-    ) as HTMLElement;
-    const names = within(row)
-      .getAllByRole("button")
-      .map((b) => b.textContent);
-    expect(names).toEqual(["読み直す"]);
-    expect(row.querySelector("input")).toBeNull();
   });
 });
 
@@ -846,5 +849,406 @@ describe("何も無いとき", () => {
     expect(
       await screen.findByText("いま進められるものはありません。"),
     ).toBeInTheDocument();
+  });
+});
+
+// ---- Issue #1184（区切り S4d-2）。番号は親 #1176 の「受入基準」を上から数えたもの ----
+
+const child = (n: number, parent: number) => ({
+  external_key: `o/r#${parent}${n}`,
+  number: parent * 10 + n,
+  parent_external_key: `o/r#${parent}`,
+  title: `子 ${n}`,
+  url: `https://example.invalid/${parent}${n}`,
+});
+const checkOf = (title: string) =>
+  screen.getByRole("checkbox", { name: `取り込む: ${title}` });
+const ingestBtn = () => screen.getByTestId("ingest-button");
+const posts = (
+  requests: { method: string; url: string; body: string | null }[],
+  suffix: string,
+) => requests.filter((r) => r.method === "POST" && r.url === `${P}/${suffix}`);
+const apiError = (status: number, code: string, message: string) => () =>
+  new Response(JSON.stringify({ error: { code, message } }), { status });
+
+describe("画面: 取り込み（#1184）", () => {
+  const rows: Ingestable = {
+    error: null,
+    items: [
+      item(1, { children: [child(1, 1), child(2, 1)] }),
+      item(2),
+      item(3),
+    ],
+  };
+
+  it("AC-108 #1184: 取り込めるものの行に、チェックが出る", async () => {
+    await openNow({ ingestable: rows });
+    await screen.findByTestId("ingestable-list");
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+  });
+  it("AC-109 #1184: チェックが 0 件のとき、取り込みのボタンは押せない", async () => {
+    await openNow({ ingestable: rows });
+    await screen.findByTestId("ingestable-list");
+    expect(ingestBtn()).toBeDisabled();
+    expect(ingestBtn()).toHaveTextContent(
+      "選んだ 0 件を取り込んで、計画まで進める",
+    );
+  });
+  it("AC-110 #1184: チェックを 2 件付けると、ボタンの文が「選んだ 2 件を取り込んで、計画まで進める」になる", async () => {
+    await openNow({ ingestable: rows });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 2"));
+    fireEvent.click(checkOf("取り込み元 3"));
+    expect(ingestBtn()).toHaveTextContent(
+      "選んだ 2 件を取り込んで、計画まで進める",
+    );
+    expect(ingestBtn()).toBeEnabled();
+  });
+  it("AC-111 #1184: 子を 2 件持つ行を 1 つ選ぶと、脇に「課題 1 件・取り込み元の子として記録 2 件」が出る", async () => {
+    await openNow({ ingestable: rows });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 1"));
+    expect(screen.getByTestId("ingest-counts")).toHaveTextContent(
+      "課題 1 件・取り込み元の子として記録 2 件",
+    );
+  });
+  it("AC-111 #1184: 件数は、選んだ行の数と、選んだ行の子の数の合計（行を足すと増える）", async () => {
+    await openNow({ ingestable: rows });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 1"));
+    fireEvent.click(checkOf("取り込み元 2"));
+    expect(screen.getByTestId("ingest-counts")).toHaveTextContent(
+      "課題 2 件・取り込み元の子として記録 2 件",
+    );
+  });
+  it("AC-112 #1184: ボタンの脇に、費用の見込みと、タスクの案の数は出ない", async () => {
+    await openNow({ ingestable: rows });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 1"));
+    const side = document.querySelector(".now-ingest-actions") as HTMLElement;
+    expect(side.textContent).not.toMatch(/費用|見込み|\$|案/);
+  });
+  it("AC-112 #1184: ボタンの脇に、「計画が出来たら、承認を求めます。」の案内が出る", async () => {
+    await openNow({ ingestable: rows });
+    await screen.findByTestId("ingestable-list");
+    expect(screen.getByTestId("ingest-plan-guide")).toHaveTextContent(
+      "計画が出来たら、承認を求めます。",
+    );
+  });
+  it("AC-113 #1184: ボタンを押すと、取り込みの口へ、選んだものの指定を送る", async () => {
+    const { requests } = await openNow({
+      ingestable: rows,
+      ingestPost: {
+        cycle: { reason: "started", started: true },
+        ingested: [],
+      },
+    });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 2"));
+    fireEvent.click(checkOf("取り込み元 3"));
+    fireEvent.click(ingestBtn());
+    await waitFor(() => expect(posts(requests, "ingest")).toHaveLength(1));
+    expect(JSON.parse(posts(requests, "ingest")[0]?.body ?? "null")).toEqual({
+      items: ["o/r#2", "o/r#3"],
+    });
+  });
+  it("AC-114 #1184: 成立すると、作った課題へのリンクが出て、取り込めるものの一覧を読み直す", async () => {
+    const { requests } = await openNow({
+      ingestable: rows,
+      ingestPost: {
+        cycle: { reason: "started", started: true },
+        ingested: [
+          { challenge_id: "C-77", children: 0, external_key: "o/r#2" },
+        ],
+      },
+    });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 2"));
+    fireEvent.click(ingestBtn());
+    const done = await screen.findByTestId("ingest-done");
+    expect(
+      within(done)
+        .getByRole("link", { name: "取り込み元 2" })
+        .getAttribute("href"),
+    ).toBe("#/a/alpha/challenges/C-77");
+    await waitFor(() => expect(ingestCalls(requests)).toHaveLength(2));
+  });
+  it("#1184: 成立後のリンクの題名が引けないとき、課題の ID を単独で出さない", async () => {
+    await openNow({
+      ingestable: rows,
+      ingestPost: {
+        cycle: { reason: "started", started: true },
+        ingested: [
+          { challenge_id: "C-77", children: 0, external_key: "o/r#unknown" },
+        ],
+      },
+    });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 2"));
+    fireEvent.click(ingestBtn());
+    const done = await screen.findByTestId("ingest-done");
+    expect(
+      within(done).getByRole("link", { name: "課題（C-77）" }),
+    ).toBeTruthy();
+  });
+  it("AC-115 #1184: 取り込みの口が誤りを返すと、理由が出て、チェックは残る", async () => {
+    await openNow({
+      ingestable: rows,
+      ingestPost: apiError(
+        502,
+        "upstream_unavailable",
+        "上流を読めませんでした",
+      ),
+    });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 2"));
+    fireEvent.click(ingestBtn());
+    expect(await screen.findByTestId("ingest-error")).toHaveTextContent(
+      "上流を読めませんでした",
+    );
+    expect(checkOf("取り込み元 2")).toBeChecked();
+    expect(screen.queryByTestId("ingest-done")).toBeNull();
+  });
+  it("#1184: 取り込みの口が 403 のとき、再読み込みの案内が出る", async () => {
+    await openNow({
+      ingestable: rows,
+      ingestPost: apiError(403, "forbidden_origin", "拒否"),
+    });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 2"));
+    fireEvent.click(ingestBtn());
+    expect(await screen.findByTestId("ingest-error")).toHaveTextContent(
+      RELOAD_TEXT,
+    );
+  });
+  it("#1184: 送っている間は、ボタンを押せない（二度押しの防止）", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const slow = (async () => {
+      await gate;
+      return new Response(
+        JSON.stringify({
+          cycle: { reason: "started", started: true },
+          ingested: [],
+        }),
+      );
+    }) as unknown as FakeResponder;
+    const { requests } = await openNow({ ingestable: rows, ingestPost: slow });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 2"));
+    fireEvent.click(ingestBtn());
+    await waitFor(() => expect(ingestBtn()).toBeDisabled());
+    fireEvent.click(ingestBtn());
+    await act(async () => {
+      release();
+    });
+    expect(posts(requests, "ingest")).toHaveLength(1);
+  });
+});
+
+describe("画面: あなたを待っているものの内訳（#1184）", () => {
+  it("AC-172 #1184: あなたを待っているものの件数が、承認と回答に分かれて出る", async () => {
+    await openNow({
+      nh: {
+        challenges: [
+          ch("C-1", "awaiting_plan_approval"),
+          ch("C-2", "awaiting_completion_approval"),
+          ch("C-3", "awaiting_human"),
+        ],
+      },
+    });
+    expect(screen.getByTestId("count-waiting-split")).toHaveTextContent(
+      "承認 2 件・回答 1 件",
+    );
+  });
+  it("AC-97 #1184: 回答の行に、ボタンで答えられる問いの選択肢のボタンが出る", async () => {
+    await openNow({
+      nh: { challenges: [ch("C-3", "awaiting_human", "回答の題名")] },
+      questions: [
+        {
+          challenge_id: "C-3",
+          question: "どちらにしますか",
+          hold_id: "H-5",
+          check: "chk",
+          options: [
+            { id: "a", label: "案 A", description: "", button: true },
+            { id: "b", label: "案 B", description: "", button: false },
+          ],
+        },
+      ],
+    });
+    const row = rowOf("answer");
+    expect(within(row).getAllByTestId("hold-option-button")).toHaveLength(1);
+    expect(
+      within(row).getByTestId("hold-option-conversation"),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("画面: 知らせ（#1184）", () => {
+  const added: Partial<Notice> = {
+    kind: "task_added",
+    at: "2026-11-23T01:00:00Z",
+    challenge_id: "C-1",
+    challenge_title: "課題の題名",
+    added_count: 2,
+  };
+  const ended = (
+    reason: string,
+    at = "2026-11-23T02:00:00Z",
+  ): Partial<Notice> => ({
+    kind: "cycle_ended",
+    at,
+    cycle_id: "Y-1",
+    end_reason: reason,
+  });
+  // 対話の欄にも同じ知らせが出るので、「最近起きたこと」の枠の中だけを見る。
+  const box = async () => within(await screen.findByTestId("notices"));
+  const noticeTexts = () =>
+    within(screen.getByTestId("notices"))
+      .getAllByTestId("notice-item")
+      .map((li) => li.textContent ?? "");
+
+  it("AC-173 #1184: 知らせが 1 件以上あるとき、「最近起きたこと」の枠に、新しい順に出る", async () => {
+    await openNow({
+      notices: [
+        added,
+        { ...added, kind: "released", at: "2026-11-23T03:00:00Z" },
+        ended("settled"),
+      ],
+    });
+    const box = await screen.findByTestId("notices");
+    expect(
+      within(box).getByRole("heading", { name: "最近起きたこと" }),
+    ).toBeInTheDocument();
+    const t = noticeTexts();
+    expect(t[0]).toContain("反映先へ入りました");
+    expect(t[1]).toContain("サイクルが終わりました");
+    expect(t[2]).toContain("タスクを 2 件足しました");
+  });
+  it("AC-174 #1184: 知らせが 0 件のとき、「最近起きたこと」の枠は出ない", async () => {
+    await openNow({ notices: [] });
+    await ingestLoaded();
+    expect(screen.queryByTestId("notices")).toBeNull();
+    expect(screen.queryByText("最近起きたこと")).toBeNull();
+  });
+  it("AC-175 #1184: 「タスクを足した」の文に、課題の題名と件数が入り、リンク先は課題の詳細", async () => {
+    await openNow({ notices: [added] });
+    const li = (await (await box()).findByTestId("notice-item")) as HTMLElement;
+    expect(li).toHaveTextContent("「課題の題名」にタスクを 2 件足しました。");
+    expect(within(li).getByRole("link").getAttribute("href")).toBe(
+      "#/a/alpha/challenges/C-1",
+    );
+  });
+  it("AC-176 #1184: 「反映先へ入った」の文に、課題の題名が入り、リンク先は課題の詳細", async () => {
+    await openNow({ notices: [{ ...added, kind: "released" }] });
+    const li = (await (await box()).findByTestId("notice-item")) as HTMLElement;
+    expect(li).toHaveTextContent("「課題の題名」が反映先へ入りました。");
+    expect(within(li).getByRole("link").getAttribute("href")).toBe(
+      "#/a/alpha/challenges/C-1",
+    );
+  });
+  it("AC-177 #1184: 「サイクルが終わった」の文に、終わった理由の言葉が入り、リンク先はサイクルの画面", async () => {
+    await openNow({ notices: [ended("stopped")] });
+    const li = (await (await box()).findByTestId("notice-item")) as HTMLElement;
+    expect(li).toHaveTextContent("サイクルが終わりました（止めた）。");
+    expect(within(li).getByRole("link").getAttribute("href")).toBe(
+      "#/a/alpha/cycle",
+    );
+  });
+  it("AC-178 #1184: 終わった理由が費用の上限のとき、続け方の案内が付く", async () => {
+    await openNow({ notices: [ended("budget")] });
+    expect(await (await box()).findByTestId("notice-guide")).toHaveTextContent(
+      "「サイクルを回す」を押すと、続きから進みます。費用の上限は、宣言で変えます。",
+    );
+  });
+  it.each(["rate_limited", "stalled", "error", "interrupted"])(
+    "AC-179 #1184: 終わった理由が %s のとき、続け方の案内が付く",
+    async (reason) => {
+      await openNow({ notices: [ended(reason)] });
+      expect(
+        (await (await box()).findByTestId("notice-guide")).textContent,
+      ).not.toBe("");
+    },
+  );
+  it.each(["settled", "stopped"])(
+    "AC-180 #1184: 終わった理由が %s のとき、続け方の案内は付かない",
+    async (reason) => {
+      await openNow({ notices: [ended(reason)] });
+      await (await box()).findByTestId("notice-item");
+      expect(
+        within(screen.getByTestId("notices")).queryByTestId("notice-guide"),
+      ).toBeNull();
+    },
+  );
+  it("AC-181 #1184: 「スーパーバイザーがあなたへ上げた」のリンク先は、タスクの詳細", async () => {
+    await openNow({
+      notices: [
+        {
+          kind: "supervisor_escalated",
+          at: "2026-11-23T01:00:00Z",
+          challenge_id: "C-1",
+          challenge_title: "課題の題名",
+          task_id: "T-4",
+          task_title: "タスクの題名",
+        },
+      ],
+    });
+    const li = (await (await box()).findByTestId("notice-item")) as HTMLElement;
+    expect(li).toHaveTextContent("スーパーバイザーがあなたへ上げました");
+    expect(within(li).getByRole("link").getAttribute("href")).toBe(
+      "#/a/alpha/challenges/C-1/tasks/T-4",
+    );
+  });
+  it("タスクに結び付かない保留を上げた知らせは、タスクの題名を出さず、課題の詳細へ移る", async () => {
+    await openNow({
+      notices: [
+        {
+          kind: "supervisor_escalated",
+          at: "2026-11-23T01:00:00Z",
+          challenge_id: "C-1",
+          challenge_title: "課題の題名",
+          task_id: null,
+          task_title: null,
+        },
+      ],
+    });
+    const li = (await (await box()).findByTestId("notice-item")) as HTMLElement;
+    expect(li).toHaveTextContent(
+      "スーパーバイザーがあなたへ上げました（課題の題名）。",
+    );
+    expect(li).not.toHaveTextContent("題名を読めないタスク");
+    expect(within(li).getByRole("link").getAttribute("href")).toBe(
+      "#/a/alpha/challenges/C-1",
+    );
+  });
+  it("AC-187 #1184: 変化の知らせを受けると、知らせの口を読み直す", async () => {
+    const { requests } = await openNow({ notices: [added] });
+    await box();
+    const count = () => requests.filter((r) => r.url === `${P}/notices`).length;
+    const before = count();
+    await act(async () => {
+      FakeEventSource.latest.send({
+        type: "workspace_changed",
+        workspace: "alpha",
+      });
+    });
+    await waitFor(() => expect(count()).toBeGreaterThan(before));
+  });
+  it("#1184: 知らせの口が失敗しても、画面は残り、枠だけが出ない", async () => {
+    await openNow({
+      noticesResponder: apiError(500, "internal_error", "失敗"),
+    });
+    await ingestLoaded();
+    expect(screen.queryByTestId("notices")).toBeNull();
+    expect(screen.getByTestId("count-waiting")).toBeInTheDocument();
+  });
+  it("#1184: 「タスクを足した」に出どころが付く", async () => {
+    await openNow({ notices: [{ ...added, origin: "followup" }] });
+    expect(await (await box()).findByTestId("notice-item")).toHaveTextContent(
+      "件足しました（フォローアップをタスクに上げた）。",
+    );
   });
 });

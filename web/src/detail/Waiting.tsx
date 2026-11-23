@@ -3,6 +3,13 @@ import { HOLD_KIND_PARENT_DIRECT, PARENT_DIRECT_HOLD_NOTE } from "../labels.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { ApprovalGuide } from "../parts/ApprovalGuide.tsx";
 import { ClampedText } from "../parts/ClampedText.tsx";
+import {
+  HoldAnswerNotices,
+  HoldOptions,
+  SupervisorNote,
+  hasOptions,
+  useHoldAnswer,
+} from "../parts/HoldOptions.tsx";
 import { hrefOf } from "../shell/route.ts";
 import {
   NO_WAITING_TEXT,
@@ -22,12 +29,15 @@ export function Waiting({
   show,
   agentName,
   workspacePath,
+  reload,
 }: {
   show: ShowCardResponse;
   agentName: string;
   workspacePath: string;
+  reload: () => void;
 }) {
   const id = show.challenge.id;
+  const answerState = useHoldAnswer(agentName, id, reload);
   const actions = show.card.next_human_actions;
   const openHolds = show.holds.filter(
     (h) => h.answer === null && h.closed_at === null,
@@ -36,6 +46,11 @@ export function Waiting({
   const parentDirect = openHolds.some(
     (h) => h.kind === HOLD_KIND_PARENT_DIRECT,
   );
+  // 開いている問いがすべてボタンで答えられるなら、ターミナルの回答の案内は出さない（タスクの詳細と同じ）。
+  const guideActions =
+    questions.length > 0 && questions.every((h) => hasOptions(h))
+      ? actions.filter((a) => a !== "answer_question")
+      : actions;
   const taskTitle = (taskId: string): string =>
     show.tasks.find((t) => t.id === taskId)?.title ??
     show.tree.tasks.find((t) => t.id === taskId)?.title ??
@@ -90,6 +105,10 @@ export function Waiting({
                     data-testid="hold-question"
                   >
                     <p data-testid="hold-id">保留: {h.hold_id}</p>
+                    <SupervisorNote
+                      findings={h.supervisor_findings}
+                      recommendation={h.supervisor_recommendation}
+                    />
                     <ClampedText resetKey={h.question}>
                       <Markdown text={h.question} />
                     </ClampedText>
@@ -107,6 +126,15 @@ export function Waiting({
                           {taskTitle(h.task_id)}
                         </a>
                       </p>
+                    ) : (
+                      <p data-testid="hold-scope">課題全体を止めています</p>
+                    )}
+                    {hasOptions(h) ? (
+                      <HoldOptions
+                        key={`${h.hold_id}:${h.check ?? ""}`}
+                        hold={h}
+                        state={answerState}
+                      />
                     ) : null}
                   </div>
                 ))
@@ -114,11 +142,14 @@ export function Waiting({
           </li>
         ))}
       </ul>
+      <HoldAnswerNotices state={answerState} />
       <ApprovalGuide
         challengeId={id}
-        actions={actions}
+        actions={guideActions}
         workspacePath={workspacePath}
-        openHoldIds={questions.map((h) => h.hold_id)}
+        openHoldIds={questions
+          .filter((h) => !hasOptions(h))
+          .map((h) => h.hold_id)}
         needsHold={openHolds.length >= 2}
       />
     </section>

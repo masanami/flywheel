@@ -88,6 +88,12 @@ func sameJSON(t *testing.T, got, want string) {
 	if err := json.Unmarshal([]byte(want), &w); err != nil {
 		t.Fatalf("cli output is not JSON: %v (%q)", err, want)
 	}
+	// needs_human.holds（保留の照合の値・選択肢ごとの button）は画面の口だけの値で、CLI の --json には出さない。
+	if gm, ok := g.(map[string]any); ok {
+		if nh, ok := gm["needs_human"].(map[string]any); ok {
+			delete(nh, "holds")
+		}
+	}
 	if !reflect.DeepEqual(g, w) {
 		t.Errorf("api body != cli output\napi: %s\ncli: %s", got, want)
 	}

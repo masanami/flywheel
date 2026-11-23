@@ -1,6 +1,7 @@
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -9,9 +10,11 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
 import type {
+  Approval,
   Hold,
   ShowCardResponse,
   ShowRun,
+  SupervisorAction,
   Task,
   TreeTask,
 } from "../api/types.gen.ts";
@@ -626,7 +629,7 @@ it("#810: 前提・この後のリンクの横に、そのタスクの表示の�
 // 誰が答えたかは、経路と本人確認の方式の組で決まる（対話で受けた回答は、経路が cli・方式が relayed で記録される）。
 it.each([
   ["cli", "relayed", "あなた（対話）"],
-  ["ui", "none", "あなた（画面）"],
+  ["ui", "none", "あなた（画面のボタン）"],
   ["cli", "tty_confirm", "あなた（ターミナル）"],
   ["invoker", "none", "invoker"],
 ])(
@@ -889,4 +892,526 @@ it("AC-126 S4c-3: 開いている保留が 2 つの課題のタスクの詳細�
   const w = within(within(root).getByTestId("task-waiting"));
   expect(w.getByText(/flywheel answer C-1 .*--hold H-7 /)).toBeTruthy();
   expect(w.queryByText(/--hold H-8/)).toBeNull();
+});
+
+// 画面のボタンで選ぶだけの回答（区切り S4d-2 の T5）。
+const opts2 = [
+  { id: "yes", label: "作り直す", description: "表を消して作る", button: true },
+  { id: "no", label: "そのまま使う", description: "", button: true },
+  { id: "add", label: "足す", description: "上限が上がる", button: false },
+];
+const answerUrl = (id: string) =>
+  `POST ${BASE}/challenges/C-1/holds/${id}/answer`;
+const okAnswer = (h: Hold): Response =>
+  new Response(
+    JSON.stringify({ cycle: { started: true, reason: "" }, hold: h }),
+    { status: 200 },
+  );
+
+it("AC-95・AC-98 #1182: 待っている問いに、ボタンで選べる選択肢の数だけボタンが出て、選べないものは案内が出る", async () => {
+  const h = hold({ hold_id: "H-50", options: opts2, check: "k1" });
+  const { root } = await open(
+    show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
+  );
+  const waiting = within(root).getByTestId("task-waiting");
+  expect(within(waiting).getAllByTestId("hold-option-button")).toHaveLength(2);
+  const item = waiting.querySelector('[data-option="add"]') as HTMLElement;
+  expect(within(item).queryByRole("button")).toBeNull();
+  expect(item.textContent).toContain("足す");
+  expect(item.textContent).toContain("上限が上がる");
+  expect(item.textContent).toContain("対話で伝えてください");
+});
+
+it("AC-99 #1182: 選択肢を持たない問いには、ボタンが出ず、いまの案内（ターミナルのコマンド）が出る", async () => {
+  const { root } = await open(
+    show({
+      holds: [hold({ hold_id: "H-51" })],
+      nodes: [N("T-2", { phase: "waiting" })],
+    }),
+  );
+  const waiting = within(root).getByTestId("task-waiting");
+  expect(within(waiting).queryByTestId("hold-option-button")).toBeNull();
+  expect(within(waiting).getByLabelText("承認方法の案内")).toBeTruthy();
+});
+
+it("AC-100・AC-101 #1182: ボタンを押すと確かめが出て、確かめる前には送らず、確かめた後に保留の ID・選択肢・照合の値を送る", async () => {
+  const h = hold({ hold_id: "H-52", options: opts2, check: "k52" });
+  const { root, requests } = await open(
+    show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
+    { extra: { [answerUrl("H-52")]: () => okAnswer(h) } },
+  );
+  fireEvent.click(
+    within(root).getAllByTestId("hold-option-button")[1] as HTMLElement,
+  );
+  const confirm = within(root).getByTestId("hold-confirm");
+  expect(confirm.textContent).toContain("そのまま使う");
+  expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
+  fireEvent.click(within(confirm).getByTestId("hold-confirm-send"));
+  await waitFor(() =>
+    expect(requests.filter((r) => r.method === "POST")).toHaveLength(1),
+  );
+  const post = requests.find((r) => r.method === "POST");
+  expect(post?.url).toBe(`${BASE}/challenges/C-1/holds/H-52/answer`);
+  expect(JSON.parse(post?.body ?? "{}")).toEqual({
+    option: "no",
+    check: "k52",
+  });
+});
+
+it("AC-100 #1182: 確かめをやめると、送らない", async () => {
+  const h = hold({ hold_id: "H-53", options: opts2, check: "k" });
+  const { root, requests } = await open(
+    show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
+  );
+  fireEvent.click(
+    within(root).getAllByTestId("hold-option-button")[0] as HTMLElement,
+  );
+  fireEvent.click(within(root).getByTestId("hold-confirm-cancel"));
+  expect(within(root).queryByTestId("hold-confirm")).toBeNull();
+  expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
+});
+
+it("AC-102 #1182: 確かめて送った直後から、応答が返るまで、選択肢のボタンは押せない", async () => {
+  const h = hold({ hold_id: "H-54", options: opts2, check: "k" });
+  const { root, requests } = await open(
+    show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
+    { extra: { [answerUrl("H-54")]: () => okAnswer(h) } },
+  );
+  const first = () =>
+    within(root).getAllByTestId("hold-option-button")[0] as HTMLButtonElement;
+  fireEvent.click(first());
+  fireEvent.click(within(root).getByTestId("hold-confirm-send"));
+  // 押した直後（応答が処理される前）に、すでに押せない
+  expect(first().disabled).toBe(true);
+  await waitFor(() => expect(first().disabled).toBe(false));
+  expect(requests.filter((r) => r.method === "POST")).toHaveLength(1);
+});
+
+it("AC-103 #1182: 409 で断られたら、問いが変わった旨を出し、問いを読み直す", async () => {
+  const h = hold({ hold_id: "H-55", options: opts2, check: "old" });
+  const { root, requests } = await open(
+    show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
+    {
+      extra: {
+        [answerUrl("H-55")]: () =>
+          new Response(
+            JSON.stringify({
+              error: { code: "conflict", message: "変わった" },
+            }),
+            { status: 409 },
+          ),
+      },
+    },
+  );
+  const gets = () =>
+    requests.filter(
+      (r) => r.method === "GET" && r.url === `${BASE}/challenges/C-1`,
+    ).length;
+  const before = gets();
+  fireEvent.click(
+    within(root).getAllByTestId("hold-option-button")[0] as HTMLElement,
+  );
+  fireEvent.click(within(root).getByTestId("hold-confirm-send"));
+  expect(
+    (await within(root).findByTestId("hold-changed")).textContent,
+  ).toContain("問いか選択肢が変わっていました");
+  await waitFor(() => expect(gets()).toBeGreaterThan(before));
+});
+
+it("AC-147・AC-148 #1182: スーパーバイザーが上げた問いには、調べたことと推奨が出る。関わっていない問いには出ない", async () => {
+  const sv = hold({
+    hold_id: "H-56",
+    question: "SV の問い",
+    supervisor_findings: "ログを調べた",
+    supervisor_recommendation: "作り直す",
+    options: opts2,
+    check: "k",
+  });
+  const plain = hold({
+    hold_id: "H-57",
+    question: "ふつうの問い",
+    task_id: "T-2",
+  });
+  const { root } = await open(
+    show({ holds: [sv, plain], nodes: [N("T-2", { phase: "waiting" })] }),
+  );
+  const notes = within(root).getAllByTestId("hold-supervisor");
+  expect(notes).toHaveLength(1);
+  expect(notes[0]?.textContent).toContain("スーパーバイザーが調べたこと");
+  expect(notes[0]?.textContent).toContain("ログを調べた");
+  expect(notes[0]?.textContent).toContain("推奨");
+});
+
+it("AC-95 #1182: すべての問いがボタンで答えられるとき、ターミナルの回答の案内は出ない", async () => {
+  const h = hold({ hold_id: "H-70", options: opts2, check: "k" });
+  const { root } = await open(
+    show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
+  );
+  expect(within(root).queryByLabelText("承認方法の案内")).toBeNull();
+});
+
+it("AC-103 #1182: 409 以外の断りは、その文を出す", async () => {
+  const h = hold({ hold_id: "H-71", options: opts2, check: "k" });
+  const { root } = await open(
+    show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] }),
+    {
+      extra: {
+        [answerUrl("H-71")]: () =>
+          new Response(
+            JSON.stringify({
+              error: { code: "verification_rejected", message: "断られた" },
+            }),
+            { status: 403 },
+          ),
+      },
+    },
+  );
+  fireEvent.click(
+    within(root).getAllByTestId("hold-option-button")[0] as HTMLElement,
+  );
+  fireEvent.click(within(root).getByTestId("hold-confirm-send"));
+  expect(
+    (await within(root).findByTestId("hold-answer-error")).textContent,
+  ).toContain("断られた");
+});
+
+// 意思決定の記録・足されたタスクの印（区切り S4d-2 の T8）。
+const approval = (p: Partial<Approval> = {}): Approval => ({
+  actor: "owner",
+  channel: "ui",
+  decided_at: "2026-11-01T01:00:00Z",
+  decision: "approved",
+  id: "AP-1",
+  kind: "plan",
+  merge_in_verified_head: null,
+  operation_id: null,
+  reason: null,
+  rejected_fields: null,
+  relay_quote: null,
+  relay_session: null,
+  superseded_at: null,
+  superseded_by: null,
+  superseded_reason: null,
+  target_version: 3,
+  verification: "none",
+  ...p,
+});
+
+const sv = (p: Partial<SupervisorAction> = {}): SupervisorAction => ({
+  basis: [],
+  challenge_id: "C-1",
+  conditions: [],
+  created_at: "2026-11-01T03:00:00Z",
+  cycle_id: "Y-1",
+  findings: "ログを調べた",
+  hand: "retry",
+  hold_id: null,
+  id: 1,
+  note: "",
+  questions: [],
+  reject_reason: null,
+  result: "executed",
+  run_id: null,
+  stop_kind: "",
+  task_id: "T-2",
+  ...p,
+});
+
+const withExtra = (
+  o: Over,
+  e: Partial<ShowCardResponse>,
+): ShowCardResponse => ({
+  ...show(o),
+  ...e,
+});
+const decisionRows = (root: HTMLElement) =>
+  within(root).queryAllByTestId("decision-row");
+
+it("AC-149 #1185: 意思決定の記録に、計画の承認の行が、承認した人（経路の言葉つき）と時刻つきで出る", async () => {
+  const { root } = await open(withExtra({}, { approvals: [approval()] }));
+  const rows = decisionRows(root);
+  expect(rows).toHaveLength(1);
+  expect(
+    within(rows[0] as HTMLElement).getByTestId("decision-who").textContent,
+  ).toBe("あなた（画面）");
+  expect(rows[0]?.textContent).toContain("計画を承認した");
+  expect(rows[0]?.querySelector("time")?.getAttribute("datetime")).toBe(
+    "2026-11-01T01:00:00Z",
+  );
+});
+
+it("AC-149 #1185: 取り替えられた承認・差し戻しは出ない", async () => {
+  const { root } = await open(
+    withExtra(
+      {},
+      {
+        approvals: [
+          approval({ id: "AP-1", superseded_at: "2026-11-01T02:00:00Z" }),
+          approval({ id: "AP-2", decision: "rejected" }),
+        ],
+      },
+    ),
+  );
+  expect(within(root).queryByTestId("task-decisions")).toBeNull();
+});
+
+it("AC-150 #1185: 回答の行が、答えた人と、選んだ選択肢か答えの文つきで出る", async () => {
+  const byOption = hold({
+    hold_id: "H-80",
+    options: opts2,
+    answer: "yes",
+    answer_option: "yes",
+    answered_at: "2026-11-01T02:00:00Z",
+    answered_channel: "ui",
+  });
+  const byText = hold({
+    hold_id: "H-81",
+    answer: "自由な答え",
+    answered_at: "2026-11-01T02:30:00Z",
+    answered_channel: "cli",
+    answered_verification: "tty_confirm",
+  });
+  const { root } = await open(withExtra({}, { holds: [byOption, byText] }));
+  const rows = decisionRows(root);
+  expect(rows).toHaveLength(2);
+  expect(rows[0]?.textContent).toContain("作り直す");
+  expect(rows[0]?.textContent).toContain("あなた（画面のボタン）");
+  expect(rows[1]?.textContent).toContain("自由な答え");
+  expect(rows[1]?.textContent).toContain("あなた（ターミナル）");
+});
+
+it("AC-151 #1185: スーパーバイザーの手の行が、手の種類・調べたこと・結果つきで出る", async () => {
+  const { root } = await open(
+    withExtra({}, { supervisor_actions: [sv({ note: "急ぎ" })] }),
+  );
+  const row = decisionRows(root)[0] as HTMLElement;
+  expect(within(row).getByTestId("decision-who").textContent).toBe(
+    "スーパーバイザー",
+  );
+  expect(row.textContent).toContain("もう一度実行する");
+  expect(row.textContent).toContain("ログを調べた");
+  expect(row.textContent).toContain("急ぎ");
+  expect(row.textContent).toContain("成った");
+});
+
+it("AC-152 #1185: 断られた手の行に、断られた理由が出る", async () => {
+  const { root } = await open(
+    withExtra(
+      {},
+      {
+        supervisor_actions: [
+          sv({ result: "rejected", reject_reason: "owner_answered" }),
+        ],
+      },
+    ),
+  );
+  const row = decisionRows(root)[0] as HTMLElement;
+  expect(row.textContent).toContain("断られた");
+  expect(row.textContent).toContain("あなたが先に回答していた");
+});
+
+it("AC-153 #1185: 完了の検証の行が、結果と理由つきで出る", async () => {
+  const t = T("T-2", {
+    verification: {
+      at: "2026-11-01T04:00:00Z",
+      reason: "試験が通った",
+      verdict: "met",
+    },
+  });
+  const { root } = await open(show({ tasks: [t] }));
+  const row = decisionRows(root)[0] as HTMLElement;
+  expect(row.textContent).toContain("満たした");
+  expect(within(row).getByTestId("decision-reason").textContent).toContain(
+    "試験が通った",
+  );
+  expect(within(row).getByTestId("decision-who").textContent).toContain(
+    "完了を検証する判断点",
+  );
+});
+
+it("AC-154 #1185: 意思決定の記録の行は、古い順に並ぶ", async () => {
+  const t = T("T-2", {
+    verification: { at: "2026-11-01T04:00:00Z", reason: "ok", verdict: "met" },
+  });
+  const { root } = await open(
+    withExtra(
+      { tasks: [t] },
+      {
+        // 配列の並びは新しい順に入れても、画面は古い順
+        supervisor_actions: [sv({ created_at: "2026-11-01T03:00:00Z" })],
+        approvals: [approval({ decided_at: "2026-11-01T01:00:00Z" })],
+        holds: [
+          hold({
+            hold_id: "H-82",
+            answer: "答え",
+            answered_at: "2026-11-01T02:00:00Z",
+            answered_channel: "ui",
+          }),
+        ],
+      },
+    ),
+  );
+  const whats = decisionRows(root).map(
+    (r) => within(r).getByTestId("decision-what").textContent ?? "",
+  );
+  expect(whats[0]).toContain("計画を承認した");
+  expect(whats[1]).toContain("問いに答えた");
+  expect(whats[2]).toContain("もう一度実行する");
+  expect(whats[3]).toContain("完了条件を確かめた");
+});
+
+it("AC-155 #1185: ほかのタスクの回答と、ほかのタスクへのスーパーバイザーの手は出ない", async () => {
+  const { root } = await open(
+    withExtra(
+      { tasks: [T("T-2"), T("T-3")], nodes: [N("T-2"), N("T-3")] },
+      {
+        holds: [
+          hold({
+            hold_id: "H-83",
+            task_id: "T-3",
+            answer: "他の答え",
+            answered_channel: "ui",
+          }),
+        ],
+        supervisor_actions: [sv({ task_id: "T-3", findings: "他の調査" })],
+      },
+    ),
+  );
+  expect(within(root).queryByTestId("task-decisions")).toBeNull();
+});
+
+it("AC-156 #1185: 同じ課題の 2 つのタスクの詳細の、どちらにも計画の承認の行が出る", async () => {
+  const detail = withExtra(
+    { tasks: [T("T-2"), T("T-3")], nodes: [N("T-2"), N("T-3")] },
+    { approvals: [approval()] },
+  );
+  const a = await open(detail);
+  expect(decisionRows(a.root)[0]?.textContent).toContain("計画を承認した");
+  cleanup();
+  const b = await open(detail, { hash: "#/a/alpha/challenges/C-1/tasks/T-3" });
+  expect(decisionRows(b.root)[0]?.textContent).toContain("計画を承認した");
+});
+
+it("AC-157 #1185: 足されたタスクの意思決定の記録に、足された経緯の行が出る", async () => {
+  const t = T("T-2", {
+    added: {
+      added_at: "2026-11-01T05:00:00Z",
+      followup_id: null,
+      origin: "expand",
+      origin_task_id: "T-1",
+    },
+  });
+  const { root } = await open(
+    show({ tasks: [t, T("T-1")], nodes: [N("T-2"), N("T-1")] }),
+  );
+  expect(decisionRows(root)[0]?.textContent).toContain("後から足されたタスク");
+});
+
+it("AC-158 #1185: 出す出来事が無いタスクでは、意思決定の記録の節は出ない", async () => {
+  const { root } = await open(show());
+  expect(within(root).queryByTestId("task-decisions")).toBeNull();
+});
+
+const addedTask = (p: Partial<NonNullable<Task["added"]>> = {}) =>
+  T("T-2", {
+    added: {
+      added_at: "2026-11-01T05:00:00Z",
+      followup_id: null,
+      origin: "expand",
+      origin_task_id: "T-1",
+      ...p,
+    },
+  });
+
+it("AC-159 #1185: 足されたタスクの詳細に、「後から足したタスク」の印と、足した時刻・出どころが出る", async () => {
+  const { root } = await open(
+    show({ tasks: [addedTask(), T("T-1")], nodes: [N("T-2"), N("T-1")] }),
+  );
+  const mark = within(root).getByTestId("task-added");
+  expect(within(mark).getByTestId("task-added-mark").textContent).toBe(
+    "後から足したタスク",
+  );
+  expect(
+    within(mark).getByTestId("task-added-at").getAttribute("datetime"),
+  ).toBe("2026-11-01T05:00:00Z");
+  expect(within(mark).getByTestId("task-added-origin").textContent).toContain(
+    "完了の検証",
+  );
+});
+
+it("AC-160 #1185: 出どころがフォローアップの、足されたタスクでは、フォローアップの一覧へのリンクが出る。スーパーバイザーのものはその旨", async () => {
+  const t = addedTask({
+    origin: "followup",
+    followup_id: "F-1",
+    origin_task_id: null,
+  });
+  const f = {
+    challenge_id: "C-1",
+    created_at: "2026-11-01T00:00:00Z",
+    detail: "",
+    id: "F-1",
+    note: null,
+    promoted_challenge_id: null,
+    promoted_task_id: null,
+    reason: null,
+    source: "supervisor",
+    status: "open",
+    title: "続き",
+    updated_at: "2026-11-01T00:00:00Z",
+  };
+  const { root } = await open(withExtra({ tasks: [t] }, { followups: [f] }));
+  const link = within(root).getByTestId("task-added-followups-link");
+  expect(link.getAttribute("href")).toBe("#/a/alpha/followups");
+  expect(within(root).getByTestId("task-added-origin").textContent).toContain(
+    "スーパーバイザー",
+  );
+  expect(within(root).queryByTestId("task-added-origin-link")).toBeNull();
+});
+
+it("AC-161 #1185: 出どころがタスクの、足されたタスクでは、そのタスクの詳細へのリンクが出る", async () => {
+  const { root } = await open(
+    show({ tasks: [addedTask(), T("T-1")], nodes: [N("T-2"), N("T-1")] }),
+  );
+  const link = within(root).getByTestId("task-added-origin-link");
+  expect(link.getAttribute("href")).toBe("#/a/alpha/challenges/C-1/tasks/T-1");
+  expect(within(root).queryByTestId("task-added-followups-link")).toBeNull();
+});
+
+it("AC-162 #1185: 足されていないタスクの詳細に、「後から足したタスク」の印は出ない", async () => {
+  const { root } = await open(show());
+  expect(within(root).queryByTestId("task-added")).toBeNull();
+});
+
+it("#1185: 最後の開いている保留が 409 の後の読み直しで消えても、問いが変わった旨は残る", async () => {
+  const h = hold({ hold_id: "H-90", options: opts2, check: "old" });
+  const waiting = show({ holds: [h], nodes: [N("T-2", { phase: "waiting" })] });
+  const closed = show({
+    holds: [{ ...h, answer: "他で答えた", closed_at: "2026-11-01T06:00:00Z" }],
+    nodes: [N("T-2", { phase: "running" })],
+  });
+  let refused = false;
+  const { root } = await open(waiting, {
+    extra: {
+      [answerUrl("H-90")]: () => {
+        refused = true;
+        return new Response(
+          JSON.stringify({ error: { code: "conflict", message: "変わった" } }),
+          { status: 409 },
+        );
+      },
+      // 断られた後の読み直しからは、保留が消えた詳細を返す
+      [`${BASE}/challenges/C-1`]: () =>
+        new Response(JSON.stringify(refused ? closed : waiting)),
+    },
+  });
+  fireEvent.click(
+    within(root).getAllByTestId("hold-option-button")[0] as HTMLElement,
+  );
+  fireEvent.click(within(root).getByTestId("hold-confirm-send"));
+  await waitFor(() =>
+    expect(within(root).queryByTestId("task-waiting")).toBeNull(),
+  );
+  expect(within(root).getByTestId("hold-changed").textContent).toContain(
+    "問いか選択肢が変わっていました",
+  );
 });

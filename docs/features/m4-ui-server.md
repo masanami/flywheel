@@ -519,6 +519,7 @@ S1 の UI は旧 board の画面を移植した 4 つのタブ（ボード・人
 | `invalid_transition`・`terminal_state`・`conflict`・`locked` | 409 |
 | `verification_rejected`・`confirmation_mismatch` | 403 |
 | `store_too_new`・`store_busy`・`store_error` | 503 |
+| `upstream_unavailable` | 502 |
 | `config_invalid` | 500 |
 | `internal_error` とその他 | 500 |
 

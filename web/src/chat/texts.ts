@@ -18,3 +18,6 @@ export const CHAT_STATE_TEXTS: Record<string, string> = {
 
 // 費用は小数 2 桁（$0.42）。
 export const chatCost = (n: number): string => `$${n.toFixed(2)}`;
+
+// 会話が無いときに、欄へ出す知らせの上限。
+export const CHAT_NOTICE_LIMIT = 3;

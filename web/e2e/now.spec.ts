@@ -45,9 +45,7 @@ test("AC-157 #805: 偽のデータで「読み直す」を押すと「読んで�
   await expect(page.getByTestId("ingestable-list")).toBeVisible();
   await page.getByRole("button", { name: "読み直す" }).click();
   await expect(page.getByTestId("ingestable-list")).toBeVisible();
-  await expect(
-    page.getByText("取り込みは、ターミナルか対話で行います。"),
-  ).toBeVisible();
+  await expect(page.getByTestId("ingest-button")).toBeDisabled();
 });
 
 test("AC-125 #805: 偽のデータで、計画の承認の行のリンクを押すと計画の承認の画面へ移る", async ({
@@ -70,4 +68,30 @@ test("AC-144 #805: 偽のデータで、承認の種類の印は data-kind-group
   const answer = page.locator('[data-kind="answer"] .now-kind').first();
   await expect(answer).toBeVisible();
   await expect(answer).not.toHaveAttribute("data-kind-group", /.*/);
+});
+
+test("AC-109・AC-110・AC-114 #1184: 偽のデータで、チェックを付けると取り込みのボタンが押せて、取り込むと課題のリンクが出る（幅 360px で横にはみ出さない）", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto("/#/a/alpha/now");
+  await expect(page.getByTestId("ingestable-list")).toBeVisible();
+  await expect(page.getByTestId("ingest-button")).toBeDisabled();
+  await page
+    .getByTestId("ingestable-list")
+    .getByRole("checkbox")
+    .first()
+    .check();
+  await expect(page.getByTestId("ingest-button")).toBeEnabled();
+  await expect(page.getByTestId("ingest-button")).toContainText(
+    "選んだ 1 件を取り込んで、計画まで進める",
+  );
+  await page.getByTestId("ingest-button").click();
+  await expect(page.getByTestId("ingest-done")).toBeVisible();
+  const overflow = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
 });

@@ -143,6 +143,10 @@ type Hold struct {
 	// Reissued は、回答の処理（ExecuteAnswer）が回答を成立させず、問いを出し直したことを表す（足す依頼の保留で、計算し直した額が選択肢 add の説明の額と違った）。
 	// 真のとき、保留は開いたままで、Question・Options は新しい額に書き換わっている。保存する値ではない。
 	Reissued bool
+	// Check は保留の照合の値（問いの文と選択肢から作る。保存しない）。OptionButtons は Options と同じ並びの、選択肢ごとの「画面のボタンで選べるか」
+	// （保留の理由と選択肢の識別だけで決める）。どちらも読み出した保留にだけ入る。
+	Check         string
+	OptionButtons []bool
 }
 
 // ScopeLabel は止める範囲の表示の語（task か challenge）。
@@ -488,7 +492,7 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id, scope, question, from_status, raised_at, answer, answered_at, answered_by, run_id,
 		        answered_channel, answered_verification, relay_session, relay_quote, closed_at, kind, replan, task_id, options, answer_option, option_required,
-		        stop_kind, supervisor_state, supervisor_findings, supervisor_recommendation
+		        stop_kind, supervisor_state, supervisor_findings, supervisor_recommendation, reason
 		 FROM hold WHERE challenge_id = ? ORDER BY id ASC`, challengeID)
 	if err != nil {
 		return nil, err
@@ -511,11 +515,12 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			optionRequired                    int
 			stopKind, supState                sql.NullString
 			supFindings, supRecommendation    sql.NullString
+			reason                            sql.NullString
 			h                                 Hold
 			rowID                             int64
 			scope                             sql.NullString
 		)
-		if err := rows.Scan(&rowID, &scope, &h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind, &replan, &taskID, &optionsJSON, &answerOption, &optionRequired, &stopKind, &supState, &supFindings, &supRecommendation); err != nil {
+		if err := rows.Scan(&rowID, &scope, &h.Question, &fromStatus, &raisedAtStr, &answer, &answeredAtStr, &answeredBy, &runID, &ansChannel, &ansVerif, &relSess, &relQuote, &closedAtStr, &kind, &replan, &taskID, &optionsJSON, &answerOption, &optionRequired, &stopKind, &supState, &supFindings, &supRecommendation, &reason); err != nil {
 			return nil, err
 		}
 		h.HoldID = formatHoldID(rowID)
@@ -532,6 +537,8 @@ func loadHolds(ctx context.Context, tx *sql.Tx, challengeID int64) ([]Hold, erro
 			h.AnswerOption = &v
 		}
 		h.OptionRequired = optionRequired == 1
+		h.Check = holdCheckValue(h.Question, h.Options, h.OptionRequired)
+		h.OptionButtons = holdOptionButtons(holdReason(reason.String), h.Options)
 		h.StopKind = StopKind(stopKind.String)
 		h.SupervisorState = SupervisorState(supState.String)
 		h.SupervisorFindings = supFindings.String

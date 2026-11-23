@@ -8,7 +8,10 @@ import (
 	"testing"
 )
 
-// S4b-1: 保留へ選択肢で答える口（画面のボタンの経路）は、S4d-2 が足すまで、サーバーの経路の一覧に無い。
+// 保留へ選択肢で答える口（画面のボタンの経路）は、S4d-2 が足した 1 つだけ（holdAnswerRoute）。ほかの経路は、回答に見える名前を持たない。
+// holdAnswerRoute は、画面のボタンで選ぶだけの回答を受ける、唯一の経路。
+const holdAnswerRoute = "/api/v1/workspaces/{name}/challenges/{id}/holds/{hold}/answer"
+
 func TestRoutesHaveNoWayToAnswerHoldByOption(t *testing.T) {
 	src, err := os.ReadFile("server.go")
 	if err != nil {
@@ -18,17 +21,25 @@ func TestRoutesHaveNoWayToAnswerHoldByOption(t *testing.T) {
 	if len(routes) == 0 {
 		t.Fatal("経路の一覧を server.go から読めない（検査が空振りしている）")
 	}
+	found := false
 	for _, m := range routes {
+		if m[1] == holdAnswerRoute {
+			found = true
+			continue
+		}
 		p := strings.ToLower(m[1])
 		for _, banned := range []string{"answer", "option", "hold", "question/"} {
 			if strings.Contains(p, banned) {
-				t.Errorf("経路 %q は保留へ答える口に見える（%q を含む）。S4d-2 が足すまで置かない", m[1], banned)
+				t.Errorf("経路 %q は保留へ答える口に見える（%q を含む）。画面のボタンの回答の口は holdAnswerRoute だけ", m[1], banned)
 			}
 		}
 	}
+	if !found {
+		t.Errorf("経路 %q が server.go に無い", holdAnswerRoute)
+	}
 }
 
-// 経路の名前だけでなく、サーバーのソースが回答の口（ExecuteAnswer・PrepareAnswer・AnswerRequest）を呼ばないことも固定する
+// 経路の名前だけでなく、サーバーのソース（hold_answer.go を除く）が回答の口（ExecuteAnswer・PrepareAnswer・AnswerRequest）を呼ばないことも固定する
 // （既存の経路が選択肢で答える口に化けても検出する）。
 func TestServerSourcesDoNotCallCoreAnswer(t *testing.T) {
 	files, err := filepath.Glob("*.go")
@@ -43,9 +54,12 @@ func TestServerSourcesDoNotCallCoreAnswer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if f == "hold_answer.go" {
+			continue // 画面のボタンで選ぶだけの回答の口だけが、core の回答を呼ぶ
+		}
 		for _, banned := range []string{"ExecuteAnswer", "PrepareAnswer", "AnswerRequest"} {
 			if strings.Contains(string(b), banned) {
-				t.Errorf("%s が %s を参照している。保留へ答える口は S4d-2 が足すまで置かない", f, banned)
+				t.Errorf("%s が %s を参照している。保留へ答える口は hold_answer.go だけ", f, banned)
 			}
 		}
 	}

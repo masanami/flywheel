@@ -39,18 +39,137 @@ describe("読み取り（types.gen.ts の形）", () => {
     const c = await api.cycle("alpha");
     expect(c.state).toBe("running");
     expect(Object.keys(c).sort()).toEqual([
+      "costs",
       "last_end_reason",
       "last_ended_at",
       "last_result",
       "last_started_at",
       "running",
       "state",
+      "supervisor_actions",
     ]);
+    expect(Array.isArray(c.supervisor_actions)).toBe(true);
+    expect(Array.isArray(c.costs)).toBe(true);
     expect((await api.cycle("beta")).state).toBe("idle");
   });
   it("読めないワークスペースは state のコードで失敗する", async () => {
     expect(await codeOf(api.status("gamma"))).toBe("store_not_found");
     expect(await codeOf(api.status("nope"))).toBe("not_found");
+  });
+});
+
+describe("知らせと取り込みの偽の口", () => {
+  it("知らせは alpha だけが 4 種を新しい順に返し、読めないワークスペースは失敗する", async () => {
+    const { notices } = await api.notices("alpha");
+    expect(notices.map((n) => n.kind)).toEqual([
+      "supervisor_escalated",
+      "cycle_ended",
+      "released",
+      "task_added",
+    ]);
+    expect(await api.notices("beta")).toEqual({ notices: [] });
+    expect(await codeOf(api.notices("nope"))).toBe("not_found");
+  });
+  it("取り込みの口は、空・重複・取り込めるものでない指定を 400 で断り、課題を足さない", async () => {
+    const store = new MockStore();
+    const a = createMockApi(store, { latencyMs: 0 });
+    const before = store.workspaces.alpha?.items.length;
+    expect(await codeOf(a.ingest("alpha", { items: [] }))).toBe(
+      "validation_failed",
+    );
+    expect(
+      await codeOf(
+        a.ingest("alpha", {
+          items: ["example/repo#904", "example/repo#904"],
+        }),
+      ),
+    ).toBe("validation_failed");
+    expect(await codeOf(a.ingest("alpha", { items: ["nope#1"] }))).toBe(
+      "validation_failed",
+    );
+    expect(store.workspaces.alpha?.items.length).toBe(before);
+  });
+  it("取り込みが成立すると、課題を 1 つ足し、子の数を返し、取り込めるものの一覧から外す", async () => {
+    const store = new MockStore();
+    const a = createMockApi(store, { latencyMs: 0 });
+    const res = await a.ingest("alpha", { items: ["example/repo#901"] });
+    expect(res.ingested).toHaveLength(1);
+    expect(res.ingested[0]?.children).toBe(2);
+    const added = store.workspaces.alpha?.items.some(
+      (m) => m.c.id === res.ingested[0]?.challenge_id,
+    );
+    expect(added).toBe(true);
+    const left = (await a.statusIngestable("alpha")).ingestable?.items ?? [];
+    expect(left.some((it) => it.external_key === "example/repo#901")).toBe(
+      false,
+    );
+  });
+});
+
+describe("ボタンの回答の偽の口", () => {
+  it("照合の値が空は 400、無い保留は 404、選択肢の無い保留は 403", async () => {
+    const store = new MockStore();
+    const a = createMockApi(store, { latencyMs: 0 });
+    const h = store.workspaces.alpha?.items.find((x) => x.c.id === "C-8")
+      ?.holds[0];
+    if (!h) throw new Error("種の保留が無い");
+    h.check = "c";
+    h.options = [];
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", "H-1", { check: "", option: "o" }),
+      ),
+    ).toBe("validation_failed");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", "H-99", { check: "c", option: "o" }),
+      ),
+    ).toBe("not_found");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", "H-1", { check: "c", option: "o" }),
+      ),
+    ).toBe("verification_rejected");
+  });
+  it("照合の値が違えば 409、合えば経路 ui の回答として記録し、閉じた保留への回答は 409", async () => {
+    const store = new MockStore();
+    const a = createMockApi(store, { latencyMs: 0 });
+    const m = store.workspaces.alpha?.items.find((x) => x.c.id === "C-8");
+    const h = m?.holds[0];
+    if (!h) throw new Error("種の保留が無い");
+    h.options = [
+      { id: "x", label: "選ぶ", description: "", button: true },
+      { id: "y", label: "対話で", description: "", button: false },
+    ];
+    h.check = "now";
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", h.hold_id, { check: "old", option: "x" }),
+      ),
+    ).toBe("conflict");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", h.hold_id, { check: "now", option: "y" }),
+      ),
+    ).toBe("verification_rejected");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", h.hold_id, { check: "now", option: "zz" }),
+      ),
+    ).toBe("validation_failed");
+    const r = await a.answerHold("alpha", "C-8", h.hold_id, {
+      check: "now",
+      option: "x",
+    });
+    expect(r.cycle.started).toBe(true);
+    expect(h.answered_channel).toBe("ui");
+    expect(h.answered_verification).toBe("none");
+    expect(h.answer).toBe("選ぶ");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", h.hold_id, { check: "now", option: "x" }),
+      ),
+    ).toBe("conflict");
   });
 });
 

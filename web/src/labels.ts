@@ -16,7 +16,15 @@ import {
   type TASK_PROGRESS_CODES,
   type VERDICT_CODES,
 } from "./api/types.gen.ts";
-import type { CycleWorkStages } from "./api/types.gen.ts";
+import type {
+  CYCLE_END_REASON_CODES,
+  CYCLE_TRIGGER_CODES,
+  CycleWorkStages,
+  SUPERVISOR_HAND_CODES,
+  SUPERVISOR_REJECT_REASON_CODES,
+  SUPERVISOR_RESULT_CODES,
+  WATCH_STATE_CODES,
+} from "./api/types.gen.ts";
 
 export const CARD_STATES = [
   "unclassified",
@@ -307,6 +315,82 @@ export const CYCLE_RESULT_LABELS: Record<CycleResult, string> = {
   interrupted: "途中で止まった",
 };
 
+// 終わった理由（サイクルの API の last_end_reason。core の閉集合）。知らない値は値のまま出す。
+export const CYCLE_END_REASON_LABELS: Record<
+  (typeof CYCLE_END_REASON_CODES)[number],
+  string
+> = {
+  settled: "進められるものが無くなった",
+  budget: "費用の上限に達した",
+  stopped: "止めた",
+  rate_limited: "利用上限に達した",
+  stalled: "進まなくなった",
+  error: "エラーで終わった",
+  interrupted: "中断された",
+};
+// 終わった理由が費用の上限のときの、続け方の案内。
+export const CYCLE_BUDGET_GUIDE_TEXT =
+  "「サイクルを回す」を押すと、続きから進みます。費用の上限は、宣言で変えます。";
+
+// サイクルを始めたきっかけ（running.trigger）。
+export const CYCLE_TRIGGER_LABELS: Record<
+  (typeof CYCLE_TRIGGER_CODES)[number],
+  string
+> = {
+  manual: "手動",
+  ui: "画面のボタン",
+  approve: "承認",
+  reject: "差し戻し",
+  answer: "回答",
+  budget: "予算の変更",
+  ingest: "取り込み",
+  followup_promote: "フォローアップを課題に上げた",
+  continue: "続きから",
+};
+
+// 見ているタスクの様子（running.watching[].state）。
+export const WATCH_STATE_LABELS: Record<
+  (typeof WATCH_STATE_CODES)[number],
+  string
+> = {
+  working: "作業中",
+  verifying: "検証中",
+  waiting_owner: "あなたの回答か承認待ち",
+};
+
+// スーパーバイザーの手の種類（supervisor_actions[].hand）。null は判断できなかったとき。
+export const SUPERVISOR_HAND_LABELS: Record<
+  (typeof SUPERVISOR_HAND_CODES)[number],
+  string
+> = {
+  reverify: "検証し直す",
+  send_back: "差し戻す",
+  retry: "もう一度実行する",
+  split_followup: "フォローアップに分ける",
+  replan: "計画を作り直す",
+  defer: "見送る",
+  escalate: "あなたへ上げる",
+  answer: "子の問いに答える",
+};
+export const SUPERVISOR_NO_HAND_TEXT = "手を決められなかった";
+export const SUPERVISOR_RESULT_LABELS: Record<
+  (typeof SUPERVISOR_RESULT_CODES)[number],
+  string
+> = {
+  executed: "成った",
+  failed: "失敗した",
+  rejected: "断られた",
+};
+export const SUPERVISOR_REJECT_REASON_LABELS: Record<
+  (typeof SUPERVISOR_REJECT_REASON_CODES)[number],
+  string
+> = {
+  state_changed: "状態が変わっていた",
+  owner_answered: "あなたが先に回答していた",
+};
+export const NO_SUPERVISOR_ACTIONS_TEXT =
+  "このサイクルでは、スーパーバイザーの手はありません";
+
 // サイクルを回すと進むものの段（状況の API の cycle_work.stages のキー）。表示の順もこの並び。
 // 段の件数は core が数え、ここは語と並びだけを持つ（Record の型で、全部のキーに語があることを守る）。
 export const CYCLE_WORK_STAGES = [
@@ -428,7 +512,34 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
     "取り込み元のコメント数・更新日時の観測が変わった",
   upstream_state_change: "取り込み元の状態が変わった",
   policy_state_change: "取り込みの方針の範囲内か外かが変わった",
+  supervise: "スーパーバイザーが手を打った",
+  hold_edit: "問いを書き換えた",
+  budget_limit: "課題の費用の上限を変えた",
+  "task_addition:create": "タスクを足す依頼を作った",
+  "task_addition:add_tasks": "計画の後にタスクを足した",
+  "task_addition:state": "タスクを足す依頼の状態が変わった",
 };
+
+// 足す依頼の状態（additions[].state）。開いているのは pending・awaiting_owner。知らない値は値のまま出す。
+export const TASK_ADDITION_STATE_LABELS: Record<string, string> = {
+  pending: "仕様を待っている",
+  awaiting_owner: "上限を超えるので問い中",
+  applied: "足した",
+  none: "足さなかった",
+  declined: "足さなかった",
+  superseded: "取り消した",
+};
+
+// 後から足したタスクの出どころ（added.origin）。知らない値は値のまま出す。
+export const TASK_ADDED_ORIGIN_LABELS: Record<string, string> = {
+  expand: "タスクの完了の検証から足した",
+  followup: "フォローアップをタスクに上げた",
+};
+export const TASK_ADDED_ORIGIN_SUPERVISOR_LABEL =
+  "スーパーバイザーのフォローアップをタスクに上げた";
+export const TASK_ADDED_MARK = "後から足したタスク";
+export const TASK_ADDED_TREE_MARK = "後から足した";
+export const WHO_SUPERVISOR = "スーパーバイザー";
 
 // 実行の記録の「何の実行か」。判断点は役割の言葉で呼び、番号は括弧で添える。知らない値は値のまま出す。
 export const JUDGMENT_LABELS: Record<string, string> = {
@@ -439,6 +550,7 @@ export const JUDGMENT_LABELS: Record<string, string> = {
   J5: "完了を検証する判断点（J5）",
   J6: "学びを書く判断点（J6）",
   J8: "改修を提案する判断点（J8）",
+  SV: "スーパーバイザーの判断点（SV）",
 };
 export const RUN_KIND_LABELS: Record<string, string> = {
   judgment: "判断点",
@@ -477,5 +589,7 @@ export const NO_COST_LABEL = "費用の記録なし";
 // 経緯の「誰が」
 export const WHO_ME_RELAYED = "あなた（対話）";
 export const WHO_ME_UI = "あなた（画面）";
+// 保留への回答を画面のボタンで受けた（経路 ui）ときの「誰が」。
+export const WHO_ME_UI_BUTTON = "あなた（画面のボタン）";
 export const WHO_ME_TTY = "あなた（ターミナル）";
 export const WHO_AGENT_RUN = "エージェント";

@@ -1062,6 +1062,9 @@ type AnswerRequest struct {
 	// Agent・Conn は、足す依頼の保留で「足す」を選んだとき、保存した出力を検査する宣言（nil なら core が作業ディレクトリの宣言を読む）。
 	Agent *AgentDeclaration
 	Conn  *ConnectorsDeclaration
+	// HoldCheck は、画面が読んだときの保留の照合の値（Hold.Check）。経路 ui の回答では必須で、書き込みの中でいまの値と同じことを確かめる
+	// （違えば ErrConflict）。経路 ui の回答は HoldID も必須。ほかの経路は使わない。
+	HoldCheck string
 }
 
 // ExecuteAnswer は answer（T12）の②（書き込み）。「保留に入る直前の状態」は
@@ -1184,7 +1187,11 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	if err != nil {
 		return nil, nil, err
 	}
-	if req.HoldID != "" {
+	uiAnswer := att.channel == ChannelUI
+	if uiAnswer {
+		// 経路 ui の回答の限りと保留の照合は、下の書き込みの中で先に確かめる（保留の照合は checkUIAnswer が行うので、遷移の入口では行わない）。
+		p.holdCheck = func(context.Context, *sql.Tx, int64) error { return nil }
+	} else if req.HoldID != "" {
 		p.holdCheck = func(ctx context.Context, tx *sql.Tx, cid int64) error {
 			return checkAnswerHoldUnchanged(ctx, tx, cid, req.HoldID, req.HoldQuestion, req.HoldOptions, req.HoldOptionRequired)
 		}
@@ -1195,6 +1202,11 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	}
 	var c *Challenge
 	err = s.mutateAsRun(ctx, p.actor, p.channel, p.verification, p.runID, func(tx *sql.Tx, rec *activityRecorder) error {
+		if uiAnswer {
+			if err := checkUIAnswer(ctx, tx, cid, req); err != nil {
+				return err
+			}
+		}
 		// 足す依頼の保留に「足す」で答えるときは、回答を成立させる前に、足した後の見込みを計算し直す。選択肢の説明の額と違えば、
 		// 回答を成立させず、成功の書き込みとして問いを出し直す（エラーで巻き戻さない）。
 		if req.Option == taskAddOptionAdd {

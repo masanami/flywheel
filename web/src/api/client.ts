@@ -4,13 +4,21 @@ import type {
   ChatPostRequest,
   ChatPostResponse,
   ChatResponse,
+  CycleScreen,
   CycleStart,
   CycleStarted,
-  CycleStatus,
+  CycleStopResponse,
+  FollowupDoneRequest,
+  FollowupDropRequest,
   FollowupListResponse,
+  HoldAnswerRequest,
+  HoldAnswerResponse,
+  IngestAcceptedResponse,
+  IngestRequest,
   ListCardResponse,
   LogResponse,
   NeedsHumanResponse,
+  NoticesResponse,
   QuestionsResponse,
   RunReportResponse,
   ShowCardResponse,
@@ -36,7 +44,7 @@ async function failure(res: Response, what: string): Promise<ApiError> {
   return new ApiError(code, message, res.status);
 }
 
-// 読み取りは GET（SSE は EventSource）。書き込みは下の post だけで、呼ぶのは計画の承認・完了の承認・「サイクルを回す」・対話の欄の POST に限る。
+// 読み取りは GET（SSE は EventSource）。書き込みは下の post だけで、呼ぶのは計画の承認・完了の承認・「サイクルを回す」・対話の欄・画面のボタン（選ぶだけの回答・取り込み・サイクルを止める・フォローアップを済みにする／捨てる）の POST に限る。
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, {
     method: "GET",
@@ -89,12 +97,15 @@ export interface ReadApi {
   // フォローアップ。status の既定は open。
   followups(name: string, status?: string): Promise<FollowupListResponse>;
   challenges(name: string): Promise<ListCardResponse>;
-  cycle(name: string): Promise<CycleStatus>;
+  // サイクルの様子。対象のサイクルのスーパーバイザーの手と費用の内訳（supervisor_actions・costs）を含む。
+  cycle(name: string): Promise<CycleScreen>;
   challenge(name: string, id: string): Promise<ShowCardResponse>;
   log(name: string, id: string): Promise<LogResponse>;
   runReport(name: string, runId: string): Promise<RunReportResponse>;
   needsHuman(): Promise<NeedsHumanResponse>;
   questions(): Promise<QuestionsResponse>;
+  // 起きたことの知らせ（新しい順に、直近の 20 件まで）。
+  notices(name: string): Promise<NoticesResponse>;
 }
 
 // 承認の応答は、承認後の課題（ShowCardResponse）に、サイクルを始めたかの結果 cycle を足した形。
@@ -119,7 +130,31 @@ export interface ChatApi {
   chatNew(name: string): Promise<unknown>;
 }
 
-export type ApiClient = ReadApi & ApprovalApi & CycleApi & ChatApi;
+// 画面のボタンで受ける操作（いまの守りの CSRF つきの POST）。回答は保留の ID で指し、読んだときの照合の値を送る。
+export interface ScreenWriteApi {
+  answerHold(
+    name: string,
+    challengeId: string,
+    holdId: string,
+    req: HoldAnswerRequest,
+  ): Promise<HoldAnswerResponse>;
+  ingest(name: string, req: IngestRequest): Promise<IngestAcceptedResponse>;
+  cycleStop(name: string): Promise<CycleStopResponse>;
+  followupsDone(
+    name: string,
+    req: FollowupDoneRequest,
+  ): Promise<FollowupListResponse>;
+  followupsDrop(
+    name: string,
+    req: FollowupDropRequest,
+  ): Promise<FollowupListResponse>;
+}
+
+export type ApiClient = ReadApi &
+  ApprovalApi &
+  CycleApi &
+  ChatApi &
+  ScreenWriteApi;
 
 const readApi: ReadApi = {
   workspaces: () => get<WorkspaceList>("/api/v1/workspaces"),
@@ -132,7 +167,7 @@ const readApi: ReadApi = {
       `${ws(name)}/followups${status === undefined ? "" : `?status=${encodeURIComponent(status)}`}`,
     ),
   challenges: (name) => get<ListCardResponse>(`${ws(name)}/challenges`),
-  cycle: (name) => get<CycleStatus>(`${ws(name)}/cycle`),
+  cycle: (name) => get<CycleScreen>(`${ws(name)}/cycle`),
   challenge: (name, id) =>
     get<ShowCardResponse>(`${ws(name)}/challenges/${encodeURIComponent(id)}`),
   log: (name, id) =>
@@ -143,6 +178,7 @@ const readApi: ReadApi = {
     ),
   needsHuman: () => get<NeedsHumanResponse>("/api/v1/needs-human"),
   questions: () => get<QuestionsResponse>("/api/v1/questions"),
+  notices: (name) => get<NoticesResponse>(`${ws(name)}/notices`),
 };
 
 const approvalApi: ApprovalApi = {
@@ -169,11 +205,27 @@ const chatApi: ChatApi = {
   chatNew: (name) => post<unknown>(`${ws(name)}/chat/new`),
 };
 
+const screenWriteApi: ScreenWriteApi = {
+  answerHold: (name, challengeId, holdId, req) =>
+    post<HoldAnswerResponse>(
+      `${ws(name)}/challenges/${encodeURIComponent(challengeId)}/holds/${encodeURIComponent(holdId)}/answer`,
+      req,
+    ),
+  ingest: (name, req) =>
+    post<IngestAcceptedResponse>(`${ws(name)}/ingest`, req),
+  cycleStop: (name) => post<CycleStopResponse>(`${ws(name)}/cycle/stop`),
+  followupsDone: (name, req) =>
+    post<FollowupListResponse>(`${ws(name)}/followups/done`, req),
+  followupsDrop: (name, req) =>
+    post<FollowupListResponse>(`${ws(name)}/followups/drop`, req),
+};
+
 const realApi: ApiClient = {
   ...readApi,
   ...approvalApi,
   ...cycleApi,
   ...chatApi,
+  ...screenWriteApi,
 };
 
 // 呼び出し口は差し替えられる。開発時の mock モードだけが setApi でブラウザ内の偽の API を入れる。
@@ -199,6 +251,7 @@ export const api: ApiClient = {
   runReport: (n, r) => impl.runReport(n, r),
   needsHuman: () => impl.needsHuman(),
   questions: () => impl.questions(),
+  notices: (n) => impl.notices(n),
   approvalSummary: (n, id) => impl.approvalSummary(n, id),
   approve: (n, id, v) => impl.approve(n, id, v),
   startCycle: (n) => impl.startCycle(n),
@@ -206,6 +259,11 @@ export const api: ApiClient = {
   chatSend: (n, r) => impl.chatSend(n, r),
   chatStop: (n) => impl.chatStop(n),
   chatNew: (n) => impl.chatNew(n),
+  answerHold: (n, c, h, r) => impl.answerHold(n, c, h, r),
+  ingest: (n, r) => impl.ingest(n, r),
+  cycleStop: (n) => impl.cycleStop(n),
+  followupsDone: (n, r) => impl.followupsDone(n, r),
+  followupsDrop: (n, r) => impl.followupsDrop(n, r),
 };
 
 export const eventsPath = "/api/v1/events";
