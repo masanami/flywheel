@@ -123,8 +123,3 @@ func writeCoreError(w http.ResponseWriter, err error) {
 	code := apiCodeForCoreErr(err)
 	writeError(w, errorStatus(code), code, err.Error())
 }
-
-// notImplementedPost は、経路を登録しただけで中身を置いていない書き込みの口の応答。中身を置くまでは、ルートが無いときと同じ 404 を返す。
-func notImplementedPost(w http.ResponseWriter, _ *http.Request) {
-	writeError(w, http.StatusNotFound, CodeNotFound, "not found")
-}
