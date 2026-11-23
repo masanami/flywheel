@@ -77,6 +77,9 @@ func LatestSchemaVersion() (int, error) {
 
 // UnansweredHold は未回答の保留 1 件（課題の情報つき）。RunID は "R-<n>" か nil。
 type UnansweredHold struct {
+	// HoldID は保留の表示用の ID（"H-<番号>"）、Scope は止める範囲（task か challenge）。
+	HoldID      string
+	Scope       string
 	ChallengeID string
 	Title       string
 	Question    string
@@ -93,7 +96,7 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 	out := []UnansweredHold{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx,
-			`SELECT h.challenge_id, c.title, h.question, h.raised_at, h.from_status, h.run_id, h.task_id
+			`SELECT h.id, h.scope, h.challenge_id, c.title, h.question, h.raised_at, h.from_status, h.run_id, h.task_id
 			 FROM hold h JOIN challenge c ON c.id = h.challenge_id
 			 WHERE h.answer IS NULL AND h.closed_at IS NULL AND h.kind = ?
 			 ORDER BY h.raised_at, h.challenge_id, h.id`, string(HoldKindHuman))
@@ -103,6 +106,8 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var (
+				hid        int64
+				scope      sql.NullString
 				cid        int64
 				raisedAt   string
 				fromStatus string
@@ -110,7 +115,7 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 				taskID     sql.NullInt64
 				h          UnansweredHold
 			)
-			if err := rows.Scan(&cid, &h.Title, &h.Question, &raisedAt, &fromStatus, &runID, &taskID); err != nil {
+			if err := rows.Scan(&hid, &scope, &cid, &h.Title, &h.Question, &raisedAt, &fromStatus, &runID, &taskID); err != nil {
 				return err
 			}
 			t, err := parseTimestamp(raisedAt)
@@ -118,6 +123,8 @@ func (s *Store) ListUnansweredHolds(ctx context.Context) ([]UnansweredHold, erro
 				return err
 			}
 			h.ChallengeID = formatChallengeID(cid)
+			h.HoldID = formatHoldID(hid)
+			h.Scope = holdScopeLabel(HoldScope(scope.String))
 			h.RaisedAt = t
 			h.FromStatus = Status(fromStatus)
 			if runID.Valid {

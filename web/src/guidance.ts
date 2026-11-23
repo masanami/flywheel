@@ -5,6 +5,8 @@ import guidance from "./guidance.json";
 export interface When {
   actions?: string[];
   context?: string;
+  // 回答の相手の保留を --hold で指定する場面かどうかによる出し分け（無ければ絞らない）。開いている保留が 2 つ以上のとき真。
+  needs_hold?: boolean;
 }
 
 export interface Template {
@@ -49,20 +51,34 @@ export function showsConversationNote(actions: string[]): boolean {
 
 // card.next_human_actions のコードから、ターミナルで実行するコマンドの案内を作る（課題の状態の文字列は見ない）。
 // <理由>・<回答>・<額>・<OP-ID> は差し込み口のまま残す。
+// 回答の相手の保留を指定する場面（needsHold。既定は openHoldIds が 2 つ以上）の回答の案内（<H-ID> を持つ雛形）は、openHoldIds の保留ごとに 1 つ作り、<H-ID> をその保留の ID にする。
 export function guidesFor(
   challengeId: string,
   workspacePath: string,
   actions: string[],
+  openHoldIds: string[] = [],
+  needsHold: boolean = openHoldIds.length >= 2,
 ): Guide[] {
   return (guidance.templates as Template[])
-    .filter((t) => t.when.actions?.some((a) => actions.includes(a)))
-    .map((t) => ({
-      id: t.id,
-      command: t.template
+    .filter(
+      (t) =>
+        t.when.actions?.some((a) => actions.includes(a)) &&
+        (t.when.needs_hold === undefined || t.when.needs_hold === needsHold),
+    )
+    .flatMap((t) => {
+      const base = t.template
         .replaceAll("<C-ID>", () => challengeId)
-        .replaceAll("<パス>", () => shellQuote(workspacePath)),
-      ...(t.note ? { note: t.note } : {}),
-    }));
+        .replaceAll("<パス>", () => shellQuote(workspacePath));
+      const note = t.note ? { note: t.note } : {};
+      if (!base.includes("<H-ID>")) {
+        return [{ id: t.id, command: base, ...note }];
+      }
+      return openHoldIds.map((h) => ({
+        id: `${t.id}-${h}`,
+        command: base.replaceAll("<H-ID>", () => h),
+        ...note,
+      }));
+    });
 }
 
 // 課題の操作に結び付かない案内を、場面の名前（context）から作る。差し込み口（<理由> など）はそのまま残す。

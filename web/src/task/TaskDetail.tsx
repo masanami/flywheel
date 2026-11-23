@@ -266,10 +266,11 @@ function TaskView({
           <h3>あなたを待っているもの</h3>
           {openHolds.map((h) => (
             <div
-              key={h.raised_at}
+              key={h.hold_id}
               className="detail-question"
               data-testid="task-hold-question"
             >
+              <p data-testid="task-hold-id">保留: {h.hold_id}</p>
               <Markdown text={h.question} />
             </div>
           ))}
@@ -277,6 +278,13 @@ function TaskView({
             challengeId={id}
             actions={["answer_question"]}
             workspacePath={workspacePath}
+            openHoldIds={openHolds.map((h) => h.hold_id)}
+            needsHold={
+              openHolds.length > 0 &&
+              show.holds.filter(
+                (h) => h.answer === null && h.closed_at === null,
+              ).length >= 2
+            }
           />
         </section>
       ) : null}
@@ -469,7 +477,8 @@ function Holds({ holds }: { holds: Hold[] }) {
       <h3>問いと回答</h3>
       <ol className="task-holds">
         {holds.map((h) => (
-          <li key={h.raised_at} data-testid="task-hold">
+          <li key={h.hold_id} data-testid="task-hold">
+            <p data-testid="task-hold-listed-id">保留: {h.hold_id}</p>
             <div className="detail-question">
               <Markdown text={h.question} />
             </div>

@@ -114,7 +114,18 @@ func overviewText(ov *core.Overview) string {
 		for _, c := range cs {
 			label, _ := c.Status.Label()
 			fmt.Fprintf(&b, "  %s\t%s\t%s\n", c.ID, label, c.Title)
-			writeHoldOptions(&b, ov.HoldOptions[c.ID], "    ")
+			holds := ov.OpenHolds[c.ID]
+			for _, h := range holds {
+				title := ""
+				if h.TaskTitle != "" {
+					title = "\tタスク: " + escapeControl(h.TaskTitle)
+				}
+				fmt.Fprintf(&b, "    %s%s\n", h.HoldID, title)
+				writeHoldOptions(&b, h.Options, "      ")
+			}
+			if len(holds) >= 2 {
+				fmt.Fprintf(&b, "    開いている保留が %d 件あります。答える保留を指定してください: flywheel answer %s --hold <H-ID> --answer <回答>\n", len(holds), c.ID)
+			}
 		}
 	}
 	challengeSection("あなたの承認を待っているもの", approvals)
