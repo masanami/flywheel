@@ -49,10 +49,10 @@ type SupervisorAction struct {
 	Findings   string                `json:"findings"`
 	// Hand は選んだ手（SUPERVISOR_HAND_CODES の値）。判断できなかったときは null。
 	Hand *string `json:"hand"`
-	// HoldID は対処した保留の ID（保留には表示用の ID が無いので、内部の整数）。無ければ null。
-	HoldID *int64 `json:"hold_id"`
-	ID     int64  `json:"id"`
-	Note   string `json:"note"`
+	// HoldID は対処した保留の ID（`H-<番号>`。番号は保留の行の番号）。無ければ null。
+	HoldID *string `json:"hold_id"`
+	ID     int64   `json:"id"`
+	Note   string  `json:"note"`
 	// Questions は答えた子の問いと答え（手が answer のときだけ。無ければ []）。
 	Questions []SupervisorQuestion `json:"questions"`
 	// RejectReason は断りの理由（SUPERVISOR_REJECT_REASON_CODES の値）。結果が rejected でなければ null。
@@ -71,7 +71,7 @@ func FromSupervisorAction(a core.SupervisorAction) SupervisorAction {
 	out := SupervisorAction{
 		Basis: make([]SupervisorBasis, 0, len(a.Basis)), ChallengeID: a.ChallengeID,
 		Conditions: make([]SupervisorCondition, 0, len(a.Conditions)), CreatedAt: FormatTimestamp(a.CreatedAt),
-		CycleID: a.CycleID, Findings: a.Findings, HoldID: a.HoldID, ID: a.ID, Note: a.Note, Result: string(a.Result),
+		CycleID: a.CycleID, Findings: a.Findings, ID: a.ID, Note: a.Note, Result: string(a.Result),
 		Questions: FromSupervisorQuestions(a.Questions), RunID: a.RunID, StopKind: string(a.StopKind), TaskID: a.TaskID,
 	}
 	for _, b := range a.Basis {
@@ -79,6 +79,10 @@ func FromSupervisorAction(a core.SupervisorAction) SupervisorAction {
 	}
 	for _, c := range a.Conditions {
 		out.Conditions = append(out.Conditions, SupervisorCondition{Number: c.Number, Text: c.Text})
+	}
+	if a.HoldID != nil {
+		v := core.FormatHoldID(*a.HoldID)
+		out.HoldID = &v
 	}
 	if a.Hand != nil {
 		v := string(*a.Hand)

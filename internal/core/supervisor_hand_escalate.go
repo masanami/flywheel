@@ -84,7 +84,7 @@ func (s *Store) supervisorHandEscalate(ctx context.Context, in supervisorHandInp
 
 // recordSupervisorChildEscalate は、子の問い（保留を作る前）にスーパーバイザーが escalate を選んだときの対処の記録（結果 executed）と作業ログを書き、
 // 対処の記録の ID を返す。保留はまだ無いので、hold_id は NULL（呼び出し元が、この ID を保留に結び付ける）。
-// 判断の間に課題が着手中でなくなっていたら（取り下げなど）、保留を作れないので、同じ書き込みで断りの記録（rejected・state_changed）を残して
+// 判断の間に、そのタスクを進めてよくなくなっていたら（課題の取り下げ・そのタスクの保留など。述語は childQuestionTargetMayProceed）、保留を作れないので、同じ書き込みで断りの記録（rejected・state_changed）を残して
 // executed を偽で返す（呼び出し元は、保留を作らない）。
 func (s *Store) recordSupervisorChildEscalate(ctx context.Context, req supervisorHandRequest) (id int64, executed bool, err error) {
 	o := req.Output

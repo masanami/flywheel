@@ -116,7 +116,7 @@ func (s *Store) writeSupervisorAction(ctx context.Context, tx *sql.Tx, req super
 		after["hand"] = string(in.Hand)
 	}
 	if in.HoldID != nil {
-		after["hold_id"] = *in.HoldID
+		after["hold_id"] = formatHoldID(*in.HoldID)
 	}
 	if in.RejectReason != "" {
 		after["reject_reason"] = string(in.RejectReason)

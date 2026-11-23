@@ -197,54 +197,61 @@ func overLimitReissueEdit(ctx context.Context, tx *sql.Tx, cid, holdID, addition
 }
 
 // reissueOverLimitQuestion は、足す依頼の保留に「足す」で答える回答の前に、同じ書き込みの中で呼ぶ。計算し直した額が選択肢 add の説明の額と違えば、
-// 問いの文と add の説明を書き換え、課題の版を 1 つ進めて reissued=true を返す（保留・足す依頼・上限・タスクは変えない。エラーにしない）。
-// 保留が足す依頼の「足す」への回答でない、または額が同じなら何もせず false を返す。版の不一致・状態・本人確認の検査は、遷移（transitionInTx）と同じ順。
-func (s *Store) reissueOverLimitQuestion(ctx context.Context, tx *sql.Tx, rec *activityRecorder, p runTransitionParams, cid int64, req AnswerRequest) (reissued bool, err error) {
+// 問いの文と add の説明を書き換え、課題の版を 1 つ進めて その保留の ID を返す（保留・足す依頼・上限・タスクは変えない。エラーにしない）。
+// 保留が足す依頼の「足す」への回答でない、または額が同じなら何もせず 0 を返す。版の不一致・状態・本人確認の検査は、遷移（transitionInTx）と同じ順。
+func (s *Store) reissueOverLimitQuestion(ctx context.Context, tx *sql.Tx, rec *activityRecorder, p runTransitionParams, cid int64, req AnswerRequest) (reissuedHoldID int64, err error) {
 	current, _, err := s.transitionGateInTx(ctx, tx, p, cid)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	// 足す依頼の保留は課題を止める保留なので、課題を止める保留に絞って読む（タスクを止める保留が別に開いていても相手にしない）。
+	// 保留を --hold で指した回答は、指した保留を相手にする（ほかの開いている保留を相手にしない）。指さない回答は、足す依頼の保留が課題を止める保留なので、
+	// 課題を止める保留に絞って読む（タスクを止める保留が別に開いていても相手にしない）。
 	var holdID int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT id FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL AND `+challengeScopedHoldSQL+` ORDER BY id DESC LIMIT 1`, cid).Scan(&holdID); err != nil {
+	var q string
+	var args []any
+	if n, ok := parseHoldID(req.HoldID); ok {
+		q, args = `SELECT id FROM hold WHERE id = ? AND challenge_id = ? AND answer IS NULL AND closed_at IS NULL`, []any{n, cid}
+	} else {
+		q, args = `SELECT id FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL AND `+challengeScopedHoldSQL+` ORDER BY id DESC LIMIT 1`, []any{cid}
+	}
+	if err := tx.QueryRowContext(ctx, q, args...).Scan(&holdID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
+			return 0, nil
 		}
-		return false, err
+		return 0, err
 	}
 	var reason sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT reason FROM hold WHERE id = ?`, holdID).Scan(&reason); err != nil {
-		return false, err
+		return 0, err
 	}
 	if holdReason(reason.String) != holdReasonTaskAddOverLimit {
-		return false, nil
+		return 0, nil
 	}
 	additionID, ok, err := awaitingAdditionOfHold(ctx, tx, holdID)
 	if err != nil || !ok {
-		return false, err
+		return 0, err
 	}
 	edit, err := overLimitReissueEdit(ctx, tx, cid, holdID, additionID, s.answerDecls(req))
 	if err != nil || edit == nil {
-		return false, err
+		return 0, err
 	}
 	extra := map[string]any{"version": current.Version + 1, "reissued_on_answer": true}
 	p.att.addRelayTo(extra)
 	changed, err := editHoldText(ctx, tx, rec, cid, holdID, *edit, extra)
 	if err != nil || !changed {
-		return false, err
+		return 0, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE challenge SET version = ?, updated_at = ? WHERE id = ? AND version = ?`,
 		current.Version+1, formatTimestamp(rec.at), cid, current.Version)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	if n, err := res.RowsAffected(); err != nil {
-		return false, err
+		return 0, err
 	} else if n != 1 {
-		return false, fmt.Errorf("core: reissue the question of %s: expected to update 1 row, updated %d", current.ID, n)
+		return 0, fmt.Errorf("core: reissue the question of %s: expected to update 1 row, updated %d", current.ID, n)
 	}
-	return true, nil
+	return holdID, nil
 }
 
 // applyTaskAdditionAdd は applyTaskAdditionAnswer の add。検査・タスクの作り方は、上限以下で足す処理（applyJ2ExpandAdd）と同じものを使う。
@@ -267,16 +274,21 @@ func applyTaskAdditionAdd(ctx context.Context, tc *transitionCtx, att Attestatio
 	return err
 }
 
-// loadReissuedHold は、問いを出し直した課題 cid と、書き換えた後の開いている保留を返す（出し直したことを表す Reissued つき）。
-func loadReissuedHold(ctx context.Context, tx *sql.Tx, cid int64) (*Challenge, Hold, error) {
+// loadReissuedHold は、問いを出し直した課題 cid と、書き換えた後の保留 holdID を返す（出し直したことを表す Reissued つき）。
+func loadReissuedHold(ctx context.Context, tx *sql.Tx, cid, holdID int64) (*Challenge, Hold, error) {
 	c, err := loadChallenge(ctx, tx, cid)
 	if err != nil {
 		return nil, Hold{}, err
 	}
-	holdID, question, from, raisedAt, err := loadUnansweredHold(ctx, tx, cid)
+	var question, fs, raisedAtStr string
+	if err := tx.QueryRowContext(ctx, `SELECT question, from_status, raised_at FROM hold WHERE id = ?`, holdID).Scan(&question, &fs, &raisedAtStr); err != nil {
+		return nil, Hold{}, err
+	}
+	raisedAt, err := parseTimestamp(raisedAtStr)
 	if err != nil {
 		return nil, Hold{}, err
 	}
+	from := Status(fs)
 	opts, required, err := loadHoldOptionsOf(ctx, tx, holdID)
 	if err != nil {
 		return nil, Hold{}, err

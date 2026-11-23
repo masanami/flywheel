@@ -30,6 +30,9 @@ var holdIDPattern = regexp.MustCompile(`^H-[1-9][0-9]*$`)
 // formatHoldID は保留の表示用の ID（H-<番号>）。番号は保留の行の番号と同じで、列は持たない。過去の保留・閉じた保留も同じ形で読める。
 func formatHoldID(id int64) string { return fmt.Sprintf("H-%d", id) }
 
+// FormatHoldID は保留の行の番号から表示用の ID（H-<番号>）を作る（view が使う）。
+func FormatHoldID(id int64) string { return formatHoldID(id) }
+
 // parseHoldID は H-<番号> を保留の行の番号として読む。形式が違えば ok=false。
 func parseHoldID(s string) (int64, bool) {
 	if !holdIDPattern.MatchString(s) {

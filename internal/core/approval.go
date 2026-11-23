@@ -1195,13 +1195,13 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		// 足す依頼の保留に「足す」で答えるときは、回答を成立させる前に、足した後の見込みを計算し直す。選択肢の説明の額と違えば、
 		// 回答を成立させず、成功の書き込みとして問いを出し直す（エラーで巻き戻さない）。
 		if req.Option == taskAddOptionAdd {
-			reissued, err := s.reissueOverLimitQuestion(ctx, tx, rec, p, cid, req)
+			reissuedHoldID, err := s.reissueOverLimitQuestion(ctx, tx, rec, p, cid, req)
 			if err != nil {
 				return err
 			}
-			if reissued {
+			if reissuedHoldID != 0 {
 				var err error
-				c, holdOut, err = loadReissuedHold(ctx, tx, cid)
+				c, holdOut, err = loadReissuedHold(ctx, tx, cid, reissuedHoldID)
 				return err
 			}
 		}

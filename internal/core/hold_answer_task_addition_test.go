@@ -346,3 +346,39 @@ func TestHoldAnswerTaskAddition_AddWithoutAVerifiedAttestationIsRefusedAndKeepsT
 		t.Errorf("limit = %d version = %d, want unchanged (no reissue either)", f.limitMicros(t), f.detail(t, f.id).Version)
 	}
 }
+
+// 足す依頼の保留を --hold で指して「足す」で答えるとき、タスクを止める保留がより新しく開いていても、見込みの計算し直しと問いの出し直しは
+// 指した保留（足す依頼の保留）に対して行い、返す保留も指した保留である（最新の開いている保留を相手にしない）。
+func TestHoldAnswerTaskAddition_AddWithHoldFlagReissuesThePointedHoldEvenIfATaskHoldIsNewer(t *testing.T) {
+	t.Parallel()
+	f := overLimitHeld(t)
+	var additionHold int64
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT id FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL`, f.cid()).Scan(&additionHold)
+	})
+	coretest.InsertTaskHold(t, f.s.Workspace(), int(f.cid()), f.taskByKey(t, "b").Title, "別のタスクの問い", "in_progress", "2026-11-23T00:00:00.000Z", "")
+	f.raiseExistingEstimate(t)
+	prev, err := f.s.PrepareAnswerHold(context.Background(), f.id, formatHoldID(additionHold), "", taskAddOptionAdd, false)
+	if err != nil {
+		t.Fatalf("PrepareAnswerHold: %v", err)
+	}
+	c, hold, err := f.answerHoldFull(t, prev.Version, AnswerRequest{
+		Option: taskAddOptionAdd, HoldID: prev.HoldID, HoldQuestion: prev.Question, HoldOptions: prev.Options, HoldOptionRequired: prev.OptionRequired,
+	})
+	if err != nil {
+		t.Fatalf("err = %v, want a successful write that reissues the question", err)
+	}
+	if !hold.Reissued || hold.Answer != nil || !strings.Contains(hold.Question, "$16") || strings.Contains(hold.Question, "別のタスクの問い") {
+		t.Errorf("returned hold = %+v, want the reissued addition hold ($16)", hold)
+	}
+	if c.Status != StatusAwaitingHuman || f.limitMicros(t) != 14_000_000 {
+		t.Errorf("status=%s limit=%d, want unchanged awaiting_human and 14 USD", c.Status, f.limitMicros(t))
+	}
+	var q string
+	readForTest(t, f.s, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT question FROM hold WHERE id = ?`, additionHold).Scan(&q)
+	})
+	if !strings.Contains(q, "$16") {
+		t.Errorf("addition hold question = %q, want $16", q)
+	}
+}
