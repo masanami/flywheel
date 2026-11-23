@@ -86,10 +86,7 @@ const notIndividualOpFilter = `trigger NOT IN ('run', 'classify --auto', 'plan -
 // （終了していない周の有無は数えない）。
 func (s *Store) ReadCycleStatus(ctx context.Context) (*CycleStatus, error) {
 	now := s.currentTime()
-	threshold := s.lockStaleAfter
-	if threshold <= 0 {
-		threshold = defaultLockStaleAfter
-	}
+	threshold := s.lockStaleThreshold()
 	out := &CycleStatus{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		lock, err := loadLockByName(ctx, tx, cycleLockName)
@@ -275,10 +272,7 @@ type CycleStopResult struct {
 // 書き換えない。委譲先の実行は取り消さない。
 func (s *Store) RequestCycleStop(ctx context.Context) (*CycleStopResult, error) {
 	now := s.currentTime()
-	threshold := s.lockStaleAfter
-	if threshold <= 0 {
-		threshold = defaultLockStaleAfter
-	}
+	threshold := s.lockStaleThreshold()
 	out := &CycleStopResult{}
 	err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		lock, err := loadLockByName(ctx, tx, cycleLockName)
