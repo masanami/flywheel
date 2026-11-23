@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -24,6 +25,34 @@ type eventsConfig struct {
 	keepAliveInterval time.Duration
 	// now はカードの導出に使う現在時刻（既定は time.Now。テストが固定する）。
 	now func() time.Time
+	// buildOverview・readTreeNode・logf は、課題の詳細と承認の API の読み取りの差し替え口（テストが、状況の組み立ての回数を数える・
+	// 承認の後のツリーの読み直しを失敗させる・ログを受けるために使う）。nil なら既定（baseOverview・core の ChallengeTreeNodeWith・log.Printf）。
+	buildOverview func(ctx context.Context, st *core.Store) (*core.Overview, error)
+	readTreeNode  func(ctx context.Context, st *core.Store, id string, now time.Time, ov *core.Overview) (*core.TreeChallenge, error)
+	logf          func(format string, args ...any)
+}
+
+// overview はカードの導出に使う状況を 1 回組み立てる。
+func (c eventsConfig) overview(ctx context.Context, st *core.Store) (*core.Overview, error) {
+	if c.buildOverview != nil {
+		return c.buildOverview(ctx, st)
+	}
+	return baseOverview(ctx, st)
+}
+
+// treeNode は課題 1 件のツリーの要素を、組み立て済みの状況 ov を使って読む。
+func (c eventsConfig) treeNode(ctx context.Context, st *core.Store, id string, now time.Time, ov *core.Overview) (*core.TreeChallenge, error) {
+	if c.readTreeNode != nil {
+		return c.readTreeNode(ctx, st, id, now, ov)
+	}
+	return st.ChallengeTreeNodeWith(ctx, id, agentDeclOrNil(st), now, ov)
+}
+
+func (c eventsConfig) logFn() func(format string, args ...any) {
+	if c.logf != nil {
+		return c.logf
+	}
+	return log.Printf
 }
 
 func (c eventsConfig) withDefaults() eventsConfig {

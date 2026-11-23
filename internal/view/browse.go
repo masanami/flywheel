@@ -88,6 +88,49 @@ type ShowCardResponse struct {
 	Waiting              Waiting            `json:"waiting"`
 }
 
+// ApprovedCardResponse は `POST …/challenges/{id}/approve` の本文（cycle を除く）。ShowCardResponse と同じキーと並びで、tree だけが
+// null になりうる（承認が確定した後の課題のツリーの読み直しに失敗したとき。画面は次の読み直しでツリーを出す）。
+type ApprovedCardResponse struct {
+	Additions         []TaskAddition      `json:"additions"`
+	Approvals         []Approval          `json:"approvals"`
+	Budget            Budget              `json:"budget"`
+	Card              Card                `json:"card"`
+	Challenge         ShowChallenge       `json:"challenge"`
+	ConflictFixes     []PassedConflictFix `json:"conflict_fixes"`
+	DirectCompletions []DirectCompletion  `json:"direct_completions"`
+	Followups         []Followup          `json:"followups"`
+	Holds             []Hold              `json:"holds"`
+	Operations        []Operation         `json:"operations"`
+	Pairs             []StagePair         `json:"pairs"`
+	Plans             []PlanDetail        `json:"plans"`
+	Runs              []ShowRun           `json:"runs"`
+	SourceBinding     *SourceBinding      `json:"source_binding"`
+	SourceChildren    []SourceChild       `json:"source_children"`
+	Stages            Stages              `json:"stages"`
+	// SupervisorActions・SupervisorHandsTaken は ShowCardResponse と同じ値。
+	SupervisorActions    []SupervisorAction `json:"supervisor_actions"`
+	SupervisorHandsTaken map[string]int     `json:"supervisor_hands_taken"`
+	Tasks                []Task             `json:"tasks"`
+	Tree                 *TreeChallenge     `json:"tree"`
+	Waiting              Waiting            `json:"waiting"`
+}
+
+// FromApprovedChallengeDetailCard は FromChallengeDetailCard の、ツリーが nil でもよい版。
+func FromApprovedChallengeDetailCard(d *core.ChallengeDetail, card *core.Card, tree *core.TreeChallenge) ApprovedCardResponse {
+	s := FromChallengeDetailCard(d, card, core.TreeChallenge{})
+	out := ApprovedCardResponse{
+		Additions: s.Additions, Approvals: s.Approvals, Budget: s.Budget, Card: s.Card, Challenge: s.Challenge, ConflictFixes: s.ConflictFixes,
+		DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds, Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans,
+		Runs: s.Runs, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
+		SupervisorActions: s.SupervisorActions, SupervisorHandsTaken: s.SupervisorHandsTaken, Tasks: s.Tasks, Waiting: s.Waiting,
+	}
+	if tree != nil {
+		t := FromTreeChallenge(*tree)
+		out.Tree = &t
+	}
+	return out
+}
+
 // WaitingChallenge は待っている相手の課題 1 件（status は課題の状態の値）。
 type WaitingChallenge struct {
 	ChallengeID string `json:"challenge_id"`

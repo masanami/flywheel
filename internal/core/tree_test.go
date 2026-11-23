@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -643,7 +644,7 @@ func TestBuildTreeNodes_SkipsRelationsMissingFromTheList_798(t *testing.T) {
 		return out
 	}
 	t.Run("a prerequisite and a child that are not in the list are skipped", func(t *testing.T) {
-		nodes, err := f.s.buildTreeNodes(ctx, without(pre, child), []Challenge{pick(main)}, f.decl(), treeNow)
+		nodes, err := buildNodesForTest(ctx, f.s, without(pre, child), []Challenge{pick(main)}, f.decl())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -652,7 +653,7 @@ func TestBuildTreeNodes_SkipsRelationsMissingFromTheList_798(t *testing.T) {
 		}
 	})
 	t.Run("a parent that is not in the list stays nil", func(t *testing.T) {
-		nodes, err := f.s.buildTreeNodes(ctx, without(main), []Challenge{pick(child)}, f.decl(), treeNow)
+		nodes, err := buildNodesForTest(ctx, f.s, without(main), []Challenge{pick(child)}, f.decl())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -661,7 +662,7 @@ func TestBuildTreeNodes_SkipsRelationsMissingFromTheList_798(t *testing.T) {
 		}
 	})
 	t.Run("relations that are in the list are still returned", func(t *testing.T) {
-		nodes, err := f.s.buildTreeNodes(ctx, all, []Challenge{pick(main)}, f.decl(), treeNow)
+		nodes, err := buildNodesForTest(ctx, f.s, all, []Challenge{pick(main)}, f.decl())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -782,4 +783,59 @@ func TestPrepareApprovalFor_CompletionTasksListsTreeAndPriorDone(t *testing.T) {
 	if plain.CompletionTasks != nil || plain.OpenFollowups != nil {
 		t.Errorf("PrepareApproval must not load screen values: %+v", plain)
 	}
+}
+
+// 課題のツリーの読み取りは、課題の一覧・親子・前提・フォローアップ・タスク・実行の記録を 1 つの読み取りのトランザクションの中で読む
+// （masanami/flywheel#837）。一覧を読んだ直後に別の接続がフォローアップと費用を足しても、結果は足す前の時点でそろう。
+func TestChallengeTree_ReadsOneSnapshot_837(t *testing.T) {
+	setup := func(t *testing.T) (*treeFx, int) {
+		f := newTreeFx(t)
+		cid := f.challenge("親", "in_progress")
+		return f, cid
+	}
+	inject := func(f *treeFx, cid int) {
+		f.s.treeListRead = func() {
+			coretest.Exec(f.t, f.ws, `INSERT INTO followup (challenge_id, title, source, status, created_at, updated_at) VALUES (?, 'f', 'learn', 'open', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`, cid)
+			coretest.InsertChallenge(f.t, f.ws, "途中で足した")
+		}
+	}
+	countActivities := func(f *treeFx) int64 {
+		return coretest.QueryRows(f.t, f.ws, `SELECT COUNT(*) FROM activity`)[0][0].(int64)
+	}
+
+	t.Run("ChallengeTree", func(t *testing.T) {
+		f, cid := setup(t)
+		inject(f, cid)
+		before := countActivities(f)
+		tr := f.tree()
+		if got := tr.Challenges[0].FollowupsOpen; got != 0 {
+			t.Errorf("followups_open = %d, want 0（一覧と同じ時点）", got)
+		}
+		if n := len(tr.Challenges); n != 1 {
+			t.Errorf("challenges = %d, want 1（途中で足した課題は入らない）", n)
+		}
+		if countActivities(f) != before {
+			t.Error("読み取りが作業ログを書いた")
+		}
+		f.s.treeListRead = nil
+		if got := f.tree().Challenges[0].FollowupsOpen; got != 1 {
+			t.Errorf("次の読み取りの followups_open = %d, want 1", got)
+		}
+	})
+	t.Run("ChallengeTreeNode", func(t *testing.T) {
+		f, cid := setup(t)
+		inject(f, cid)
+		if got := f.node(cid).FollowupsOpen; got != 0 {
+			t.Errorf("followups_open = %d, want 0（一覧と同じ時点）", got)
+		}
+	})
+}
+
+// buildNodesForTest は buildTreeNodes を、読み取りのトランザクションの中で呼ぶ（一覧 all を差し替えて守りを確かめる）。
+func buildNodesForTest(ctx context.Context, s *Store, all, picked []Challenge, agent *AgentDeclaration) (nodes []TreeChallenge, err error) {
+	err = s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		nodes, err = s.buildTreeNodes(ctx, tx, all, picked, agent, nil, treeNow)
+		return err
+	})
+	return nodes, err
 }

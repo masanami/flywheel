@@ -403,95 +403,105 @@ func (s *Store) GetOverview(ctx context.Context) (*Overview, error) {
 // agent が nil のときの needs_human.budget_exhausted は、計画の出力が枠の額を明記する課題だけを
 // 判定できる。
 func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*Overview, error) {
-	result := Overview{WaitingExternal: []WaitingExternal{}}
-	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		humanChallenges, err := listChallengesInStatuses(ctx, tx, needsHumanStatuses)
-		if err != nil {
-			return err
-		}
-		parentAgent, err := listParentAgentChallenges(ctx, tx)
-		if err != nil {
-			return err
-		}
-		result.ParentAgentChallenges = parentAgent
-		inParentAgent := map[string]bool{}
-		for _, c := range parentAgent {
-			inParentAgent[c.ID] = true
-		}
-		checking, err := listSupervisorCheckingIDs(ctx, tx, agent)
-		if err != nil {
-			return err
-		}
-		result.NeedsHumanChallenges = make([]Challenge, 0, len(humanChallenges))
-		result.SupervisorCheckingChallenges = make([]Challenge, 0)
-		for _, c := range humanChallenges {
-			switch {
-			case inParentAgent[c.ID]:
-			case checking[c.ID]:
-				result.SupervisorCheckingChallenges = append(result.SupervisorCheckingChallenges, c)
-			default:
-				result.NeedsHumanChallenges = append(result.NeedsHumanChallenges, c)
-			}
-		}
-
-		openHolds, err := listOpenHolds(ctx, tx)
-		if err != nil {
-			return err
-		}
-		result.OpenHolds = openHolds
-
-		actionable, err := listChallengesInStatuses(ctx, tx, actionableStatuses)
-		if err != nil {
-			return err
-		}
-		result.ActionableChallenges = actionable
-
-		unmet, err := listUnmetDependencies(ctx, tx, actionable)
-		if err != nil {
-			return err
-		}
-		result.UnmetDependencies = unmet
-
-		pendingOps, err := listOperationsInState(ctx, tx, OperationStatePending)
-		if err != nil {
-			return err
-		}
-		result.NeedsHumanOperations = pendingOps
-
-		approvedOps, err := listOperationsInState(ctx, tx, OperationStateApproved)
-		if err != nil {
-			return err
-		}
-		result.ApprovedOperations = approvedOps
-
-		discrepancies, err := listDiscrepancies(ctx, tx)
-		if err != nil {
-			return err
-		}
-		result.Discrepancies = discrepancies
-
-		triage, err := listJ1Triage(ctx, tx)
-		if err != nil {
-			return err
-		}
-		result.NeedsHumanTriage = triage
-
-		slots, err := listSlotsNeedingAttention(ctx, tx)
-		if err != nil {
-			return err
-		}
-		result.NeedsHumanSlots = slots
-
-		exhausted, err := listBudgetExhausted(ctx, tx, agent)
-		if err != nil {
-			return err
-		}
-		result.NeedsHumanBudgetExhausted = exhausted
-
-		result.FollowupsOpen, err = countOpenFollowupsToTriage(ctx, tx)
+	var result *Overview
+	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		result, err = overviewTx(ctx, tx, agent)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// overviewTx は GetOverviewFor の読み取り（読み取りのトランザクションの中で呼ぶ）。
+func overviewTx(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration) (*Overview, error) {
+	result := Overview{WaitingExternal: []WaitingExternal{}}
+	humanChallenges, err := listChallengesInStatuses(ctx, tx, needsHumanStatuses)
+	if err != nil {
+		return nil, err
+	}
+	parentAgent, err := listParentAgentChallenges(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	result.ParentAgentChallenges = parentAgent
+	inParentAgent := map[string]bool{}
+	for _, c := range parentAgent {
+		inParentAgent[c.ID] = true
+	}
+	checking, err := listSupervisorCheckingIDs(ctx, tx, agent)
+	if err != nil {
+		return nil, err
+	}
+	result.NeedsHumanChallenges = make([]Challenge, 0, len(humanChallenges))
+	result.SupervisorCheckingChallenges = make([]Challenge, 0)
+	for _, c := range humanChallenges {
+		switch {
+		case inParentAgent[c.ID]:
+		case checking[c.ID]:
+			result.SupervisorCheckingChallenges = append(result.SupervisorCheckingChallenges, c)
+		default:
+			result.NeedsHumanChallenges = append(result.NeedsHumanChallenges, c)
+		}
+	}
+
+	openHolds, err := listOpenHolds(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	result.OpenHolds = openHolds
+
+	actionable, err := listChallengesInStatuses(ctx, tx, actionableStatuses)
+	if err != nil {
+		return nil, err
+	}
+	result.ActionableChallenges = actionable
+
+	unmet, err := listUnmetDependencies(ctx, tx, actionable)
+	if err != nil {
+		return nil, err
+	}
+	result.UnmetDependencies = unmet
+
+	pendingOps, err := listOperationsInState(ctx, tx, OperationStatePending)
+	if err != nil {
+		return nil, err
+	}
+	result.NeedsHumanOperations = pendingOps
+
+	approvedOps, err := listOperationsInState(ctx, tx, OperationStateApproved)
+	if err != nil {
+		return nil, err
+	}
+	result.ApprovedOperations = approvedOps
+
+	discrepancies, err := listDiscrepancies(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	result.Discrepancies = discrepancies
+
+	triage, err := listJ1Triage(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	result.NeedsHumanTriage = triage
+
+	slots, err := listSlotsNeedingAttention(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	result.NeedsHumanSlots = slots
+
+	exhausted, err := listBudgetExhausted(ctx, tx, agent)
+	if err != nil {
+		return nil, err
+	}
+	result.NeedsHumanBudgetExhausted = exhausted
+
+	result.FollowupsOpen, err = countOpenFollowupsToTriage(ctx, tx)
+	if err != nil {
 		return nil, err
 	}
 	return &result, nil
