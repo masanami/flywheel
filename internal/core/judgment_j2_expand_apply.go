@@ -100,10 +100,8 @@ func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2Expan
 	byKey := make(map[string]int, len(in))
 	inputs := make([]TaskInput, len(in))
 	for i, t := range in {
-		for _, s := range []string{t.Key, t.Title, t.Body, t.DoneCriteria} {
-			if checkText("tasks", s, MaxStageRunes) != nil {
-				return nil, false
-			}
+		if checkJ2TaskTexts(i, t) != nil {
+			return nil, false
 		}
 		if _, dup := byKey[t.Key]; dup || vc.TakenKeys[t.Key] {
 			return nil, false
@@ -127,8 +125,8 @@ func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2Expan
 		if t.Repo != vc.Repos[0] {
 			return nil, false
 		}
-		jt, ok := validateJ2TaskFields(t, jc, true)
-		if !ok {
+		jt, reason := validateJ2TaskFields(t, jc, true)
+		if reason != "" {
 			return nil, false
 		}
 		if followup {
