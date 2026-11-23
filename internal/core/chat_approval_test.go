@@ -472,18 +472,18 @@ func TestChatApproval_MarkCheckIsUnchangedWhileNoticesExist(t *testing.T) {
 			fixedActor(t, "alice")
 			c := createAndAdvance(t, s, StatusUnclassified)
 			f := newChatFix(t, s)
-			// 発言の後に、知らせの元の記録（理由つきで終わったサイクル）を作る。
-			end := statusBase.Add(time.Minute)
-			cycle := seedCycle(t, s, statusBase, &end, CycleResultCompleted)
-			if err := s.db.Write(context.Background(), func(tx *sql.Tx) error {
-				_, err := tx.Exec(`UPDATE cycle SET end_reason = 'budget' WHERE id = ?`, cycle)
-				return err
-			}); err != nil {
+			// 発言の後に、知らせの元の記録を作る: 走っているサイクルを、本番の口で、理由つきで終える（終わりの時刻は発言より後）。
+			cycle := seedCycle(t, s, time.Now().Add(-time.Minute), nil, "")
+			if _, err := s.EndCycleWithReason(context.Background(), formatCycleID(cycle), CycleResultCompleted, CycleEndBudget); err != nil {
 				t.Fatal(err)
 			}
 			notices, err := s.ListNotices(context.Background())
-			if err != nil || len(notices) != 1 {
-				t.Fatalf("notices = %+v, %v; want 1", notices, err)
+			if err != nil || len(notices) != 1 || notices[0].Kind != NoticeCycleEnded {
+				t.Fatalf("notices = %+v, %v; want 1 cycle_ended", notices, err)
+			}
+			chat, err := s.ReadChat(context.Background())
+			if err != nil || len(chat.Messages) == 0 || !notices[0].At.After(chat.Messages[0].CreatedAt) {
+				t.Fatalf("the notice (%v) must come after the owner's message (%+v, %v)", notices[0].At, chat, err)
 			}
 			if !inProgress {
 				if err := s.FinishChatReply(context.Background(), f.turn.ReplyMessageID, ChatStateDone, 0); err != nil {
@@ -497,7 +497,7 @@ func TestChatApproval_MarkCheckIsUnchangedWhileNoticesExist(t *testing.T) {
 			_, err = s.ExecuteWithdraw(context.Background(), WithdrawRequest{ChallengeID: c.ID, ExpectedVersion: prev.Version, Reason: "やめる"}, f.mark(t, c.ID))
 			_, st := challengeVersion(t, s, c.ID)
 			if inProgress {
-				if err != nil || st == StatusUnclassified {
+				if err != nil || st != StatusWithdrawn {
 					t.Errorf("withdraw with notices = %v (status %q), want accepted", err, st)
 				}
 				return
