@@ -84,7 +84,7 @@ func (s *Store) routeChildQuestions(ctx context.Context, p childRouteParams) (ch
 	if jctx == nil {
 		jctx = ctx
 	}
-	if inProgress, err := s.challengeInProgress(jctx, p.ChallengeID); err != nil || !inProgress {
+	if may, err := s.taskMayProceedFor(jctx, p.ChallengeID, p.TaskID); err != nil || !may {
 		return childRoute{}, err
 	}
 	// 答えによる再開の上限に達していれば、判断点を呼ばない（保留を作る入口が、問いの先頭に固定の 1 行を付ける）。

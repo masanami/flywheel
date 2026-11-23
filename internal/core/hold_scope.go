@@ -56,13 +56,17 @@ func taskMayProceed(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) 
 	case StatusInProgress:
 		return true, nil
 	case StatusAwaitingHuman:
-		var blocking int
+		if taskID <= 0 {
+			return false, nil // タスクに結び付かない起動・処理は、保留中の課題では進めない
+		}
+		// 開いている保留が 1 つも無い人間対応待ち（保留の行と合わない状態）は、進めない（保留の行が、進めてよい根拠）。
+		var open, blocking int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL
-			   AND (COALESCE(scope, '') <> 'task' OR task_id = ?)`, challengeID, taskID).Scan(&blocking); err != nil {
+			`SELECT COUNT(*), COALESCE(SUM(COALESCE(scope, '') <> 'task' OR task_id = ?), 0) FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL`,
+			taskID, challengeID).Scan(&open, &blocking); err != nil {
 			return false, err
 		}
-		return blocking == 0, nil
+		return open > 0 && blocking == 0, nil
 	default:
 		return false, nil
 	}
@@ -70,9 +74,10 @@ func taskMayProceed(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) 
 
 // taskMayProceedSQL は taskMayProceed と同じ述語を、SQL の条件の断片にしたもの（課題の行の別名 c と、タスクの番号の式 taskExpr を受け取る）。
 // SQL の中で使う所（契約の待ちの結び付きを外す UPDATE・周の数え）は、自前で書かずこれを使う。
-// 断片は課題が人間対応待ちのときの条件を含むので、taskExpr が NULL になりうるときは呼び出し側で IS NOT NULL を併記する。
+// 開いている保留が 1 つも無い人間対応待ち（保留の行と合わない状態）は進めない。断片は課題が人間対応待ちのときの条件を含むので、taskExpr が NULL になりうるときは呼び出し側で IS NOT NULL を併記する。
 func taskMayProceedSQL(c, taskExpr string) string {
-	return "(" + c + ".status = 'in_progress' OR (" + c + ".status = 'awaiting_human' AND " + taskExpr + " IS NOT NULL AND NOT EXISTS (" +
+	return "(" + c + ".status = 'in_progress' OR (" + c + ".status = 'awaiting_human' AND " + taskExpr + " IS NOT NULL AND EXISTS (" +
+		"SELECT 1 FROM hold oa WHERE oa.challenge_id = " + c + ".id AND oa.answer IS NULL AND oa.closed_at IS NULL) AND NOT EXISTS (" +
 		"SELECT 1 FROM hold o WHERE o.challenge_id = " + c + ".id AND o.answer IS NULL AND o.closed_at IS NULL " +
 		"AND (COALESCE(o.scope, '') <> 'task' OR o.task_id = " + taskExpr + "))))"
 }
@@ -83,29 +88,6 @@ const holdNotOpenTaskScopedSQL = `NOT (COALESCE(scope, '') = 'task' AND answer I
 
 // challengeScopedHoldSQL は、課題を止める保留に絞って読む条件（hold の列を修飾なしで使う）。
 const challengeScopedHoldSQL = `COALESCE(scope, '') <> 'task'`
-
-// loadTaskHeldChallenges は、人間対応待ちで、開いている保留がどれもタスクを止める保留（1 つ以上）の課題を ID 昇順で返す
-// （ほかのタスクを進めてよい課題。個々のタスクを進めてよいかは taskMayProceed が決める）。
-func loadTaskHeldChallenges(ctx context.Context, tx *sql.Tx) ([]Challenge, error) {
-	rows, err := tx.QueryContext(ctx, challengeSelectColumns+` WHERE status = ?
-		AND EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = challenge.id AND h.answer IS NULL AND h.closed_at IS NULL)
-		AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = challenge.id AND h.answer IS NULL AND h.closed_at IS NULL
-			AND COALESCE(h.scope, '') <> 'task')
-		ORDER BY id ASC`, string(StatusAwaitingHuman))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []Challenge
-	for rows.Next() {
-		c, err := scanChallengeRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *c)
-	}
-	return out, rows.Err()
-}
 
 // countOpenHolds は、課題の開いている保留（回答が無く、閉じていない）の数。閉じる書き込みと同じトランザクションの中で数える。
 func countOpenHolds(ctx context.Context, tx *sql.Tx, challengeID int64) (int, error) {
@@ -183,4 +165,124 @@ func mayProceedOn(ctx context.Context, tx *sql.Tx, challengeID int64, taskID *in
 		return false, err
 	}
 	return Status(status) == StatusInProgress, nil
+}
+
+// tcTaskMayProceed は、遷移の中（tc）で「このタスクを進めてよいか」を述語 taskMayProceed と同じ規則で確かめる（課題の状態は tc の
+// 現在の値で見る）。taskID が nil（タスクに結び付かない）なら、課題が着手中のときだけ真。
+func tcTaskMayProceed(ctx context.Context, tc *transitionCtx, taskID *int64) (bool, error) {
+	switch tc.current.Status {
+	case StatusInProgress:
+		return true, nil
+	case StatusAwaitingHuman:
+		if taskID == nil {
+			return false, nil
+		}
+		return taskMayProceed(ctx, tc.tx, tc.id, *taskID)
+	}
+	return false, nil
+}
+
+// taskMayProceedFor は taskMayProceed を、読み取りの中で呼ぶ版。taskID が nil（タスクに結び付かない）なら、課題が着手中のときだけ真。
+func (s *Store) taskMayProceedFor(ctx context.Context, cid int64, taskID *int64) (bool, error) {
+	var ok bool
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		if taskID != nil {
+			v, err := taskMayProceed(ctx, tx, cid, *taskID)
+			ok = v
+			return err
+		}
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM challenge WHERE id = ?`, cid).Scan(&status); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		ok = Status(status) == StatusInProgress
+		return nil
+	})
+	return ok, classifyReadWriteErr(err)
+}
+
+// loadChallengesWithProceedableTasks は、タスクを進めうる課題（着手中の課題と、開いている保留がどれもタスクを止める保留の人間対応待ちの課題）を、
+// 優先度→ID の順に返す。人間対応待ちの課題の、どのタスクを進めてよいかは、taskMayProceed が決める。
+func loadChallengesWithProceedableTasks(ctx context.Context, tx *sql.Tx) ([]Challenge, error) {
+	in, err := loadChallengesByStatusSorted(ctx, tx, StatusInProgress)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, challengeSelectColumns+` WHERE status = ? AND NOT EXISTS
+		(SELECT 1 FROM hold h WHERE h.challenge_id = challenge.id AND h.answer IS NULL AND h.closed_at IS NULL AND COALESCE(h.scope, '') <> 'task')
+		AND EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = challenge.id AND h.answer IS NULL AND h.closed_at IS NULL) ORDER BY id ASC`,
+		string(StatusAwaitingHuman))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := in
+	for rows.Next() {
+		c, err := scanChallengeRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	stableSortChallengesByPriority(out)
+	return out, nil
+}
+
+// openTaskHoldTaskIDs は、課題の、開いているタスクを止める保留が結び付くタスクの内部 ID の集合。
+func openTaskHoldTaskIDs(ctx context.Context, tx *sql.Tx, cid int64) (map[int64]bool, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT task_id FROM hold WHERE challenge_id = ? AND scope = 'task' AND task_id IS NOT NULL AND answer IS NULL AND closed_at IS NULL`, cid)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// contractRunTaskIDFor は contractRunTaskID を読み取りの中で呼ぶ版。
+func (s *Store) contractRunTaskIDFor(ctx context.Context, cid int64, externalRunID string) (*int64, error) {
+	var id *int64
+	err := s.db.Read(ctx, func(tx *sql.Tx) error {
+		v, err := contractRunTaskID(ctx, tx, cid, externalRunID)
+		id = v
+		return err
+	})
+	return id, classifyReadWriteErr(err)
+}
+
+// challengeHasOnlyTaskHolds は、課題に開いている保留があり、そのどれもがタスクを止める保留か。
+func challengeHasOnlyTaskHolds(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
+	var open, blocking int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(COALESCE(scope, '') <> 'task'), 0) FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL`, cid).Scan(&open, &blocking)
+	return open > 0 && blocking == 0, err
+}
+
+// childQuestionTargetMayProceed は、子の問い（保留を作る前）へのスーパーバイザーの手を、判断の間に状態が変わっていないか確かめて実行してよいか
+// （課題が着手中、または、タスクを止める保留だけが開いていて、このタスクに保留が無い）。
+func childQuestionTargetMayProceed(ctx context.Context, tx *sql.Tx, ch *Challenge, taskID *int64) (bool, error) {
+	if ch.Status == StatusInProgress {
+		return true, nil
+	}
+	if ch.Status != StatusAwaitingHuman || taskID == nil {
+		return false, nil
+	}
+	cid, ok := parseChallengeID(ch.ID)
+	if !ok {
+		return false, nil
+	}
+	return taskMayProceed(ctx, tx, cid, *taskID)
 }

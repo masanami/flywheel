@@ -1067,7 +1067,18 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 		if err != nil {
 			return nil, err
 		}
-		if ch.Status == StatusInProgress {
+		taskHoldsOnly := false
+		if ch.Status == StatusAwaitingHuman {
+			// タスクを止める保留だけが開いている課題は、保留の無い検証中のタスクを検証する。
+			if err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
+				var err error
+				taskHoldsOnly, err = challengeHasOnlyTaskHolds(ctx, tx, challengeIntID(ch))
+				return err
+			})); err != nil {
+				return nil, err
+			}
+		}
+		if ch.Status == StatusInProgress || taskHoldsOnly {
 			// 統合先を使う着手中の課題は、検証中のタスクを 1 個ずつ検証する（対象が無ければ ErrInvalidTransition）。
 			var targets []j5TaskTarget
 			if err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) error {
@@ -1194,7 +1205,13 @@ func (s *Store) VerifyAutoJ5(ctx context.Context, in J5AutoInput) (*JudgmentAuto
 			return nil, err
 		}
 		if ch.Status != StatusInProgress {
-			continue // 対象を選んだ後に状態が変わった（保留など）
+			// 対象を選んだ後に状態が変わった（保留など）。タスクを止める保留だけが開いていて、このタスクに保留が無いなら、進める。
+			tid := tg.TaskID
+			if may, err := s.taskMayProceedFor(ctx, tg.ChallengeID, &tid); err != nil {
+				return nil, err
+			} else if !may {
+				continue
+			}
 		}
 		taskID := tg.TaskID
 		item, notStarted, err := s.verifyTarget(ctx, in, jc, *ch, &taskID)
