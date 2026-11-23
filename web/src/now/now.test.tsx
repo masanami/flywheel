@@ -928,6 +928,13 @@ describe("画面: 取り込み（#1184）", () => {
     const side = document.querySelector(".now-ingest-actions") as HTMLElement;
     expect(side.textContent).not.toMatch(/費用|見込み|\$|案/);
   });
+  it("AC-112 #1184: ボタンの脇に、「計画が出来たら、承認を求めます。」の案内が出る", async () => {
+    await openNow({ ingestable: rows });
+    await screen.findByTestId("ingestable-list");
+    expect(screen.getByTestId("ingest-plan-guide")).toHaveTextContent(
+      "計画が出来たら、承認を求めます。",
+    );
+  });
   it("AC-113 #1184: ボタンを押すと、取り込みの口へ、選んだものの指定を送る", async () => {
     const { requests } = await openNow({
       ingestable: rows,

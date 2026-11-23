@@ -29,6 +29,7 @@ import { useIngestable } from "./useIngestable.ts";
 export const INGEST_LOADING_TEXT = "読んでいます";
 export const INGEST_BUTTON_TEXT = (n: number) =>
   `選んだ ${n} 件を取り込んで、計画まで進める`;
+export const INGEST_PLAN_GUIDE_TEXT = "計画が出来たら、承認を求めます。";
 export const INGEST_BUSY_TEXT = "取り込んでいます";
 export const INGEST_DONE_TEXT = "取り込みました。作った課題:";
 export const INGEST_CYCLE_STARTED_TEXT = "計画まで進めるサイクルを始めました。";
@@ -446,6 +447,9 @@ function IngestList({
             </span>
           ) : null}
           {busy ? <output>{INGEST_BUSY_TEXT}</output> : null}
+          <span className="now-hint" data-testid="ingest-plan-guide">
+            {INGEST_PLAN_GUIDE_TEXT}
+          </span>
         </div>
       ) : null}
       {error !== null ? (
