@@ -266,4 +266,20 @@ func TestHoldReads_CarryCheckAndButton(t *testing.T) {
 	if !found {
 		t.Error("question for C-1 missing")
 	}
+	// status の口（AC-49・AC-50）。
+	nh := mustJSON(t, port, "/api/v1/workspaces/w/status")["needs_human"].(map[string]any)
+	hs, _ := nh["holds"].([]any)
+	var sh map[string]any
+	for _, h := range hs {
+		if m := h.(map[string]any); m["hold_id"] == "H-1" {
+			sh = m
+		}
+	}
+	if sh == nil {
+		t.Fatalf("status needs_human.holds has no H-1: %v", nh["holds"])
+	}
+	sopts := sh["options"].([]any)
+	if sh["check"] != check || len(sopts) != 2 || sopts[0].(map[string]any)["button"] != true {
+		t.Errorf("status hold = %v (want check %q)", sh, check)
+	}
 }

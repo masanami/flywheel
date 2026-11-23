@@ -50,7 +50,7 @@ type Overview struct {
 	// 上げた（escalated）保留・止まり方を渡さずに作った（NULL）保留が 1 つでもある課題は、オーナー待ちのまま。
 	SupervisorCheckingChallenges []Challenge
 	// OpenHolds は人間対応待ちの課題の、いま開いている保留（種類を問わない。回答の相手の数え方と同じ）を保留ごとに並べたもの（キーは課題の ID。保留の番号の昇順）。
-	// 開いている保留の無い課題は載らない。`status` のテキストの表示だけが使う（JSON・API の状況には出さない）。
+	// 開いている保留の無い課題は載らない。`status` のテキストの表示と、画面の状況の口（needs_human.holds）が使う（CLI の --json には出さない）。
 	OpenHolds map[string][]OpenHold
 	// ParentAgentChallenges は「親のエージェントが動く番」の課題（id 昇順）。状態は人間対応待ちのままで、
 	// いま開いている保留の種類が親が直接行う課題だけ（課題 #452。新しい状態は作らない）。
@@ -503,12 +503,15 @@ type OpenHold struct {
 	HoldID    string
 	TaskTitle string
 	Options   []HoldOption
+	// Check・OptionButtons は、画面のボタンで答えるための値（Hold の同名の欄と同じ）。
+	Check         string
+	OptionButtons []bool
 }
 
 // listOpenHolds は人間対応待ちの課題の、いま開いている保留（種類を問わない）を、課題の ID ごとに保留の番号の昇順で返す。
 func listOpenHolds(ctx context.Context, tx *sql.Tx) (map[string][]OpenHold, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT h.challenge_id, h.id, h.options, COALESCE(t.title, '')
+		`SELECT h.challenge_id, h.id, h.options, COALESCE(t.title, ''), h.question, h.option_required, h.reason
 		 FROM hold h JOIN challenge c ON c.id = h.challenge_id LEFT JOIN task t ON t.id = h.task_id
 		 WHERE c.status = ? AND h.answer IS NULL AND h.closed_at IS NULL 
 		 ORDER BY h.id ASC`, string(StatusAwaitingHuman))
@@ -521,9 +524,12 @@ func listOpenHolds(ctx context.Context, tx *sql.Tx) (map[string][]OpenHold, erro
 		var (
 			cid, hid int64
 			raw      sql.NullString
+			question string
+			optReq   int
+			reason   sql.NullString
 			h        OpenHold
 		)
-		if err := rows.Scan(&cid, &hid, &raw, &h.TaskTitle); err != nil {
+		if err := rows.Scan(&cid, &hid, &raw, &h.TaskTitle, &question, &optReq, &reason); err != nil {
 			return nil, err
 		}
 		h.HoldID = formatHoldID(hid)
@@ -536,6 +542,8 @@ func listOpenHolds(ctx context.Context, tx *sql.Tx) (map[string][]OpenHold, erro
 				h.Options = opts
 			}
 		}
+		h.Check = holdCheckValue(question, h.Options, optReq == 1)
+		h.OptionButtons = holdOptionButtons(holdReason(reason.String), h.Options)
 		key := formatChallengeID(cid)
 		out[key] = append(out[key], h)
 	}
