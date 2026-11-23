@@ -129,7 +129,7 @@ func expandAddableReason(ctx context.Context, tx *sql.Tx, cid int64, agent *Agen
 		// 保留中は、着手中から置かれた保留のときだけ足せる（計画前・検証中から置かれた保留では足せない）。
 		var from string
 		err := tx.QueryRowContext(ctx,
-			`SELECT from_status FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL ORDER BY id DESC LIMIT 1`, cid).Scan(&from)
+			`SELECT from_status FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL AND `+challengeScopedHoldSQL+` ORDER BY id DESC LIMIT 1`, cid).Scan(&from)
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, "元の課題の保留が、着手中から置かれたものではない", nil
 		}

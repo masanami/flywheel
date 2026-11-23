@@ -142,13 +142,13 @@ func (s *Store) CompleteDirect(ctx context.Context, ch Channel, id string, in Co
 	return c, &out, nil
 }
 
-// loadOpenHoldKind は課題の「現在の未回答の保留」（loadUnansweredHold と同じ、開いている最新の 1 件）の
+// loadOpenHoldKind は課題を止める保留のうち、開いている最新の 1 件（タスクを止める保留が別に開いていても読まない）の
 // ID と種類を返す。行が無ければ sql.ErrNoRows をそのまま返す。
 func loadOpenHoldKind(ctx context.Context, tx *sql.Tx, cid int64) (int64, HoldKind, error) {
 	var id int64
 	var kind string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT id, kind FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL ORDER BY id DESC LIMIT 1`, cid,
+		`SELECT id, kind FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL AND `+challengeScopedHoldSQL+` ORDER BY id DESC LIMIT 1`, cid,
 	).Scan(&id, &kind); err != nil {
 		return 0, "", err
 	}
@@ -251,7 +251,7 @@ func raiseParentDirectHoldOnReject(ctx context.Context, tc *transitionCtx, reaso
 // （status の「親のエージェントが動く番」）。
 func listParentAgentChallenges(ctx context.Context, tx *sql.Tx) ([]Challenge, error) {
 	rows, err := tx.QueryContext(ctx, challengeSelectColumns+` WHERE status = ? AND
-		(SELECT h.kind FROM hold h WHERE h.challenge_id = challenge.id AND h.answer IS NULL AND h.closed_at IS NULL ORDER BY h.id DESC LIMIT 1) = ?
+		(SELECT h.kind FROM hold h WHERE h.challenge_id = challenge.id AND h.answer IS NULL AND h.closed_at IS NULL AND COALESCE(h.scope, '') <> 'task' ORDER BY h.id DESC LIMIT 1) = ?
 		ORDER BY id ASC`, string(StatusAwaitingHuman), string(HoldKindParentDirect))
 	if err != nil {
 		return nil, err

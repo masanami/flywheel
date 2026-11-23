@@ -204,8 +204,10 @@ func (s *Store) reissueOverLimitQuestion(ctx context.Context, tx *sql.Tx, rec *a
 	if err != nil {
 		return false, err
 	}
-	holdID, _, _, _, err := loadUnansweredHold(ctx, tx, cid)
-	if err != nil {
+	// 足す依頼の保留は課題を止める保留なので、課題を止める保留に絞って読む（タスクを止める保留が別に開いていても相手にしない）。
+	var holdID int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id FROM hold WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL AND `+challengeScopedHoldSQL+` ORDER BY id DESC LIMIT 1`, cid).Scan(&holdID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}
