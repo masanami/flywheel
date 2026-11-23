@@ -23,9 +23,9 @@ func promptText(t *testing.T, name string) string {
 func TestSpec_AC225_ArchitectureHasS4c1Range(t *testing.T) {
 	first := archS21First(t)
 	requireAll(t, "architecture §21 の冒頭", first,
-		"区切り S4c-1〔予算の上限と、計画の後にタスクを足すこと〕の範囲も実装済み", "区切り S4c-1 で実装した範囲は", "`task_addition`", "記録と API の値までで、知らせる口は区切り S4d-2")
+		"区切り S4c-1〔予算の上限と、計画の後にタスクを足すこと〕の範囲も実装済み", "区切り S4c-1 で実装した範囲は", "`task_addition`", "記録と API の値までで、画面に知らせを出すのは区切り S4d-2")
 	sec := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), "### 21.2 承認の単位（D23）")
-	requireAll(t, "architecture §21.2", sec, "S4c-1 で実装済みなのは、足したことの記録と API の値まで", "知らせる口は区切り S4d-2")
+	requireAll(t, "architecture §21.2", sec, "S4c-1 で実装したのは、足したことの記録と API の値まで", "区切り S4d-2 で、記録から作る知らせ")
 }
 
 // AC-226: 用語集に、「見込み」「上限」「足す依頼」の行があり、枠の合計を指す「課題の上限」は見込みの旧称として残る。
@@ -95,7 +95,7 @@ func TestSpec_AC89_ArchitectureHasS4c2Range(t *testing.T) {
 	first := archS21First(t)
 	requireAll(t, "architecture §21 の冒頭", first,
 		"区切り S4c-2〔フォローアップを、開いている課題のタスクに上げる〕の範囲も実装済み", "区切り S4c-2 で実装した範囲は",
-		"`followup.promoted_task_id`", "`--raise-limit`", "知らせる口と画面の見せ方は区切り S4d-2")
+		"`followup.promoted_task_id`", "`--raise-limit`", "区切り S4d-2 で、記録から作る知らせとして画面に出す")
 	sec := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), "### 21.2 承認の単位（D23）")
 	requireAll(t, "architecture §21.2", sec, "S4c-2 で実装済みなのは", "上限の引き上げの承認として扱う")
 }

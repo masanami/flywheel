@@ -1076,7 +1076,7 @@ const buttonOpts = [
   { id: "b", label: "案 B", description: "", button: true },
 ];
 
-it("AC-97 #1182: 開いている保留が 2 つあると、保留ごとの枠が 2 つ出て、それぞれに保留の ID・問い・範囲・選択肢が出る", async () => {
+it("AC-96・AC-105・AC-106 #1182: 開いている保留が 2 つあると、保留ごとの枠が 2 つ出て、それぞれに保留の ID・問い・範囲・選択肢が出る", async () => {
   const { root } = await open(
     show({
       actions: ["answer_question"],
@@ -1111,7 +1111,7 @@ it("AC-97 #1182: 開いている保留が 2 つあると、保留ごとの枠が
   ).toHaveLength(2);
 });
 
-it("AC-97 #1182: 片方の保留にボタンで答えると、送るのは答えた保留の ID で、読み直した後、もう片方の枠が残る", async () => {
+it("AC-107 #1182: 片方の保留にボタンで答えると、送るのは答えた保留の ID で、読み直した後、もう片方の枠が残る", async () => {
   const h1 = hold({ hold_id: "H-63", options: buttonOpts, check: "c63" });
   const h2 = hold({ hold_id: "H-64", options: buttonOpts, check: "c64" });
   let current = show({ actions: ["answer_question"], holds: [h1, h2] });
@@ -1147,7 +1147,7 @@ it("AC-97 #1182: 片方の保留にボタンで答えると、送るのは答え
   expect(JSON.parse(post?.body ?? "{}")).toEqual({ option: "a", check: "c63" });
 });
 
-it("AC-96 #1182: ボタンで選べない選択肢と、選択肢の無い問いには、ボタンが出ない", async () => {
+it("AC-98・AC-99 #1182: ボタンで選べない選択肢と、選択肢の無い問いには、ボタンが出ない", async () => {
   const { root } = await open(
     show({
       actions: ["answer_question"],
@@ -1172,7 +1172,7 @@ it("AC-96 #1182: ボタンで選べない選択肢と、選択肢の無い問い
   expect(guide.textContent).not.toContain("H-65");
 });
 
-it("AC-96 #1182: ボタンの値が無い選択肢は、ボタンにしない（画面では選べると判定しない）", async () => {
+it("AC-98 #1182: ボタンの値が無い選択肢は、ボタンにしない（画面では選べると判定しない）", async () => {
   const { root } = await open(
     show({
       actions: ["answer_question"],
@@ -1188,7 +1188,7 @@ it("AC-96 #1182: ボタンの値が無い選択肢は、ボタンにしない（
   expect(q(root).queryByTestId("hold-option-button")).toBeNull();
 });
 
-it("AC-101 #1182: スーパーバイザーが関わった保留の枠に、調べたことと推奨が出る。関わっていない枠には出ない", async () => {
+it("AC-147・AC-148 #1182: スーパーバイザーが関わった保留の枠に、調べたことと推奨が出る。関わっていない枠には出ない", async () => {
   const { root } = await open(
     show({
       actions: ["answer_question"],
