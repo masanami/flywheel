@@ -195,6 +195,20 @@ func TestExpandApply_InvalidOutputsLeaveEverythingAndCountAsFailures(t *testing.
 			if n := len(taskRows(t, f.s, f.cid())); n != 2 {
 				t.Errorf("tasks = %d, want 2 (nothing added)", n)
 			}
+			// flywheel#1210: どの検査で落ちたかを、実行の記録の誤りの欄に残す（内部の前置きは入れない）。
+			runs, err := f.s.ListRuns(context.Background(), RunListOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var runErr string
+			for _, r := range runs {
+				if r.ID == res.Items[0].RunID {
+					runErr = r.Error
+				}
+			}
+			if !strings.HasPrefix(runErr, "invalid J2 expand output: ") || len(runErr) == len("invalid J2 expand output: ") || strings.Contains(runErr, ErrValidation.Error()) {
+				t.Errorf("run error = %q, want the expand prefix and a reason without the internal prefix", runErr)
+			}
 		})
 	}
 }

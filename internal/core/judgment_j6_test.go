@@ -1562,7 +1562,7 @@ func TestInvalidateRunOutputWithReason_ConcatenatesWithExistingError(t *testing.
 	if err := f.s.invalidateRunOutputWithReason(context.Background(), runID, "new reason"); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := f.j6Runs(t)[0].Error, "original failure; j6 invalid_output: new reason"; got != want {
+	if got, want := f.j6Runs(t)[0].Error, "original failure; invalid_output: new reason"; got != want {
 		t.Errorf("run error = %q, want %q", got, want)
 	}
 	f.exec(t, `UPDATE run SET error = '' WHERE id = ?`, testRunInt(t, runID))

@@ -21,6 +21,8 @@ const (
 	MaxHeadlineRunes = 100
 	MaxContextRunes  = 1000
 	MaxStageRunes    = 2000
+	// MaxTaskBodyRunes は計画のタスクの本文（委譲先へ渡す指示）の上限。境界の扱いまで本文に書くので、ほかの欄より長い。
+	MaxTaskBodyRunes = 6000
 	MaxFigureBytes   = 16384
 
 	MinOptions  = 2

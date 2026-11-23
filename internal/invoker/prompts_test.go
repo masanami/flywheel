@@ -202,7 +202,7 @@ func TestJ5Prompt_TaskVerification(t *testing.T) {
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md":   4096,
-		"j2.md":   16875,
+		"j2.md":   16983,
 		"j3.md":   8192,
 		"j5.md":   15048,
 		"j6.md":   6144,
