@@ -27,7 +27,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   complete-direct <ID> --artifact <参照>... [--note <s>]   （親が直接行った作業を成果物の参照つきで記録し、完了確認待ちへ進める）
   answer <ID> ((--answer <a> [--replan] | --option <識別> [--answer <a>]) [--hold <H-ID>] | (--choice <Q番号>=<選択肢の番号> | --text <Q番号>=<文>)...) [--relayed --session <s> --quote <q>]
             （--hold＝回答する保留の ID。開いている保留が 2 つ以上の課題では必須。ID は flywheel show・status に出る）
-            （--option＝選択肢つきの問いの、選ぶ選択肢の識別。選んだ見出しが回答の文になる。--replan とは併用できない）
+            （--option＝選択肢つきの問いの、選ぶ選択肢の識別。選んだ見出しが回答の文になる（--answer も付けると、見出しの後に改行してその文が続く）。--replan とは併用できない）
             （--choice・--text＝計画の承認待ちの問いへの答え。推奨と違う選択肢か文の答えがあれば、課題を分類済へ戻して計画を作り直す）
             （--replan＝範囲・方針・達成条件が変わる回答の印。委譲を再開せず、計画を作り直して計画の承認待ちへ戻す。着手中・検証中の保留だけ）
   approve <ID> [--hold-release | --reopen] [--relayed --session <s> --quote <q>]

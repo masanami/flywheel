@@ -51,7 +51,7 @@ func TestSpec_AC227_ChatPromptAndHelpSayToRecordTheOptionIdentifier(t *testing.T
 	}
 }
 
-// flywheel の使い方の出力の answer の行は、コマンドの定義にある保留への回答のフラグ（--hold・--option）を載せている。
+// flywheel の使い方の出力の answer の行は、保留への回答のフラグ（--hold・--option）を載せている（並びはここに固定で書く。コマンドの定義とは照らさない）。
 func TestUsage_AnswerLineListsTheHoldAndOptionFlags(t *testing.T) {
 	var line string
 	for _, l := range strings.Split(usageText, "\n") {

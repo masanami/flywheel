@@ -1118,7 +1118,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return "", err
 		}
 		holdReasonValue = holdReason(reason.String)
-		// 返す保留には、回答した保留の ID・止める範囲・結び付くタスクを入れる（保留の一覧の読みと同じ値）。
+		// 返す保留には、回答した保留の ID・止める範囲・結び付くタスクを入れる（この 3 つは保留の一覧の読みと同じ値。止まり方・スーパーバイザーの欄は入れない）。
 		holdOut = Hold{HoldID: formatHoldID(id), Scope: HoldScope(scope.String), Kind: HoldKind(kind), Question: question, FromStatus: fromStatus, RaisedAt: raisedAt, Options: opts, OptionRequired: required}
 		if holdTaskID.Valid {
 			v := formatTaskID(holdTaskID.Int64)

@@ -96,6 +96,9 @@ func TestRunAnswer_JSONHoldCarriesTheAnsweredHoldIDScopeAndTask(t *testing.T) {
 	ws, id := twoHoldsWorkspace(t)
 	n := challengeIDToInternalID(t, id)
 	rows := coretest.QueryRows(t, ws, `SELECT task_id FROM hold WHERE challenge_id = ? AND id = 2`, n)
+	if len(rows) != 1 {
+		t.Fatalf("hold 2 rows = %v, want 1", rows)
+	}
 	wantTask := fmt.Sprintf("T-%v", rows[0][0])
 	out := runJSON(t, ws, append([]string{"answer", id, "--hold", "H-2", "--answer", "b はこれで"}, holdRelayArgs()...)...)
 	hold, ok := out["hold"].(map[string]any)

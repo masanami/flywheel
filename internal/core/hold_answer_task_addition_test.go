@@ -286,6 +286,29 @@ func TestHoldAnswerTaskAddition_AddAfterTheEstimateGrewReissuesTheQuestionAndCha
 	if _, _, err := f.answerHoldFull(t, before, AnswerRequest{Option: taskAddOptionAdd}); !errors.Is(err, ErrConflict) {
 		t.Errorf("stale resend err = %v, want ErrConflict", err)
 	}
+	// 出し直して返す保留の読み（loadReissuedHold）は、保留の行の止める範囲とタスクを値で写す（行をタスクを止める保留に置き換えて読む）。
+	holdRow, ok := parseHoldID(h.HoldID)
+	if !ok {
+		t.Fatalf("hold id = %q, want H-<number>", h.HoldID)
+	}
+	var got Hold
+	var taskRow int64
+	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		if err := tx.QueryRow(`SELECT MIN(id) FROM task WHERE challenge_id = ?`, f.cid()).Scan(&taskRow); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE hold SET scope = 'task', task_id = ? WHERE id = ?`, taskRow, holdRow); err != nil {
+			return err
+		}
+		var err error
+		_, got, err = loadReissuedHold(context.Background(), tx, f.cid(), holdRow)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got.HoldID != h.HoldID || got.Scope != HoldScopeTask || got.TaskID == nil || *got.TaskID != formatTaskID(taskRow) {
+		t.Errorf("reissued hold id=%q scope=%q task=%v, want %s / task / %s", got.HoldID, got.Scope, got.TaskID, h.HoldID, formatTaskID(taskRow))
+	}
 }
 
 func TestHoldAnswerTaskAddition_AnsweringAddAgainAfterTheReissueAddsTheTasks(t *testing.T) {
