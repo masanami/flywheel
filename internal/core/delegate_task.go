@@ -134,7 +134,8 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 	}
 	// 人間対応待ちの課題（タスクを止める保留だけが開いているものだけが、ここへ来る）は、進めてよいタスクだけを選ぶ（述語 taskMayProceed）。
 	// 進めようが無い課題の保留（tasks_blocked）は、課題の状態で決めるので、着手中へ戻ってから行う（Blocked を返さない）。
-	out := &launchSelection{Busy: sel.Busy}
+	out := &launchSelection{Busy: sel.Busy, NotStarted: sel.NotStarted}
+	held := 0
 	for _, t := range sel.Tasks {
 		ok, err := taskMayProceed(ctx, tx, cid, taskIntID(&t))
 		if err != nil {
@@ -142,7 +143,14 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 		}
 		if ok {
 			out.Tasks = append(out.Tasks, t)
+		} else {
+			held++
 		}
+	}
+	// 起動できるタスクが保留で外れて残らなかったときも、起動しなかった理由を残す（課題が着手中のときの理由は引き継ぐ）。
+	if len(out.Tasks) == 0 && held > 0 && len(out.NotStarted) == 0 && !out.Busy {
+		out.NotStarted = append(out.NotStarted, NotStarted{ChallengeID: challengeID, Reason: NotStartedNoTasks,
+			Detail: "起動できるタスクは、タスクを止める保留の回答を待っている"})
 	}
 	return out, nil
 }

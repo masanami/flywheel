@@ -292,3 +292,27 @@ func TestHoldScope_CycleWorkCountsTheProceedableTaskOfAHeldChallenge(t *testing.
 		t.Errorf("run stage work with a challenge hold = %d, want 0", got)
 	}
 }
+
+// 起動できるタスクがすべて保留で外れたときは、起動しなかった理由を残す（人間対応待ちの分岐が、理由を落とさない）。
+func TestHoldScope_SelectLaunchTasksKeepsTheNotStartedReasonWhenAllTasksAreHeld(t *testing.T) {
+	t.Parallel()
+	f := newHoldScopeLaunchFixture(t, multiTask{key: "a"}, multiTask{key: "b", deps: []string{"a"}})
+	if err := f.overlay(f.taskA, HoldOptionsInput{Scope: HoldScopeTask}); err != nil {
+		t.Fatal(err)
+	}
+	cid, _ := parseChallengeID(f.id)
+	var sel *launchSelection
+	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
+		var err error
+		sel, err = selectLaunchTasks(context.Background(), tx, nil, f.id, cid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sel.Tasks) != 0 {
+		t.Fatalf("tasks = %v, want none", sel.Tasks)
+	}
+	if len(sel.NotStarted) == 0 && !sel.Busy {
+		t.Errorf("NotStarted が空: 起動しなかった理由を引き継ぐ")
+	}
+}
