@@ -241,7 +241,7 @@ API: 課題の詳細の応答（`GET /api/v1/workspaces/{name}/challenges/{id}`�
 
 ### セキュリティ: 権限モードと、子の目印
 
-- **採用案**: (1) ステップが起動する claude には、宣言の `permission_mode` を `--permission-mode` で渡す。値の閉集合は変えない。Tom の切り替えでは、いまと同じ動きになる値を書く（いまの外部コマンドの形は、権限モードを渡していない。同じになるのは `default`）(2) ステップが起動する claude の子の環境に `FLYWHEEL_DELEGATED_RUN` を付ける。`flywheel flow` のコマンドも、ほかのコマンドと同じに、この目印のある環境からは実行できない（いまの、コマンドの照合より前の検査を、そのまま使う）
+- **採用案**: (1) ステップが起動する claude には、宣言の `permission_mode` を `--permission-mode` で渡す。値の閉集合は変えない。Tom の切り替えでは、いまと同じ動きになる値（`auto`）を書く。いまの外部コマンドの形は、権限モードを渡していないが、渡さないときに効くのは、実行する人のユーザー設定の既定で、Tom を動かす環境では `auto`（Tom のいまの宣言の `permission_mode` も `auto`）。`default` を渡すと、ユーザー設定より引数が優先され、いまより厳しくなる（相手のいない実行で、確認の要る操作が拒否される）【訂正 2026-11-24 オーナー。初めは「同じになるのは `default`」と書いていた】(2) ステップが起動する claude の子の環境に `FLYWHEEL_DELEGATED_RUN` を付ける。`flywheel flow` のコマンドも、ほかのコマンドと同じに、この目印のある環境からは実行できない（いまの、コマンドの照合より前の検査を、そのまま使う）
   - 値の渡し方: core は、`flow start` と `flow resume` に、`--permission-mode <宣言の値>` と `--delegated-run <そのコマンドの run の ID>`（契約のコマンド 1 回ごとの run。例: `R-2494`）を必ず付ける。`flywheel flow` は、どちらかが無い・権限モードが 3 つの値の外のとき、使い方の誤りで終わる。状態を読む・取り消すコマンドは、claude を起動しないので、どちらも受けない
   - 切り離して進める側へは、権限モードを `HARNESS_CLAUDE_PERMISSION_MODE`、run の ID を flywheel の内部の環境変数で引き継ぐ。進める仕組みは、claude を起動するときだけ、子の環境に `FLYWHEEL_DELEGATED_RUN=<run の ID>` を足す。進める側のプロセス自身の環境と、つなぎのスクリプト・プラグインのスクリプトの環境には、目印を置かない（置くと、進める側が自分の起動で拒否される）
 - **理由**: いまは、委譲先の子が `harness` を呼ぶことはできても、flywheel のコマンドは別の道具なので届かなかった。フローを flywheel のバイナリが進めるようになると、子が `flywheel flow resume` を呼べば、自分のレビュー待ちに自分で答えられてしまう。承認と回答の口へ子から届かない、という決まり（設計書 §9）を、組み込みのフローでも保つ
@@ -321,7 +321,7 @@ API: 課題の詳細の応答（`GET /api/v1/workspaces/{name}/challenges/{id}`�
 {
   "id": "flywheel-flow",
   "form": "flow",
-  "permission_mode": "default",
+  "permission_mode": "auto",
   "challenge_id_prefix": "tom-",
   "models": { "ticket": { "main": "<モデルの名前>" } },
   "operations": [
