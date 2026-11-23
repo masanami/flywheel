@@ -199,7 +199,7 @@ type BudgetExhausted struct {
 	ReviewRemainingUSD float64
 }
 
-// listBudgetExhausted は着手中で承認済みの計画を持ち、実装枠の残りが 1 USD 未満の課題を
+// listBudgetExhausted は着手中（タスクを止める保留だけが開いている人間対応待ちの課題は、進めてよいタスクだけ）で承認済みの計画を持ち、実装枠の残りが 1 USD 未満の課題を
 // ID 昇順で返す。agent が nil のときは、計画の出力が両方の額を明記する課題だけを判定できる。
 func listBudgetExhausted(ctx context.Context, tx *sql.Tx, agent *AgentDeclaration) ([]BudgetExhausted, error) {
 	// タスクを止める保留だけが開いている課題も、保留の無い（進めてよい）タスクの枠を数える。

@@ -73,6 +73,36 @@ func taskMayProceed(ctx context.Context, tx *sql.Tx, challengeID, taskID int64) 
 	}
 }
 
+// holdNotOpenTaskScopedSQL は、課題の単位で「最後の保留」を読んで境を決める所が、ほかのタスクの開いている保留
+// （タスクを止める保留で、回答も閉じもまだ無いもの）を境に数えないための条件（hold の列を修飾なしで使う）。
+const holdNotOpenTaskScopedSQL = `NOT (COALESCE(scope, '') = 'task' AND answer IS NULL AND closed_at IS NULL)`
+
+// challengeScopedHoldSQL は、課題を止める保留に絞って読む条件（hold の列を修飾なしで使う）。
+const challengeScopedHoldSQL = `COALESCE(scope, '') <> 'task'`
+
+// loadTaskHeldChallenges は、人間対応待ちで、開いている保留がどれもタスクを止める保留（1 つ以上）の課題を ID 昇順で返す
+// （ほかのタスクを進めてよい課題。個々のタスクを進めてよいかは taskMayProceed が決める）。
+func loadTaskHeldChallenges(ctx context.Context, tx *sql.Tx) ([]Challenge, error) {
+	rows, err := tx.QueryContext(ctx, challengeSelectColumns+` WHERE status = ?
+		AND EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = challenge.id AND h.answer IS NULL AND h.closed_at IS NULL)
+		AND NOT EXISTS (SELECT 1 FROM hold h WHERE h.challenge_id = challenge.id AND h.answer IS NULL AND h.closed_at IS NULL
+			AND COALESCE(h.scope, '') <> 'task')
+		ORDER BY id ASC`, string(StatusAwaitingHuman))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Challenge
+	for rows.Next() {
+		c, err := scanChallengeRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *c)
+	}
+	return out, rows.Err()
+}
+
 // countOpenHolds は、課題の開いている保留（回答が無く、閉じていない）の数。閉じる書き込みと同じトランザクションの中で数える。
 func countOpenHolds(ctx context.Context, tx *sql.Tx, challengeID int64) (int, error) {
 	var n int
@@ -84,7 +114,7 @@ func countOpenHolds(ctx context.Context, tx *sql.Tx, challengeID int64) (int, er
 // 統合先を使う課題で、着手中の課題の 1 つのタスクの作業の中で起きた止まり（tc.taskID が結び付いている）だけ。
 // それ以外（タスクに結び付かない・統合先を使わない・検証中から立つ）は課題を止める保留のまま（opts を変えない）。
 func taskStopOptions(ctx context.Context, tc *transitionCtx, opts HoldOptionsInput) (HoldOptionsInput, error) {
-	if tc.taskID == nil || (tc.current.Status != StatusInProgress && tc.current.Status != StatusAwaitingHuman) {
+	if opts.ChallengeWide || tc.taskID == nil || (tc.current.Status != StatusInProgress && tc.current.Status != StatusAwaitingHuman) {
 		return opts, nil
 	}
 	integ, err := challengeUsesIntegration(ctx, tc.tx, tc.id)

@@ -545,12 +545,15 @@ func (s *Store) holdLandedEnd(ctx context.Context, rep *ContractRunReport, cid i
 }
 
 // endRunAtHold は契約の実行を終わった記録にする。withHold が真なら、同じトランザクションで立てた課題の最後の保留の時刻
-// （それより遅くならない）を終わりの時刻にする。
+// （それより遅くならない）を終わりの時刻にする。最後の保留は、この実行のタスクを止める保留か、課題を止める保留から選ぶ
+// （ほかのタスクを止める保留が開いていても、それを終わりの時刻に使わない）。
 func (s *Store) endRunAtHold(ctx context.Context, tx *sql.Tx, cid int64, externalRunID string, withHold bool) error {
 	now := formatTimestamp(s.currentTime())
 	if withHold {
 		var raised sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT raised_at FROM hold WHERE challenge_id = ? ORDER BY id DESC LIMIT 1`, cid).Scan(&raised); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `SELECT raised_at FROM hold WHERE challenge_id = ?
+			AND (COALESCE(scope, '') <> 'task' OR task_id = (SELECT task_id FROM contract_run WHERE challenge_id = ? AND external_run_id = ?))
+			ORDER BY id DESC LIMIT 1`, cid, cid, externalRunID).Scan(&raised); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		if raised.Valid && raised.String < now {

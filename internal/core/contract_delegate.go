@@ -1159,6 +1159,12 @@ func (s *Store) holdContractWithReason(ctx context.Context, runID, challengeID, 
 	return s.holdContractWithStop(ctx, runID, challengeID, question, reason, HoldOptionsInput{})
 }
 
+// holdContractChallengeWide は holdContractWithReason の、課題を止める保留として立てる版（上げる依頼の保留。止める範囲を、
+// タスクの結び付きから導かない）。
+func (s *Store) holdContractChallengeWide(ctx context.Context, runID, challengeID, question string, reason holdReason) (bool, error) {
+	return s.holdContractWithStop(ctx, runID, challengeID, question, reason, HoldOptionsInput{ChallengeWide: true})
+}
+
 // holdContractWithStop は holdContractWithReason の、止まり方（opts.StopKind）を渡す版。
 func (s *Store) holdContractWithStop(ctx context.Context, runID, challengeID, question string, reason holdReason, opts HoldOptionsInput) (bool, error) {
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), runID, challengeID, OpHold,

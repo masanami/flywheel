@@ -198,6 +198,7 @@ func TestChallengeCheck_NotMetHoldsAsChallengeCheckNotMetFromInProgressAndCloses
 	if reason != "challenge_check_not_met" { // AC-179
 		t.Errorf("hold reason = %q, want challenge_check_not_met", reason)
 	}
+	wantLastHoldScopeNull(t, f.s)         // AC-8
 	wantLastHoldStop(t, f.s, stopNone)    // AC-17: 課題の単位の確かめの「満たしていない」は対象にしない
 	if from != string(StatusInProgress) { // AC-180
 		t.Errorf("hold from_status = %q, want in_progress", from)
@@ -248,6 +249,7 @@ func TestChallengeCheck_UncertainHoldsWithoutATask(t *testing.T) {
 	if reason == "challenge_check_not_met" || from != string(StatusVerifying) || question != "QUESTION-TEXT" {
 		t.Errorf("hold = (%q, %q, %q), want the ordinary uncertain hold from verifying", reason, from, question)
 	}
+	wantLastHoldScopeNull(t, f.s) // AC-5
 }
 
 // ---- 上げる依頼の取り消し ----

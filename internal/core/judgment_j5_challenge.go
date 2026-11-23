@@ -67,7 +67,7 @@ func loadJ5ChallengeScope(ctx context.Context, tx *sql.Tx, cid int64) (*j5Challe
 	var answer, reason, answeredAt sql.NullString
 	var replan int
 	qerr = tx.QueryRowContext(ctx,
-		`SELECT answer, reason, answered_at, replan FROM hold WHERE challenge_id = ? ORDER BY id DESC LIMIT 1`, cid).Scan(&answer, &reason, &answeredAt, &replan)
+		`SELECT answer, reason, answered_at, replan FROM hold WHERE challenge_id = ? AND `+holdNotOpenTaskScopedSQL+` ORDER BY id DESC LIMIT 1`, cid).Scan(&answer, &reason, &answeredAt, &replan)
 	if qerr != nil && !errors.Is(qerr, sql.ErrNoRows) {
 		return nil, qerr
 	}
