@@ -28,15 +28,20 @@ func TestScreenRoutes_AreGuardedByCSRFAndHaveNoBodyYet(t *testing.T) {
 		if code, body := post(t, port, p, "", ""); code != http.StatusForbidden || !strings.Contains(body, CodeForbiddenOrigin) {
 			t.Errorf("POST %s without CSRF: %d %q, want 403 forbidden_origin", p, code, body)
 		}
-		if code, _ := post(t, port, p, token, token); code != http.StatusNotFound {
-			t.Errorf("POST %s: %d, want 404 until the route has a body", p, code)
+		// 本文を置いた口は、空の本文を 400 で断る。ワークスペースが無ければ 404（ストアを開く前の誤りは本文の検査が先）。
+		want := http.StatusNotFound
+		if strings.HasSuffix(p, "/ingest") || strings.Contains(p, "/followups/") {
+			want = http.StatusBadRequest
+		}
+		if code, _ := post(t, port, p, token, token); code != want {
+			t.Errorf("POST %s: %d, want %d", p, code, want)
 		}
 		if code, _ := getPath(t, port, p, fmt.Sprintf("127.0.0.1:%d", port), ""); code != http.StatusNotFound {
 			t.Errorf("GET %s: %d, want 404 (write route)", p, code)
 		}
 	}
 	if code, _ := getPath(t, port, "/api/v1/workspaces/w/notices", fmt.Sprintf("127.0.0.1:%d", port), ""); code != http.StatusNotFound {
-		t.Errorf("GET notices: %d, want 404 until the route has a body", code)
+		t.Errorf("GET notices of an unknown workspace: %d, want 404", code)
 	}
 	if code, _ := post(t, port, "/api/v1/workspaces/w/notices", token, token); code != http.StatusNotFound {
 		t.Errorf("POST notices: %d, want 404 (read route)", code)
