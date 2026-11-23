@@ -294,11 +294,16 @@ func loadReissuedHold(ctx context.Context, tx *sql.Tx, cid, holdID int64) (*Chal
 		return nil, Hold{}, err
 	}
 	var kind string
-	var runID sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT kind, run_id FROM hold WHERE id = ?`, holdID).Scan(&kind, &runID); err != nil {
+	var runID, taskID sql.NullInt64
+	var scope sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT kind, run_id, task_id, scope FROM hold WHERE id = ?`, holdID).Scan(&kind, &runID, &taskID, &scope); err != nil {
 		return nil, Hold{}, err
 	}
-	h := Hold{Kind: HoldKind(kind), Question: question, FromStatus: from, RaisedAt: raisedAt, Options: opts, OptionRequired: required, Reissued: true}
+	h := Hold{HoldID: formatHoldID(holdID), Scope: HoldScope(scope.String), Kind: HoldKind(kind), Question: question, FromStatus: from, RaisedAt: raisedAt, Options: opts, OptionRequired: required, Reissued: true}
+	if taskID.Valid {
+		v := formatTaskID(taskID.Int64)
+		h.TaskID = &v
+	}
 	if runID.Valid {
 		v := formatRunID(runID.Int64)
 		h.RunID = &v

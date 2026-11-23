@@ -90,6 +90,26 @@ func TestRunAnswer_RelayedWithHoldAnswersOnlyThatHold(t *testing.T) {
 	}
 }
 
+// タスクを止める保留に答えた出力（--json）の hold は、答えた保留の ID・止める範囲・結び付くタスクを持つ（既定値の "" ・challenge・null にしない）。
+func TestRunAnswer_JSONHoldCarriesTheAnsweredHoldIDScopeAndTask(t *testing.T) {
+	t.Parallel()
+	ws, id := twoHoldsWorkspace(t)
+	n := challengeIDToInternalID(t, id)
+	rows := coretest.QueryRows(t, ws, `SELECT task_id FROM hold WHERE challenge_id = ? AND id = 2`, n)
+	if len(rows) != 1 {
+		t.Fatalf("hold 2 rows = %v, want 1", rows)
+	}
+	wantTask := fmt.Sprintf("T-%v", rows[0][0])
+	out := runJSON(t, ws, append([]string{"answer", id, "--hold", "H-2", "--answer", "b はこれで"}, holdRelayArgs()...)...)
+	hold, ok := out["hold"].(map[string]any)
+	if !ok {
+		t.Fatalf("hold = %#v, want an object", out["hold"])
+	}
+	if hold["hold_id"] != "H-2" || hold["scope"] != "task" || hold["task_id"] != wantTask {
+		t.Errorf("hold_id=%v scope=%v task_id=%v, want H-2 / task / %s", hold["hold_id"], hold["scope"], hold["task_id"], wantTask)
+	}
+}
+
 // AC-69〜71・81: 別の保留の識別・形の違う値は、検証の誤りで断る（何も書かない）。
 func TestRunAnswer_HoldAndOptionAreCheckedAgainstTheSpecifiedHold(t *testing.T) {
 	t.Parallel()

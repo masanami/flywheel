@@ -1,14 +1,16 @@
 package core
 
-// このファイルは、タスクの検証（統合先を使う着手中の課題の、検証中のタスク 1 個を対象にする J5）を持つ。
+// このファイルは、タスクの検証（統合先を使う課題の、進めてよい検証中のタスク 1 個を対象にする J5）を持つ。
+// 「タスクを進めてよい」は述語 taskMayProceed（課題が着手中、または、タスクを止める保留だけが開いた人間対応待ちで、
+// そのタスクに開いている保留が無い）。
 //
-//   - 対象: 課題が着手中・統合先を使う・タスクが検証中で、タスクの契約の実行（最後の 1 件）の中身の識別（content_ref）が、
-//     検証した中身（verified_ref）と違う（か、verified_ref が無い）もの。課題とタスクの組で選ぶ。保留中の課題のタスクは選ばない。
+//   - 対象: タスクを進めてよい・統合先を使う・タスクが検証中で、タスクの契約の実行（最後の 1 件）の中身の識別（content_ref）が、
+//     検証した中身（verified_ref）と違う（か、verified_ref が無い）もの。課題とタスクの組で選ぶ。課題を止める保留が開いた課題のタスクと、開いている保留が結び付くタスクは選ばない。
 //   - 入力: そのタスクの委譲の実行のうち、成果物を持つ最後の実行の成果物（ほかのタスクの成果物は入れない）と、子に対応するタスクの「対応する取り込み元」
 //     （取り込みのときに記録した子の題名・URL・本文。上流は読み直さない）。
-//   - 結果: 課題の遷移（T8〜T10）を使わずに書く。書く直前に、課題が着手中・タスクが検証中・契約の実行の中身の識別が検証を
+//   - 結果: 課題の遷移（T8〜T10）を使わずに書く。書く直前に、タスクを進めてよい・タスクが検証中・契約の実行の中身の識別が検証を
 //     始めたときと同じことを確かめ、違えば捨てる（何も書かない。次の J5 がやり直す）。
-//     満たした→契約の実行の verified_ref に中身の識別を記録するだけ（タスクは検証中のまま・課題は着手中のまま。承認は求めず、
+//     満たした→契約の実行の verified_ref に中身の識別を記録するだけ（タスクは検証中のまま・課題の状態も変えない。承認は求めず、
 //     反映の操作・課題の実物の記録は作らない）。満たしていない→タスクを着手中へ戻す（次の状態の確認が、契約の実行へ respond を
 //     返す）。判断できない→課題を保留にし、保留をそのタスクに結び付ける。
 
@@ -87,7 +89,7 @@ func selectJ5TaskTargets(ctx context.Context, tx *sql.Tx) ([]j5TaskTarget, error
 	return out, nil
 }
 
-// selectJ5TaskTargetsOf は課題 ch（着手中でなければ対象なし）の、検証するタスクの組を返す。統合先を使わない課題は対象にしない。
+// selectJ5TaskTargetsOf は課題 ch（着手中でも人間対応待ちでもなければ対象なし。タスクごとに述語 taskMayProceed で絞る）の、検証するタスクの組を返す。統合先を使わない課題は対象にしない。
 // 終わっていない実行を持つタスク（タスクの検証・契約のコマンドの実行中）は、今は選ばない。
 func selectJ5TaskTargetsOf(ctx context.Context, tx *sql.Tx, ch Challenge) ([]j5TaskTarget, error) {
 	cid, ok := parseChallengeID(ch.ID)
@@ -141,7 +143,7 @@ func selectJ5TaskTargetsOf(ctx context.Context, tx *sql.Tx, ch Challenge) ([]j5T
 	return out, nil
 }
 
-// loadJ5TaskScope はタスク taskID の検証の対象を読む。課題が着手中・統合先を使う・タスクが検証中・中身の識別が検証した中身と
+// loadJ5TaskScope はタスク taskID の検証の対象を読む。タスクを進めてよい（述語 taskMayProceed）・統合先を使う・タスクが検証中・中身の識別が検証した中身と
 // 違う、のどれかを満たさなければ nil。
 func loadJ5TaskScope(ctx context.Context, tx *sql.Tx, cid, taskID int64) (*j5TaskScope, error) {
 	integ, err := challengeUsesIntegration(ctx, tx, cid)
@@ -191,7 +193,7 @@ func formatTaskSourceSection(c SourceChild) string {
 	return fmt.Sprintf("題名: %s\n\nURL: %s\n\n本文:\n%s", c.Title, c.URL, c.Body)
 }
 
-// j5TaskStillCurrent は、タスクの検証の結果を書く直前の読み直し（書き込みのトランザクションの中）。課題が着手中・タスクが
+// j5TaskStillCurrent は、タスクの検証の結果を書く直前の読み直し（書き込みのトランザクションの中）。タスクを進めてよい（述語 taskMayProceed）・タスクが
 // 検証中・タスクの契約の実行（最後の 1 件）の行と中身の識別が検証を始めたときと同じなら真。
 func j5TaskStillCurrent(ctx context.Context, tx *sql.Tx, cid int64, scope *j5TaskScope) (bool, error) {
 	tid := taskIntID(&scope.Task)

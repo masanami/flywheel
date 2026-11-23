@@ -24,14 +24,12 @@ import (
 	"time"
 )
 
-// loadUnansweredHold は challengeID（内部整数 ID）の「現在の未回答の保留」
-// （最新の1件）を返す。PrepareAnswer（①）と ExecuteAnswer の
-// resolvePreceding（②。同じトランザクション内での再読み込み）が同じ
-// クエリを共有するために切り出した（self-review 指摘: 別々に持つと、
-// 承認対象の同一性を決める不変条件〈①が見せた保留と②が回答を書き込む
-// 保留が同じであること〉が、将来どちらか一方だけクエリが変わっても
-// 検出できない形で壊れうる）。行が無ければ sql.ErrNoRows をそのまま返す
-// （呼び出し側が current.ID を使った文脈つきのエラーメッセージを組み立てる）。
+// loadUnansweredHold は challengeID（内部整数 ID）の開いている保留（回答が無く、閉じていない）のうち
+// 最新の 1 件を返す。使うのは取り下げの本人確認の前の要約（PrepareWithdraw）だけ。
+// 回答の相手の保留は、これではなく selectAnswerHold が決める（PrepareAnswer と ExecuteAnswer の両方が
+// selectAnswerHold を使い、開いている保留が 2 つ以上なら最新を黙って選ばず --hold を求める。確かめた保留と
+// 書き込む保留が同じことは checkAnswerHoldUnchanged が確かめる）。行が無ければ sql.ErrNoRows をそのまま返す
+// （呼び出し側が文脈つきのエラーメッセージを組み立てる）。
 func loadUnansweredHold(ctx context.Context, tx *sql.Tx, cid int64) (holdID int64, question string, fromStatus Status, raisedAt time.Time, err error) {
 	var fs, raisedAtStr string
 	if err = tx.QueryRowContext(ctx,
@@ -46,8 +44,8 @@ func loadUnansweredHold(ctx context.Context, tx *sql.Tx, cid int64) (holdID int6
 	return holdID, question, Status(fs), raisedAt, nil
 }
 
-// errNoUnansweredHold は loadUnansweredHold が sql.ErrNoRows を返したときに
-// PrepareAnswer・ExecuteAnswer の両方が使う、文脈つきのエラーを組み立てる。
+// errNoUnansweredHold は、人間対応待ちの課題に開いている保留が 1 つも無いときの、文脈つきのエラーを組み立てる
+// （回答の相手を決める selectAnswerHold〔PrepareAnswer・ExecuteAnswer の両方が通る〕と、親が直接行う保留の読み〔parent_direct.go〕が使う）。
 func errNoUnansweredHold(challengeID string) error {
 	return fmt.Errorf("core: challenge %s is awaiting_human but has no unanswered hold", challengeID)
 }
@@ -1115,12 +1113,17 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		}
 		var runID sql.NullInt64
 		var kind string
-		var reason sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT run_id, kind, reason, task_id FROM hold WHERE id = ?`, id).Scan(&runID, &kind, &reason, &holdTaskID); err != nil {
+		var reason, scope sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT run_id, kind, reason, task_id, scope FROM hold WHERE id = ?`, id).Scan(&runID, &kind, &reason, &holdTaskID, &scope); err != nil {
 			return "", err
 		}
 		holdReasonValue = holdReason(reason.String)
-		holdOut = Hold{Kind: HoldKind(kind), Question: question, FromStatus: fromStatus, RaisedAt: raisedAt, Options: opts, OptionRequired: required}
+		// 返す保留には、回答した保留の ID・止める範囲・結び付くタスクを入れる（この 3 つは保留の一覧の読みと同じ値。止まり方・スーパーバイザーの欄は入れない）。
+		holdOut = Hold{HoldID: formatHoldID(id), Scope: HoldScope(scope.String), Kind: HoldKind(kind), Question: question, FromStatus: fromStatus, RaisedAt: raisedAt, Options: opts, OptionRequired: required}
+		if holdTaskID.Valid {
+			v := formatTaskID(holdTaskID.Int64)
+			holdOut.TaskID = &v
+		}
 		if runID.Valid {
 			v := formatRunID(runID.Int64)
 			holdOut.RunID = &v

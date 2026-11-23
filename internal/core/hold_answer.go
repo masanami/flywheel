@@ -160,7 +160,7 @@ func editHoldText(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid, h
 	if _, err := tx.ExecContext(ctx, `UPDATE hold SET question = ?, options = ? WHERE id = ?`, newQuestion, newOptions, holdID); err != nil {
 		return false, err
 	}
-	after["hold_id"] = holdID
+	after["hold_id"] = formatHoldID(holdID) // ほかの作業ログ（回答・スーパーバイザーの手）と同じ H-<番号> の形
 	for k, v := range extraAfter {
 		after[k] = v
 	}
