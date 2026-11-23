@@ -43,6 +43,11 @@ const guideOf = (context: string, path: string): Guide | undefined =>
 // 「いま進められること」: あなたを待っているもの・取り込めるもの・サイクルを回すと進むもの・未のフォローアップ。
 // 件数と区分は core の値（状況の API）で、画面は並べるだけ。画面のボタンで受ける書き込みは
 // 「サイクルを回す」・取り込み・選択肢で答える回答。
+// 題名が引けず titleOf が ID をそのまま返したときは、ID を単独で出さず「課題（ID）」にする。
+function withIdIfUntitled(label: string, id: string): string {
+  return label === id ? `課題（${id}）` : label;
+}
+
 export function NowScreen({
   live,
   agentName,
@@ -214,13 +219,7 @@ export function NowScreen({
 }
 
 // 取り込み元の行き先。http(s) だけをリンクにし、それ以外は文字として出す（判定は safeHref の 1 つ）。
-function SourceLink({
-  url,
-  children,
-}: {
-  url: string;
-  children: ReactNode;
-}) {
+function SourceLink({ url, children }: { url: string; children: ReactNode }) {
   const href = safeHref(url);
   return href ? (
     <a href={href} target="_blank" rel="noopener noreferrer">
@@ -411,7 +410,10 @@ function IngestList({
                       view: "tree",
                     })}
                   >
-                    {titleOf(it.parent_challenge_id)}
+                    {withIdIfUntitled(
+                      titleOf(it.parent_challenge_id),
+                      it.parent_challenge_id,
+                    )}
                   </a>
                 </div>
               ) : null}
@@ -465,7 +467,9 @@ function IngestList({
                     view: "tree",
                   })}
                 >
-                  {c.title !== "" ? c.title : titleOf(c.id)}
+                  {c.title !== ""
+                    ? c.title
+                    : withIdIfUntitled(titleOf(c.id), c.id)}
                 </a>
               </li>
             ))}

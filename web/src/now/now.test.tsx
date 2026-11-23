@@ -966,6 +966,24 @@ describe("画面: 取り込み（#1184）", () => {
     ).toBe("#/a/alpha/challenges/C-77");
     await waitFor(() => expect(ingestCalls(requests)).toHaveLength(2));
   });
+  it("#1184: 成立後のリンクの題名が引けないとき、課題の ID を単独で出さない", async () => {
+    await openNow({
+      ingestable: rows,
+      ingestPost: {
+        cycle: { reason: "started", started: true },
+        ingested: [
+          { challenge_id: "C-77", children: 0, external_key: "o/r#unknown" },
+        ],
+      },
+    });
+    await screen.findByTestId("ingestable-list");
+    fireEvent.click(checkOf("取り込み元 2"));
+    fireEvent.click(ingestBtn());
+    const done = await screen.findByTestId("ingest-done");
+    expect(
+      within(done).getByRole("link", { name: "課題（C-77）" }),
+    ).toBeTruthy();
+  });
   it("AC-115 #1184: 取り込みの口が誤りを返すと、理由が出て、チェックは残る", async () => {
     await openNow({
       ingestable: rows,
