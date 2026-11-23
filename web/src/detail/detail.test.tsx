@@ -1066,3 +1066,147 @@ it("AC-128: 通したコンフリクトの解消が 0 件なら、課題の詳�
   const { root } = await open(show());
   expect(q(root).queryByTestId("conflict-fixes")).toBeNull();
 });
+
+// 画面のボタンで選ぶだけの回答（区切り S4d-2 の T5）。課題の詳細の待ちの所の、保留ごとの枠。
+const buttonOpts = [
+  { id: "a", label: "案 A", description: "A の説明", button: true },
+  { id: "b", label: "案 B", description: "", button: true },
+];
+
+it("AC-97 #1182: 開いている保留が 2 つあると、保留ごとの枠が 2 つ出て、それぞれに保留の ID・問い・範囲・選択肢が出る", async () => {
+  const { root } = await open(
+    show({
+      actions: ["answer_question"],
+      holds: [
+        hold({
+          hold_id: "H-61",
+          question: "問い 61",
+          options: buttonOpts,
+          check: "c61",
+        }),
+        hold({
+          hold_id: "H-62",
+          question: "問い 62",
+          options: buttonOpts,
+          check: "c62",
+        }),
+      ],
+    }),
+  );
+  const frames = q(root).getAllByTestId("hold-question");
+  expect(frames).toHaveLength(2);
+  expect(
+    within(frames[0] as HTMLElement).getByTestId("hold-id").textContent,
+  ).toContain("H-61");
+  expect(frames[0]?.textContent).toContain("問い 61");
+  expect(frames[0]?.textContent).toContain("課題全体");
+  expect(
+    within(frames[1] as HTMLElement).getByTestId("hold-id").textContent,
+  ).toContain("H-62");
+  expect(
+    within(frames[0] as HTMLElement).getAllByTestId("hold-option-button"),
+  ).toHaveLength(2);
+});
+
+it("AC-97 #1182: 片方の保留にボタンで答えると、送るのは答えた保留の ID で、読み直した後、もう片方の枠が残る", async () => {
+  const h1 = hold({ hold_id: "H-63", options: buttonOpts, check: "c63" });
+  const h2 = hold({ hold_id: "H-64", options: buttonOpts, check: "c64" });
+  let current = show({ actions: ["answer_question"], holds: [h1, h2] });
+  const { root, requests } = await open(current, {
+    extra: {
+      [`${BASE}/challenges/C-1`]: () =>
+        new Response(JSON.stringify(current), { status: 200 }),
+      [`POST ${BASE}/challenges/C-1/holds/H-63/answer`]: () => {
+        current = {
+          ...current,
+          holds: [
+            { ...h1, answer: "案 A", closed_at: "2026-11-02T00:00:00Z" },
+            h2,
+          ],
+        };
+        return new Response(
+          JSON.stringify({ cycle: { started: true, reason: "" }, hold: h1 }),
+          { status: 200 },
+        );
+      },
+    },
+  });
+  const first = q(root).getAllByTestId("hold-question")[0] as HTMLElement;
+  fireEvent.click(
+    within(first).getAllByTestId("hold-option-button")[0] as HTMLElement,
+  );
+  fireEvent.click(q(root).getByTestId("hold-confirm-send"));
+  await waitFor(() =>
+    expect(q(root).getAllByTestId("hold-question")).toHaveLength(1),
+  );
+  expect(q(root).getByTestId("hold-id").textContent).toContain("H-64");
+  const post = requests.find((r) => r.method === "POST");
+  expect(JSON.parse(post?.body ?? "{}")).toEqual({ option: "a", check: "c63" });
+});
+
+it("AC-96 #1182: ボタンで選べない選択肢と、選択肢の無い問いには、ボタンが出ない", async () => {
+  const { root } = await open(
+    show({
+      actions: ["answer_question"],
+      holds: [
+        hold({
+          hold_id: "H-65",
+          options: [
+            { id: "add", label: "足す", description: "", button: false },
+          ],
+          check: "c",
+        }),
+        hold({ hold_id: "H-66" }),
+      ],
+    }),
+  );
+  expect(q(root).queryByTestId("hold-option-button")).toBeNull();
+  expect(q(root).getByTestId("hold-option-conversation").textContent).toContain(
+    "対話で伝えてください",
+  );
+  const guide = q(root).getByLabelText("承認方法の案内");
+  expect(guide.textContent).toContain("--hold H-66");
+  expect(guide.textContent).not.toContain("H-65");
+});
+
+it("AC-96 #1182: ボタンの値が無い選択肢は、ボタンにしない（画面では選べると判定しない）", async () => {
+  const { root } = await open(
+    show({
+      actions: ["answer_question"],
+      holds: [
+        hold({
+          hold_id: "H-69",
+          options: [{ id: "x", label: "案 X", description: "" }],
+          check: "c",
+        }),
+      ],
+    }),
+  );
+  expect(q(root).queryByTestId("hold-option-button")).toBeNull();
+});
+
+it("AC-101 #1182: スーパーバイザーが関わった保留の枠に、調べたことと推奨が出る。関わっていない枠には出ない", async () => {
+  const { root } = await open(
+    show({
+      actions: ["answer_question"],
+      holds: [
+        hold({
+          hold_id: "H-67",
+          supervisor_findings: "調べた内容",
+          supervisor_recommendation: "推奨の内容",
+        }),
+        hold({ hold_id: "H-68" }),
+      ],
+    }),
+  );
+  const frames = q(root).getAllByTestId("hold-question");
+  expect(
+    within(frames[0] as HTMLElement).getByTestId("hold-supervisor").textContent,
+  ).toContain("調べた内容");
+  expect(
+    within(frames[0] as HTMLElement).getByTestId("hold-supervisor").textContent,
+  ).toContain("推奨の内容");
+  expect(
+    within(frames[1] as HTMLElement).queryByTestId("hold-supervisor"),
+  ).toBeNull();
+});

@@ -63,11 +63,7 @@ describe("画面のボタンの口の枠（区切り S4d-2 の土台。中身は
     expect(await api.notices("alpha")).toEqual({ notices: [] });
     expect(await codeOf(api.notices("nope"))).toBe("not_found");
   });
-  it("書き込みの 5 つの口は、中身を置くまでは not_found で失敗する", async () => {
-    const hold = { check: "c", option: "o1" };
-    expect(await codeOf(api.answerHold("alpha", "C-8", "H-1", hold))).toBe(
-      "not_found",
-    );
+  it("書き込みの 4 つの口は、中身を置くまでは not_found で失敗する", async () => {
     expect(await codeOf(api.ingest("alpha", { items: ["1"] }))).toBe(
       "not_found",
     );
@@ -78,6 +74,73 @@ describe("画面のボタンの口の枠（区切り S4d-2 の土台。中身は
     expect(
       await codeOf(api.followupsDrop("alpha", { ids: ["F-1"], reason: "r" })),
     ).toBe("not_found");
+  });
+});
+
+describe("ボタンの回答の偽の口", () => {
+  it("照合の値が空は 400、無い保留は 404、選択肢の無い保留は 403", async () => {
+    const store = new MockStore();
+    const a = createMockApi(store, { latencyMs: 0 });
+    const h = store.workspaces.alpha?.items.find((x) => x.c.id === "C-8")
+      ?.holds[0];
+    if (!h) throw new Error("種の保留が無い");
+    h.check = "c";
+    h.options = [];
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", "H-1", { check: "", option: "o" }),
+      ),
+    ).toBe("validation_failed");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", "H-99", { check: "c", option: "o" }),
+      ),
+    ).toBe("not_found");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", "H-1", { check: "c", option: "o" }),
+      ),
+    ).toBe("verification_rejected");
+  });
+  it("照合の値が違えば 409、合えば経路 ui の回答として記録し、閉じた保留への回答は 409", async () => {
+    const store = new MockStore();
+    const a = createMockApi(store, { latencyMs: 0 });
+    const m = store.workspaces.alpha?.items.find((x) => x.c.id === "C-8");
+    const h = m?.holds[0];
+    if (!h) throw new Error("種の保留が無い");
+    h.options = [
+      { id: "x", label: "選ぶ", description: "", button: true },
+      { id: "y", label: "対話で", description: "", button: false },
+    ];
+    h.check = "now";
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", h.hold_id, { check: "old", option: "x" }),
+      ),
+    ).toBe("conflict");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", h.hold_id, { check: "now", option: "y" }),
+      ),
+    ).toBe("verification_rejected");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", h.hold_id, { check: "now", option: "zz" }),
+      ),
+    ).toBe("validation_failed");
+    const r = await a.answerHold("alpha", "C-8", h.hold_id, {
+      check: "now",
+      option: "x",
+    });
+    expect(r.cycle.started).toBe(true);
+    expect(h.answered_channel).toBe("ui");
+    expect(h.answered_verification).toBe("none");
+    expect(h.answer).toBe("選ぶ");
+    expect(
+      await codeOf(
+        a.answerHold("alpha", "C-8", h.hold_id, { check: "now", option: "x" }),
+      ),
+    ).toBe("conflict");
   });
 });
 
