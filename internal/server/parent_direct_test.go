@@ -86,6 +86,16 @@ func TestParentDirect_StatusBoardAndQuestionsSeparateItFromHumanTurns(t *testing
 	if got := ids(status["needs_human"].(map[string]any)["challenges"]); !reflect.DeepEqual(got, []string{"C-3", "C-4"}) {
 		t.Errorf("status.needs_human.challenges = %v, want [C-3 C-4]", got)
 	}
+	// needs_human.holds は needs_human.challenges の課題の保留だけ（親のエージェントが動く番の C-2 の保留は載せない）。
+	holds, _ := status["needs_human"].(map[string]any)["holds"].([]any)
+	if len(holds) == 0 {
+		t.Errorf("status.needs_human.holds is empty, want the holds of C-3・C-4")
+	}
+	for _, h := range holds {
+		if cid := h.(map[string]any)["challenge_id"]; cid != "C-3" && cid != "C-4" {
+			t.Errorf("status.needs_human.holds has a hold of %v, want only C-3・C-4", cid)
+		}
+	}
 
 	// ボードのカード: C-2 に問いに答える操作は出ず（状態は人間対応待ちのまま）、オーナーが答える保留の C-3 と、
 	// 直接行った完了の承認待ちの C-4 には、人間の操作が出る。

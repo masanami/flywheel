@@ -159,6 +159,16 @@ func TestHoldAnswer_OverLimitAddAndReplanAre403(t *testing.T) {
 	if buttons["add"] != false || buttons["replan"] != false || buttons["skip"] != true {
 		t.Errorf("buttons = %v", buttons) // AC-48
 	}
+	// status の口も、同じ照合の値と、選択肢ごとの同じ button を返す（AC-49・AC-50）。
+	scheck, sopts := readStatusHold(t, port, "H-1")
+	sbuttons := map[string]any{}
+	for _, o := range sopts {
+		m := o.(map[string]any)
+		sbuttons[m["id"].(string)] = m["button"]
+	}
+	if scheck != check || sbuttons["add"] != false || sbuttons["replan"] != false || sbuttons["skip"] != true {
+		t.Errorf("status hold: check = %q (want %q), buttons = %v", scheck, check, sbuttons)
+	}
 	for _, opt := range []string{"add", "replan"} {
 		if code, body := postAnswer(t, port, holdAnswerPath, check, opt); code != http.StatusForbidden {
 			t.Errorf("%s = %d %s", opt, code, body)
@@ -267,19 +277,22 @@ func TestHoldReads_CarryCheckAndButton(t *testing.T) {
 		t.Error("question for C-1 missing")
 	}
 	// status の口（AC-49・AC-50）。
+	scheck, sopts := readStatusHold(t, port, "H-1")
+	if scheck != check || len(sopts) != 2 || sopts[0].(map[string]any)["button"] != true {
+		t.Errorf("status hold: check = %q (want %q), options = %v", scheck, check, sopts)
+	}
+}
+
+// readStatusHold は status の口の needs_human.holds から、課題 C-1 の保留 holdID の check と options を読む。
+func readStatusHold(t *testing.T, port int, holdID string) (check string, opts []any) {
+	t.Helper()
 	nh := mustJSON(t, port, "/api/v1/workspaces/w/status")["needs_human"].(map[string]any)
 	hs, _ := nh["holds"].([]any)
-	var sh map[string]any
 	for _, h := range hs {
-		if m := h.(map[string]any); m["hold_id"] == "H-1" {
-			sh = m
+		if m := h.(map[string]any); m["hold_id"] == holdID && m["challenge_id"] == "C-1" {
+			return m["check"].(string), m["options"].([]any)
 		}
 	}
-	if sh == nil {
-		t.Fatalf("status needs_human.holds has no H-1: %v", nh["holds"])
-	}
-	sopts := sh["options"].([]any)
-	if sh["check"] != check || len(sopts) != 2 || sopts[0].(map[string]any)["button"] != true {
-		t.Errorf("status hold = %v (want check %q)", sh, check)
-	}
+	t.Fatalf("status needs_human.holds has no %s: %v", holdID, nh["holds"])
+	return "", nil
 }

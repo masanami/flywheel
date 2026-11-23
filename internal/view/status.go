@@ -64,9 +64,10 @@ func FromDiscrepancies(ds []core.Discrepancy) []Discrepancy {
 	return out
 }
 
-// StatusHold は status.needs_human.holds の要素（人間対応待ちの課題のいま開いている保留）。画面の口だけが入れる
-// （CLI の --json には出さない。FromOverview は入れず、画面の口は FromOverviewForScreen を使う）。
-// check は保留の照合の値、options[].button は選択肢ごとの「ボタンで選べるか」（どちらも core が決めた値）。
+// StatusHold は status.needs_human.holds の要素（needs_human.challenges の課題の、いま開いている保留）。status の画面の口
+// （FromOverviewForScreen）だけが入れる。CLI の --json と、画面のほかの口（needs-human）には出さない（FromOverview は入れない）。
+// check は保留の照合の値、options[].button は選択肢ごとの「ボタンで選べるか」（どちらも core が決めた値）。回答の口へ送る値だけを持ち、
+// 問いの文は課題の詳細・questions の口から読む。
 type StatusHold struct {
 	ChallengeID string       `json:"challenge_id"`
 	Check       string       `json:"check"`
@@ -81,8 +82,8 @@ type StatusNeedsHuman struct {
 	BudgetExhausted []BudgetExhausted `json:"budget_exhausted"`
 	Challenges      []Challenge       `json:"challenges"`
 	Discrepancies   []Discrepancy     `json:"discrepancies"`
-	// Holds は課題ごとの、いま開いている保留（オーナー待ち・親のエージェントの番・スーパーバイザーが確認中の課題の順。その中は課題の ID・保留の番号の昇順）。
-	// 画面の口だけが入れ、CLI の --json では省く。
+	// Holds は needs_human.challenges の課題の、いま開いている保留（課題の ID・保留の番号の昇順）。status の画面の口だけが入れる。
+	// 開いている保留が 0 件のときと、CLI の --json・画面のほかの口では、キーごと省く。
 	Holds      []StatusHold `json:"holds,omitempty"`
 	Operations []Operation  `json:"operations"`
 	Slots      []Slot       `json:"slots"`
@@ -282,26 +283,16 @@ func FromOverview(ov *core.Overview) StatusResponse {
 }
 
 // FromOverviewForScreen は FromOverview に、画面のボタンで答えるための保留の値（照合の値・選択肢ごとの button）を足す。
+// 載せるのは needs_human.challenges の課題（オーナー待ち）の保留だけ。親のエージェントが動く番・スーパーバイザーが確認中の課題は
+// needs_human の外の区画なので、その保留は載せない（ターミナルの status の表示と同じ範囲）。
 func FromOverviewForScreen(ov *core.Overview) StatusResponse {
 	out := FromOverview(ov)
-	holds := []StatusHold{}
+	var holds []StatusHold
 	for _, c := range ov.NeedsHumanChallenges {
-		holds = append(holds, statusHolds(c.ID, ov.OpenHolds[c.ID])...)
-	}
-	for _, c := range ov.ParentAgentChallenges {
-		holds = append(holds, statusHolds(c.ID, ov.OpenHolds[c.ID])...)
-	}
-	for _, c := range ov.SupervisorCheckingChallenges {
-		holds = append(holds, statusHolds(c.ID, ov.OpenHolds[c.ID])...)
+		for _, h := range ov.OpenHolds[c.ID] {
+			holds = append(holds, StatusHold{ChallengeID: c.ID, Check: h.Check, HoldID: h.HoldID, Options: FromHoldOptionsForScreen(h.Options, h.OptionButtons), TaskTitle: h.TaskTitle})
+		}
 	}
 	out.NeedsHuman.Holds = holds
-	return out
-}
-
-func statusHolds(challengeID string, hs []core.OpenHold) []StatusHold {
-	out := make([]StatusHold, 0, len(hs))
-	for _, h := range hs {
-		out = append(out, StatusHold{ChallengeID: challengeID, Check: h.Check, HoldID: h.HoldID, Options: FromHoldOptionsForScreen(h.Options, h.OptionButtons), TaskTitle: h.TaskTitle})
-	}
 	return out
 }
