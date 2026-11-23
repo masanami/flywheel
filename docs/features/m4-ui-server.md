@@ -936,9 +936,9 @@ S1 は 2026-10-12（flywheel#159）、S2 は 2026-10-18（flywheel#212）、S3 �
 - [ ] 未回答の保留を持つ課題の詳細には、問いの文・保留に入った日時・入る直前の状態・原因の run が出る（UI のテスト）
 - [ ] UI は `workspace_changed` を受けると、そのワークスペースの `status`・`challenges`・`cycle` と fleet の `needs-human` を `GET` し直す（UI のテスト）
 - [ ] UI は `workspace_changed` を受けても、他のワークスペースの `status`・`challenges` を要求しない（UI のテスト）
-- [ ] UI は全画面を操作しても `GET /api/v1/questions` を要求しない（UI のテスト）
-- [ ] 【AC-206a】画面を表示している間（`document.visibilityState` が `visible`）、UI は最後に読み直してから偽の時計を 59 秒進めた時点では `GET …/cycle`・`GET …/challenges` を発行せず、60 秒進めた時点で、表示している各ワークスペースの `GET …/cycle` と `GET …/challenges` を発行する。その後も 60 秒進めるごとに同じ要求を発行する（UI のテストで、`workspace_changed` を送らずに偽の時計を進め、発行した要求を記録して確かめる。AC-204・AC-205 は `workspace_changed` を契機とする要求の基準で、この取り直しには及ばない）【決定 2026-10-18 オーナー M4H37】
-- [ ] 【AC-206b】`document.visibilityState` が `hidden` の間は、偽の時計を 60 秒の何倍進めても、UI は `GET …/cycle`・`GET …/challenges` を発行しない（UI のテスト）【決定 2026-10-18 オーナー M4H37】
+- [ ] UI は全画面を操作しても `GET /api/v1/questions` を要求しない（UI のテスト）【#803・#838 で改めた: 変化の合図のときと 60 秒ごとの読み直しで、問いの一覧も読む（AC-206a）】
+- [ ] 【AC-206a】画面を表示している間（`document.visibilityState` が `visible`）、UI は最後に読み直してから偽の時計を 59 秒進めた時点では `GET …/cycle`・`GET …/challenges` を発行せず、60 秒進めた時点で、表示している各ワークスペースの `GET …/cycle` と `GET …/challenges` を発行する。その後も 60 秒進めるごとに同じ要求を発行する（UI のテストで、`workspace_changed` を送らずに偽の時計を進め、発行した要求を記録して確かめる。AC-204・AC-205 は `workspace_changed` を契機とする要求の基準で、この取り直しには及ばない）【決定 2026-10-18 オーナー M4H37】【flywheel#838 で、60 秒ごとに読む範囲を広げた: 上の要求に加えて、URL が指している 1 つのエージェントの `GET …/status`（`ingestable` なし）と、`GET /api/v1/needs-human`・`GET /api/v1/questions` も読む。`ingestable=true` と、開いていないエージェントの状況は読まない。詳細は core-redesign.md の区切り S2c の画面の枠】
+- [ ] 【AC-206b】`document.visibilityState` が `hidden` の間は、偽の時計を 60 秒の何倍進めても、UI は `GET …/cycle`・`GET …/challenges` を発行しない（UI のテスト）【決定 2026-10-18 オーナー M4H37】【flywheel#838: 60 秒ごとに足した `GET …/status`・`GET /api/v1/needs-human`・`GET /api/v1/questions` も発行しない】
 - [ ] 【AC-206c】`workspace_changed` を送らずに偽の時計を 60 秒進めたとき、取り直した `GET …/cycle` の `state` が `running` から `stale` に変わっていれば列の見出しの文言が「実行中」から「更新なし」に変わり、取り直した `GET …/challenges` のカードの `card.modifiers` に `unresponsive` が加わっていればそのカードに「更新なし」の印が出る（UI のテスト）【決定 2026-10-18 オーナー M4H37】
 
 ### S2: 詳細の操作

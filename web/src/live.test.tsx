@@ -6,6 +6,7 @@ import { POLL_MS, RECONNECT_MS } from "./live/useLive.ts";
 import {
   FakeEventSource,
   type Recorded,
+  emptyStatus,
   fixtures,
   installFakes,
 } from "./testing/fakes.ts";
@@ -190,9 +191,37 @@ function setVisibility(v: "visible" | "hidden") {
   });
 }
 
-it("AC-206a: visible の間、59 秒では発行せず 60 秒ごとに各 ws の cycle と challenges だけを取り直す", async () => {
+// 60 秒ごとの読み直しの試験用に、2 つのエージェント（alpha・beta）と問いの一覧を備えた応答を作る。
+function pollBodies() {
+  const b = fixtures();
+  b["/api/v1/questions"] = { questions: [], unreadable_workspaces: [] };
+  b["/api/v1/workspaces/alpha/status?ingestable=true"] = {
+    ...emptyStatus,
+    ingestable: { error: null, items: [] },
+  };
+  return b;
+}
+
+async function openAt(hash: string, bodies = pollBodies()) {
+  window.location.hash = hash;
+  const { requests } = installFakes(bodies);
+  render(<App />);
+  act(() => FakeEventSource.latest.open());
+  await waitFor(() =>
+    expect(screen.getAllByText(/alpha/).length).toBeGreaterThan(0),
+  );
+  // 画面が開いたときの読み込みが落ち着くのを待つ。
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  return requests;
+}
+const statusCalls = (r: Recorded[], name: string) =>
+  r.filter((x) => x.url === `/api/v1/workspaces/${name}/status`);
+
+it("AC-206a #838: visible の間、59 秒では発行せず 60 秒ごとに各 ws の cycle と challenges、開いている ws の status、横断の一覧を取り直す（ingestable は読まない）", async () => {
   setVisibility("visible");
-  const requests = await mounted();
+  const requests = await mounted(); // #/all
   requests.length = 0;
   act(() => {
     vi.advanceTimersByTime(POLL_MS - 1000);
@@ -201,22 +230,128 @@ it("AC-206a: visible の間、59 秒では発行せず 60 秒ごとに各 ws の
   act(() => {
     vi.advanceTimersByTime(1000);
   });
-  await waitFor(() => expect(requests).toHaveLength(5));
-  expect(requests.map((r) => r.url).sort()).toEqual(
-    [
-      "/api/v1/workspaces/alpha/challenges",
-      "/api/v1/workspaces/alpha/cycle",
-      "/api/v1/workspaces/alpha/notices",
-      "/api/v1/workspaces/beta/challenges",
-      "/api/v1/workspaces/beta/cycle",
-    ].sort(),
-  );
+  await waitFor(() => expect(requests.length).toBeGreaterThanOrEqual(6));
+  const urls = requests.map((r) => r.url);
+  for (const u of [
+    "/api/v1/workspaces/alpha/challenges",
+    "/api/v1/workspaces/alpha/cycle",
+    "/api/v1/workspaces/beta/challenges",
+    "/api/v1/workspaces/beta/cycle",
+    "/api/v1/needs-human",
+    "/api/v1/questions",
+  ]) {
+    expect(urls).toContain(u);
+  }
+  expect(urls.some((u) => u.includes("ingestable=true"))).toBe(false);
   expect(requests.every((r) => r.method === "GET")).toBe(true);
+});
+
+it("AC-206a (a)(b)(c)(d) #838: 「いま進められること」を開いて 60 秒進めると、そのエージェントの status と questions が呼ばれ、ingestable と他のエージェントの status は呼ばれない", async () => {
+  setVisibility("visible");
+  const requests = await openAt("#/a/alpha/now");
+  const ingestBefore = requests.filter((r) =>
+    r.url.includes("ingestable=true"),
+  ).length;
   requests.length = 0;
-  act(() => {
-    vi.advanceTimersByTime(POLL_MS);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(POLL_MS);
   });
-  await waitFor(() => expect(requests).toHaveLength(5));
+  expect(statusCalls(requests, "alpha").length).toBeGreaterThan(0); // (a)
+  expect(requests.some((r) => r.url === "/api/v1/questions")).toBe(true); // (b)
+  expect(ingestBefore).toBe(1);
+  expect(requests.some((r) => r.url.includes("ingestable=true"))).toBe(false); // (c)
+  expect(statusCalls(requests, "beta")).toHaveLength(0); // (d)
+  // その後も 60 秒ごとに同じ要求を発行する。
+  const first = statusCalls(requests, "alpha").length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+  });
+  expect(statusCalls(requests, "alpha").length).toBeGreaterThan(first);
+});
+
+it("AC-206a #838: ハッシュが無いとき（既定の行き先）は、先頭のエージェントの status を 60 秒ごとに読む", async () => {
+  setVisibility("visible");
+  const requests = await openAt("");
+  requests.length = 0;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+  });
+  expect(statusCalls(requests, "alpha").length).toBeGreaterThan(0);
+  expect(statusCalls(requests, "beta")).toHaveLength(0);
+});
+
+it("AC-206a (e) #838: 「すべてのエージェント」を開いて 60 秒進めると、needs-human が呼ばれ、どのエージェントの status も呼ばれない", async () => {
+  setVisibility("visible");
+  const requests = await openAt("#/all");
+  requests.length = 0;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+  });
+  expect(requests.some((r) => r.url === "/api/v1/needs-human")).toBe(true);
+  expect(statusCalls(requests, "alpha")).toHaveLength(0);
+  expect(statusCalls(requests, "beta")).toHaveLength(0);
+});
+
+it("AC-206a #838: 合図なしで 60 秒進めて読んだ中身が変われば、「あなたを待っている」の行と件数が変わる", async () => {
+  setVisibility("visible");
+  const b = pollBodies();
+  let n = 0;
+  b["/api/v1/workspaces/alpha/status"] = () => {
+    n += 1;
+    const challenges =
+      n === 1
+        ? []
+        : [
+            {
+              context: null,
+              created_at: "2026-11-01T00:00:00Z",
+              description: "",
+              done_criteria: "",
+              headline: null,
+              id: "C-9",
+              priority: null,
+              reporter: "x",
+              status: "awaiting_plan_approval",
+              status_label: "awaiting_plan_approval",
+              title: "増えた課題",
+              updated_at: "2026-11-01T00:00:00Z",
+              urgency: null,
+              version: 1,
+            },
+          ];
+    return new Response(
+      JSON.stringify({
+        ...emptyStatus,
+        needs_human: { ...emptyStatus.needs_human, challenges },
+      }),
+      { status: 200 },
+    );
+  };
+  await openAt("#/a/alpha/now", b);
+  expect(screen.getByTestId("count-waiting")).toHaveTextContent(
+    "あなたを待っているもの 0 件",
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId("count-waiting")).toHaveTextContent(
+      "あなたを待っているもの 1 件",
+    ),
+  );
+  expect(screen.getByText("増えた課題")).toBeInTheDocument();
+});
+
+it("AC-206b #838: hidden の間は、status・questions・needs-human も 60 秒の何倍進めても発行しない", async () => {
+  setVisibility("visible");
+  const requests = await openAt("#/a/alpha/now");
+  setVisibility("hidden");
+  requests.length = 0;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(POLL_MS * 3);
+  });
+  expect(requests).toHaveLength(0);
+  setVisibility("visible");
 });
 
 it("AC-206b: hidden の間は 60 秒の何倍進めても発行しない", async () => {

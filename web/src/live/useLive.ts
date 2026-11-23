@@ -8,6 +8,7 @@ import type {
   StatusResponse,
   Workspace,
 } from "../api/types.gen.ts";
+import { parseHash } from "../shell/route.ts";
 
 export interface WorkspaceData {
   status?: StatusResponse;
@@ -129,42 +130,48 @@ export function useLive(): LiveState {
     }
   }, []);
 
-  // 定期の取り直し。cycle と challenges だけを GET する（status・questions・周の起動はしない）。
-  const pollWorkspace = useCallback(async (name: string) => {
-    // 全体の読み直し（refreshWorkspace）が必ず優先されるよう、その世代は進めず、途中で進んだら捨てる。
-    const wsToken = gen.current.ws[name] ?? 0;
-    const token = (gen.current.poll[name] ?? 0) + 1;
-    gen.current.poll[name] = token;
-    const [challenges, cycle] = await Promise.allSettled([
-      api.challenges(name),
-      api.cycle(name),
-    ]);
-    if (
-      (gen.current.ws[name] ?? 0) !== wsToken ||
-      gen.current.poll[name] !== token
-    )
-      return;
-    setState((s) => {
-      const cur = s.data[name];
-      if (!cur || cur.error) return s;
-      return {
-        ...s,
-        revision: { ...s.revision, [name]: (s.revision[name] ?? 0) + 1 },
-        data: {
-          ...s.data,
-          [name]: {
-            ...cur,
-            challenges:
-              challenges.status === "fulfilled"
-                ? challenges.value
-                : cur.challenges,
-            // 取得に失敗したら古い状態を残さず、読み込み時と同じく見出しを出さない。
-            cycle: cycle.status === "fulfilled" ? cycle.value : undefined,
+  // 定期の取り直し。全部のエージェントの cycle と challenges を GET し、URL が指している 1 つのエージェント
+  // （withStatus）だけ、ingestable を付けない status も GET する（取り込めるもの・周の起動はしない）。
+  const pollWorkspace = useCallback(
+    async (name: string, withStatus: boolean) => {
+      // 全体の読み直し（refreshWorkspace）が必ず優先されるよう、その世代は進めず、途中で進んだら捨てる。
+      const wsToken = gen.current.ws[name] ?? 0;
+      const token = (gen.current.poll[name] ?? 0) + 1;
+      gen.current.poll[name] = token;
+      const [challenges, cycle, status] = await Promise.allSettled([
+        api.challenges(name),
+        api.cycle(name),
+        withStatus ? api.status(name) : Promise.reject(new Error("skip")),
+      ]);
+      if (
+        (gen.current.ws[name] ?? 0) !== wsToken ||
+        gen.current.poll[name] !== token
+      )
+        return;
+      setState((s) => {
+        const cur = s.data[name];
+        if (!cur || cur.error) return s;
+        return {
+          ...s,
+          revision: { ...s.revision, [name]: (s.revision[name] ?? 0) + 1 },
+          data: {
+            ...s.data,
+            [name]: {
+              ...cur,
+              status: status.status === "fulfilled" ? status.value : cur.status,
+              challenges:
+                challenges.status === "fulfilled"
+                  ? challenges.value
+                  : cur.challenges,
+              // 取得に失敗したら古い状態を残さず、読み込み時と同じく見出しを出さない。
+              cycle: cycle.status === "fulfilled" ? cycle.value : undefined,
+            },
           },
-        },
-      };
-    });
-  }, []);
+        };
+      });
+    },
+    [],
+  );
 
   const loadAll = useCallback(async () => {
     const list = await refreshList();
@@ -191,12 +198,21 @@ export function useLive(): LiveState {
   useEffect(() => {
     const poll = setInterval(() => {
       if (document.visibilityState === "hidden") return;
-      for (const w of known.current) {
-        if (w.state === "ok") void pollWorkspace(w.name);
-      }
+      // URL が指しているエージェント（ハッシュが無ければ既定の行き先の先頭のエージェント）。「すべて」では無し。
+      const route = parseHash(window.location.hash);
+      const ok = known.current.filter((w) => w.state === "ok");
+      const open =
+        route === null
+          ? known.current[0]?.name
+          : "name" in route
+            ? route.name
+            : undefined;
+      for (const w of ok) void pollWorkspace(w.name, w.name === open);
+      // 左の列の件数がどの画面にも出るので、横断の一覧（needs-human・questions）もどの画面でも読む。
+      void refreshFleet();
     }, POLL_MS);
     return () => clearInterval(poll);
-  }, [pollWorkspace]);
+  }, [pollWorkspace, refreshFleet]);
 
   useEffect(() => {
     let closed = false;
