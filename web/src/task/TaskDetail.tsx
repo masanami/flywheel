@@ -24,6 +24,7 @@ import {
   TASK_SPENT_LABEL,
   UPSTREAM_STATE_LABELS,
   VERDICT_LABELS,
+  WHO_ME_UI_BUTTON,
   artifactKindLabel,
   label,
 } from "../labels.ts";
@@ -43,7 +44,9 @@ import { hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
 import { usd } from "../usd.ts";
 import { shortTime } from "../when.ts";
-import { WHO_ME_UI_BUTTON, whoOf } from "../who.ts";
+import { whoOf } from "../who.ts";
+import { AddedMark } from "./AddedMark.tsx";
+import { DecisionRecords } from "./DecisionRecords.tsx";
 
 // 委譲の実行（報告の API を呼ぶ対象）の種類。
 const DELEGATION_KINDS = ["delegate", "contract"];
@@ -194,6 +197,7 @@ function TaskView({
       <h2 id="task-title" data-testid="task-title">
         {task.title}
       </h2>
+      <AddedMark show={show} task={task} agentName={agentName} />
       <dl className="detail-items" data-testid="task-items">
         <div>
           <dt>区分</dt>
@@ -296,7 +300,6 @@ function TaskView({
               ) : null}
             </div>
           ))}
-          <HoldAnswerNotices state={answerState} />
           {openHolds.length === 0 || openHolds.some((h) => !hasOptions(h)) ? (
             <ApprovalGuide
               challengeId={id}
@@ -315,6 +318,8 @@ function TaskView({
           ) : null}
         </section>
       ) : null}
+      {/* 区画の外に置く: 最後の開いている保留が読み直しで消えても、知らせは残る。 */}
+      <HoldAnswerNotices state={answerState} />
       <section aria-label="やること" data-testid="task-body">
         <h3>やること</h3>
         <Markdown text={task.body} />
@@ -352,6 +357,7 @@ function TaskView({
         <p data-testid="task-fix-pending">{CONFLICT_FIX_PENDING_TEXT}</p>
       ) : null}
       {holds.length > 0 ? <Holds holds={holds} /> : null}
+      <DecisionRecords show={show} task={task} />
       <RunsView
         agentName={agentName}
         runs={runs}
