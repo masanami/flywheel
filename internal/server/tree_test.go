@@ -313,7 +313,7 @@ func TestQuestionsAPI_TaskID_AC70_AC71_802(t *testing.T) {
 	approvalFixture(t, ws, "in_progress")
 	coretest.InsertApprovedPlan(t, ws, 1, "PLAN", approvalPlanSpec)
 	tid := coretest.QueryRows(t, ws, `SELECT id FROM task WHERE key = 'a'`)[0][0].(int64)
-	coretest.Exec(t, ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, kind, task_id) VALUES (1, 'タスクの問い', 'in_progress', '2026-11-02T00:00:00.000Z', 'human', ?)`, tid)
+	coretest.Exec(t, ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, kind, task_id, scope) VALUES (1, 'タスクの問い', 'in_progress', '2026-11-02T00:00:00.000Z', 'human', ?, 'task')`, tid)
 	coretest.Exec(t, ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, kind) VALUES (1, '課題の問い', 'in_progress', '2026-11-03T00:00:00.000Z', 'human')`)
 	port := approvalServer(t, ws)
 	qs := mustJSON(t, port, "/api/v1/questions")["questions"].([]any)

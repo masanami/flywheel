@@ -715,8 +715,10 @@ func TestRunDelegation_MaxBudgetUsesPlanImplBudgetAndItsOverride(t *testing.T) {
 
 	n, _ := parseChallengeID(id)
 	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE challenge SET status = 'in_progress' WHERE id = ?`, n)
-		if err != nil {
+		if _, err := tx.Exec(`UPDATE challenge SET status = 'in_progress' WHERE id = ?`, n); err != nil {
+			return err
+		}
+		if err := closeOpenHoldsUnlessHeld(tx, n, "in_progress"); err != nil {
 			return err
 		}
 		ok, err := setPlanBudgetOverride(context.Background(), tx, n, 1, planBudgetOverride{ImplBudgetUSD: ptrInt64(70_000_000)})

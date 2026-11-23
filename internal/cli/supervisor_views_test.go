@@ -156,7 +156,13 @@ func TestStatus_PendingMixedWithEscalatedOrNullStaysOwnerWaiting_AC237_AC238(t *
 		if other == "" {
 			kind = ""
 		}
-		coretest.InsertSupervisorHold(t, ws, challengeIDToInternalID(t, id), "もう 1 件", "verifying", svRaisedAt, kind, other, "f", "r")
+		n := challengeIDToInternalID(t, id)
+		// 開いている保留は課題ごとに 1 つまで。pending の保留（課題を止める）に並べる 2 件目は、タスクを止める保留（scope = 'task'）にする。
+		coretest.InsertApprovedPlan(t, ws, n, "BODY", showTasksSpec)
+		coretest.Exec(t, ws, `INSERT INTO hold (challenge_id, question, from_status, raised_at, stop_kind, supervisor_state, supervisor_findings, supervisor_recommendation, task_id, scope)
+			VALUES (?, 'もう 1 件', 'verifying', ?, ?, ?, 'f', 'r', (SELECT MIN(id) FROM task WHERE challenge_id = ?), 'task')`,
+			n, svRaisedAt, nilIfEmpty(kind), nilIfEmpty(other), n)
+		coretest.SetChallengeStatus(t, ws, n, "awaiting_human")
 		ids = append(ids, id)
 	}
 	out := runJSON(t, ws, "status")
@@ -193,4 +199,12 @@ func TestShow_AnsweredChildQuestionsAreShownWithAnswerAndBasis_AC55(t *testing.T
 	if out := runText(t, ws, "show", createForCase(t, ws)); strings.Contains(out, "スーパーバイザーが答えた子の問い") {
 		t.Errorf("答えた問いが無い課題に節が出ている: %q", out)
 	}
+}
+
+// nilIfEmpty は空の文字列を NULL にして返す（試験の準備で保留の列へ入れる値用）。
+func nilIfEmpty(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
 }

@@ -21,6 +21,10 @@ func (f *delegateFixture) setStatusRaw(t *testing.T, id string, st Status) {
 	t.Helper()
 	cid, _ := parseChallengeID(id)
 	mexec(t, f.s, `UPDATE challenge SET status = ?, version = version + 1 WHERE id = ?`, string(st), cid)
+	if st != StatusAwaitingHuman {
+		// 人間対応待ちを離れる書き換えは、開いている保留を閉じる（closeOpenHoldsUnlessHeld の理由を参照）。
+		mexec(t, f.s, `UPDATE hold SET closed_at = '2026-11-23T00:00:00.000Z' WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL`, cid)
+	}
 }
 
 // AC-15: 前提が終わっていないタスクは、いま始められるものに数えない（前提が起動できるなら、前提だけを数える）。

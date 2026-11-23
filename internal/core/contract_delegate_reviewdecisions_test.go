@@ -17,8 +17,10 @@ func (f *contractFixture) setStatus(t *testing.T, st Status) {
 	t.Helper()
 	n, _ := parseChallengeID(f.cid)
 	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE challenge SET status = ?, version = version + 1 WHERE id = ?`, string(st), n)
-		return err
+		if _, err := tx.Exec(`UPDATE challenge SET status = ?, version = version + 1 WHERE id = ?`, string(st), n); err != nil {
+			return err
+		}
+		return closeOpenHoldsUnlessHeld(tx, n, string(st))
 	}); err != nil {
 		t.Fatal(err)
 	}

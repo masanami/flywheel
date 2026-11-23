@@ -168,6 +168,8 @@ func TestFinish4_SweepSkipsAnOpenStoppedRunAndTakesItOnceTheStatusCheckEndedIt(t
 	f := newIgLandFixture(t)
 	f.heldWithTaskRun(t, "in_progress")
 	f.sql(t, `UPDATE challenge SET status = 'in_progress', version = version + 1`)
+	// 着手中へ戻った課題に開いている保留は無い（本番では回答が閉じる）。ended_at より後に閉じるので、停止は保留の間に起きたままになる。
+	f.sql(t, `UPDATE hold SET closed_at = '2026-11-23T00:00:00.000Z' WHERE answer IS NULL AND closed_at IS NULL`)
 	f.sql(t, `UPDATE contract_run SET state = 'failed', ended_at = NULL, land_ref = NULL`)
 	if n, err := f.s.HoldUnrecordedContractStops(context.Background()); err != nil || n != 0 {
 		t.Fatalf("sweep held %d (%v) for an open stopped run, want 0", n, err)
