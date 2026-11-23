@@ -1265,6 +1265,9 @@ func addM4RelayEvidenceShape(t *testing.T, doc *documentedJSON) {
 	for _, k := range []string{"stop_kind", "supervisor_state", "supervisor_findings", "supervisor_recommendation"} {
 		doc.entity["hold"][k] = true
 	}
+	// 区切り S4c-3: 保留の表示用の ID と止める範囲（仕様は core-redesign-s4c.md。m4 の JSON の表には書かない）。
+	doc.entity["hold"]["hold_id"] = true
+	doc.entity["hold"]["scope"] = true
 	// closed_at: 取り下げで回答なしに閉じた保留の日時（M4.5 S4。hold.closed_at は #385 の列。
 	// 仕様の JSON の表にはまだ書かれていない）。
 	doc.entity["hold"]["closed_at"] = true

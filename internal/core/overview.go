@@ -49,9 +49,9 @@ type Overview struct {
 	// すべてスーパーバイザー待ち（supervisor_state が pending）のもの。NeedsHumanChallenges（オーナー待ち）には入れない。
 	// 上げた（escalated）保留・止まり方を渡さずに作った（NULL）保留が 1 つでもある課題は、オーナー待ちのまま。
 	SupervisorCheckingChallenges []Challenge
-	// HoldOptions は人間対応待ちの課題（NeedsHumanChallenges の中）のうち、いま開いている保留が選択肢を持つものの、
-	// その選択肢の並び（キーは課題の ID）。選択肢の無い保留の課題は載らない。`status` のテキストの表示だけが使う（JSON・API の状況には出さない）。
-	HoldOptions map[string][]HoldOption
+	// OpenHolds は人間対応待ちの課題の、いま開いている保留（種類を問わない。回答の相手の数え方と同じ）を保留ごとに並べたもの（キーは課題の ID。保留の番号の昇順）。
+	// 開いている保留の無い課題は載らない。`status` のテキストの表示だけが使う（JSON・API の状況には出さない）。
+	OpenHolds map[string][]OpenHold
 	// ParentAgentChallenges は「親のエージェントが動く番」の課題（id 昇順）。状態は人間対応待ちのままで、
 	// いま開いている保留の種類が親が直接行う課題だけ（課題 #452。新しい状態は作らない）。
 	ParentAgentChallenges []Challenge
@@ -434,11 +434,11 @@ func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*O
 			}
 		}
 
-		holdOptions, err := listOpenHoldOptions(ctx, tx)
+		openHolds, err := listOpenHolds(ctx, tx)
 		if err != nil {
 			return err
 		}
-		result.HoldOptions = holdOptions
+		result.OpenHolds = openHolds
 
 		actionable, err := listChallengesInStatuses(ctx, tx, actionableStatuses)
 		if err != nil {
@@ -497,39 +497,47 @@ func (s *Store) GetOverviewFor(ctx context.Context, agent *AgentDeclaration) (*O
 	return &result, nil
 }
 
-// listOpenHoldOptions は人間対応待ちの課題の、いま開いている保留（種類 human。課題の中で新しいもの）の選択肢を、
-// 課題の ID ごとに返す。選択肢の無い保留は含めない。
-func listOpenHoldOptions(ctx context.Context, tx *sql.Tx) (map[string][]HoldOption, error) {
+// OpenHold は人間対応待ちの課題のいま開いている保留 1 件（`status` の表示用）。TaskTitle は保留が結び付くタスクの題名（結び付かなければ空）。
+// Options は保留の選択肢（無ければ nil）。
+type OpenHold struct {
+	HoldID    string
+	TaskTitle string
+	Options   []HoldOption
+}
+
+// listOpenHolds は人間対応待ちの課題の、いま開いている保留（種類を問わない）を、課題の ID ごとに保留の番号の昇順で返す。
+func listOpenHolds(ctx context.Context, tx *sql.Tx) (map[string][]OpenHold, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT h.challenge_id, h.kind, h.options FROM hold h JOIN challenge c ON c.id = h.challenge_id
-		 WHERE c.status = ? AND h.answer IS NULL AND h.closed_at IS NULL
+		`SELECT h.challenge_id, h.id, h.options, COALESCE(t.title, '')
+		 FROM hold h JOIN challenge c ON c.id = h.challenge_id LEFT JOIN task t ON t.id = h.task_id
+		 WHERE c.status = ? AND h.answer IS NULL AND h.closed_at IS NULL 
 		 ORDER BY h.id ASC`, string(StatusAwaitingHuman))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	out := map[string][]HoldOption{}
+	out := map[string][]OpenHold{}
 	for rows.Next() {
 		var (
-			id   int64
-			kind string
-			raw  sql.NullString
+			cid, hid int64
+			raw      sql.NullString
+			h        OpenHold
 		)
-		if err := rows.Scan(&id, &kind, &raw); err != nil {
+		if err := rows.Scan(&cid, &hid, &raw, &h.TaskTitle); err != nil {
 			return nil, err
 		}
-		key := formatChallengeID(id)
-		delete(out, key) // 種類を問わず、新しい開いた保留が古いものを上書きする（既存の判定と同じ）。
-		if kind != string(HoldKindHuman) || !raw.Valid {
-			continue
+		h.HoldID = formatHoldID(hid)
+		if raw.Valid {
+			opts, err := parseHoldOptions(&raw.String)
+			if err != nil {
+				return nil, err
+			}
+			if len(opts) > 0 {
+				h.Options = opts
+			}
 		}
-		opts, err := parseHoldOptions(&raw.String)
-		if err != nil {
-			return nil, err
-		}
-		if len(opts) > 0 {
-			out[key] = opts
-		}
+		key := formatChallengeID(cid)
+		out[key] = append(out[key], h)
 	}
 	return out, rows.Err()
 }

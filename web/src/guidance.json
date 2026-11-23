@@ -37,10 +37,17 @@
     },
     {
       "id": "answer",
-      "when": { "actions": ["answer_question"] },
+      "when": { "actions": ["answer_question"], "needs_hold": false },
       "command": ["answer"],
       "flags": ["workspace", "answer"],
       "template": "flywheel answer <C-ID> --workspace <パス> --answer <回答>"
+    },
+    {
+      "id": "answer-hold",
+      "when": { "actions": ["answer_question"], "needs_hold": true },
+      "command": ["answer"],
+      "flags": ["workspace", "hold", "answer"],
+      "template": "flywheel answer <C-ID> --workspace <パス> --hold <H-ID> --answer <回答>"
     },
     {
       "id": "answer-choice",

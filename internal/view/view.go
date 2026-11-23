@@ -206,6 +206,8 @@ type Hold struct {
 	ClosedAt             *string `json:"closed_at"`
 	FromStatus           string  `json:"from_status"`
 	FromStatusLabel      string  `json:"from_status_label"`
+	// HoldID は保留の表示用の ID（"H-<番号>"）。閉じた保留・過去の保留も同じ形で出る。
+	HoldID string `json:"hold_id"`
 	// Kind は保留の種類（human＝人の対応を待つ・parent_direct＝親が直接行う）。
 	Kind string `json:"kind"`
 	// Options は保留の選択肢の並び。選択肢が無い保留は空の配列。
@@ -217,6 +219,8 @@ type Hold struct {
 	// Replan は回答に付いた「範囲が変わる」印。真なら、その回答で課題は計画の作り直しへ戻った。
 	Replan bool    `json:"replan"`
 	RunID  *string `json:"run_id"`
+	// Scope は保留の止める範囲。タスクを止める保留は task、課題を止める保留は challenge。
+	Scope string `json:"scope"`
 	// StopKind は保留を作る呼び出し元が渡した止まり方（STOP_KIND_CODES の値）。渡されなかった保留と過去の行は null。
 	StopKind *string `json:"stop_kind"`
 	// SupervisorFindings・SupervisorRecommendation は、スーパーバイザーがオーナーへ上げたときに残した、調べたことと推奨。無ければ null。
@@ -241,6 +245,7 @@ func FromHold(h core.Hold) Hold {
 		ClosedAt:             ts(h.ClosedAt),
 		FromStatus:           string(h.FromStatus),
 		FromStatusLabel:      label,
+		HoldID:               h.HoldID,
 		Kind:                 string(h.Kind),
 		Options:              FromHoldOptions(h.Options),
 		Question:             h.Question,
@@ -249,6 +254,7 @@ func FromHold(h core.Hold) Hold {
 		RelaySession:         h.RelaySession,
 		Replan:               h.Replan,
 		RunID:                h.RunID,
+		Scope:                h.ScopeLabel(),
 		TaskID:               h.TaskID,
 
 		StopKind:                 strOrNil(string(h.StopKind)),

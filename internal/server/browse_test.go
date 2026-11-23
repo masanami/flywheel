@@ -243,7 +243,7 @@ func TestBrowseAPI_Questions(t *testing.T) {
 	var order []string
 	for _, q := range qs {
 		qm := q.(map[string]any)
-		assertKeys(t, "question", qm, "workspace", "challenge_id", "title", "question", "raised_at", "from_status", "run_id", "task_id")
+		assertKeys(t, "question", qm, "workspace", "challenge_id", "title", "question", "raised_at", "from_status", "run_id", "task_id", "hold_id", "scope")
 		order = append(order, qm["question"].(string))
 	}
 	if want := []string{"oldest", "qa1", "qa2", "qb2"}; !reflect.DeepEqual(order, want) {

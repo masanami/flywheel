@@ -216,6 +216,8 @@ const taskHold = (
   raised_at: string,
   p: Partial<Hold>,
 ): Hold => ({
+  hold_id: `H-${task_id.replace("T-", "")}`,
+  scope: "task",
   answer: null,
   answer_option: null,
   answered_at: null,
@@ -366,6 +368,8 @@ export function seed(): Record<string, MockWorkspace> {
       version: 2,
       holds: [
         {
+          hold_id: "H-1",
+          scope: "challenge",
           answer: null,
           answer_option: null,
           answered_at: null,

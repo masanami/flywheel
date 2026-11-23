@@ -332,9 +332,11 @@ export function createMockApi(
               .map((h) => ({
                 challenge_id: m.c.id,
                 from_status: h.from_status,
+                hold_id: h.hold_id,
                 question: h.question,
                 raised_at: h.raised_at,
                 run_id: null,
+                scope: h.scope,
                 task_id: null,
                 title: m.c.title,
                 workspace: w.meta.name,

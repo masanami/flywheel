@@ -279,9 +279,25 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	}
 	// 保留は問いと回答（未回答ならその旨）を出す（決定は計画の本文と同じ）。
 	fmt.Fprintf(&b, "保留:          %d 件\n", len(d.Holds))
+	taskTitles := map[string]string{}
+	for _, t := range d.Tasks {
+		taskTitles[t.ID] = t.Title
+	}
+	openAnswerable := 0
 	for _, h := range d.Holds {
 		fromLabel, _ := h.FromStatus.Label()
 		fmt.Fprintf(&b, "  %s から (%s)\n", fromLabel, FormatTimestamp(h.RaisedAt))
+		fmt.Fprintf(&b, "    保留: %s (%s)\n", h.HoldID, h.ScopeLabel())
+		if h.TaskID != nil {
+			title := taskTitles[*h.TaskID]
+			if title == "" {
+				title = *h.TaskID
+			}
+			fmt.Fprintf(&b, "    タスク: %s\n", escapeControl(title))
+		}
+		if h.Open() { // core の回答の相手の数え方（種類を問わない）と同じ
+			openAnswerable++
+		}
 		if h.Kind == core.HoldKindParentDirect {
 			b.WriteString("    種類: 親が直接行う\n")
 		}
@@ -321,6 +337,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 			fmt.Fprintf(&b, "    選んだ選択肢: %s\n", escapeControl(*h.AnswerOption))
 		}
 		fmt.Fprintf(&b, "    回答者: %s (%s)\n", answeredBy, answeredAt)
+	}
+	if openAnswerable >= 2 {
+		fmt.Fprintf(&b, "  開いている保留が %d 件あります。答える保留を指定してください: flywheel answer %s --hold <H-ID> --answer <回答>\n", openAnswerable, d.ID)
 	}
 	if len(d.SupervisorActions) > 0 {
 		fmt.Fprintf(&b, "スーパーバイザーの対処: %d 件\n", len(d.SupervisorActions))
