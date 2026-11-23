@@ -31,7 +31,18 @@ describe("サイクルを止める・フォローアップを済みにする／�
       await codeOf(
         api.followupsDone("alpha", { ids: ["F-1", "F-4"], note: "n" }),
       ),
-    ).toBe("invalid_transition");
+    ).toBe("validation_failed");
+    expect(
+      await codeOf(
+        api.followupsDone("alpha", { ids: ["F-1", "F-1"], note: "n" }),
+      ),
+    ).toBe("validation_failed");
+    expect(
+      await codeOf(api.followupsDone("alpha", { ids: [], note: "n" })),
+    ).toBe("validation_failed");
+    expect(
+      await codeOf(api.followupsDrop("alpha", { ids: ["F-1"], reason: " " })),
+    ).toBe("validation_failed");
     expect(await api.followups("alpha", "all")).toEqual(before);
     await api.followupsDone("alpha", { ids: ["F-1"], note: "確かめた" });
     await api.followupsDrop("alpha", { ids: ["F-2"], reason: "不要" });

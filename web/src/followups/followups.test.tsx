@@ -416,8 +416,8 @@ it("AC-119・AC-120: 「捨てる」は理由の欄を出し、空のままで�
 it("AC-121: 口が誤りを返すと理由を出し、チェックと書いた文は残す", async () => {
   await openWith({
     [`POST ${URL_DONE}`]: errorResponse(
-      409,
-      "invalid_transition",
+      400,
+      "validation_failed",
       "未ではないものが含まれています",
     ),
   });

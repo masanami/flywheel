@@ -523,7 +523,6 @@ export const JUDGMENT_LABELS: Record<string, string> = {
   J5: "完了を検証する判断点（J5）",
   J6: "学びを書く判断点（J6）",
   J8: "改修を提案する判断点（J8）",
-  J9: "判断点（J9）",
   SV: "スーパーバイザーの判断点（SV）",
 };
 export const RUN_KIND_LABELS: Record<string, string> = {
