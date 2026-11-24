@@ -593,3 +593,43 @@ export const WHO_ME_UI = "あなた（画面）";
 export const WHO_ME_UI_BUTTON = "あなた（画面のボタン）";
 export const WHO_ME_TTY = "あなた（ターミナル）";
 export const WHO_AGENT_RUN = "エージェント";
+
+// 委譲先（flow の形）のステップの名前。識別子 → 日本語名。表に無い識別子は、画面が識別子だけを出す。
+export const STEP_LABELS: Record<string, string> = {
+  resolve: "入力の確かめ",
+  integration: "統合ブランチの用意",
+  analyze: "分析",
+  workspace: "作業ツリーの用意",
+  implement: "実装",
+  fix: "直し",
+  commit: "コミット",
+  sync: "取り込み",
+  "sync-resolve": "コンフリクトの解消",
+  e2e: "E2E テスト",
+  quality: "品質の検査",
+  open: "PR を開く",
+  retire: "統合ブランチの片付け",
+  publish: "PR の作成・更新",
+  ci: "CI 待ち",
+  respond: "レビュー対応",
+  land: "反映",
+  "land-sync": "反映前の取り込み",
+  "land-sync-resolve": "反映前のコンフリクトの解消",
+  "land-push": "取り込みの push",
+  merge: "マージ",
+  cleanup: "片付け",
+  adopt: "成果物の受け取り",
+  describe: "PR の説明",
+  push: "push",
+};
+
+// フローの名前の表示。表に無い名前は、名前だけを出す。
+export const FLOW_LABELS: Record<string, string> = {
+  ticket: "標準の実装（ticket）",
+};
+
+export const STEP_STATE_LABELS: Record<string, string> = {
+  running: "実行中…",
+  interrupted: "中断",
+  cancelled: "取り消し",
+};
