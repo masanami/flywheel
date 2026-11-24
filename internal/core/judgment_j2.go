@@ -756,6 +756,12 @@ func validateJ2TaskFields(t j2RawTask, vc j2ValidationContext, requireBudgets bo
 	flow, flowReason, reason := "", "", ""
 	if !vc.SkipFlowReason {
 		flow, flowReason, reason = checkJ2FlowReason(connector, op, t.FlowReason)
+	} else if connector.Form == ConnectorFormFlow {
+		// 検査し直しでは理由を求めないが、タスクの記録へ写す値は落とさない（保存済みの出力の理由と、いまの宣言の操作の flow）。
+		flow = op.Flow
+		if t.FlowReason != nil {
+			flowReason = *t.FlowReason
+		}
 	}
 	if reason != "" {
 		return j2Task{}, reason

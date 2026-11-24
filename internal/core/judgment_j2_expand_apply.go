@@ -402,6 +402,7 @@ func j2ExpandTaskInputs(tasks []j2Task) []TaskInput {
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria, NonGoals: t.NonGoals,
 			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn,
 			BudgetImplMicros: taskBudgetMicros(t.BudgetImplUSD), BudgetReviewMicros: taskBudgetMicros(t.BudgetReviewUSD), ExpandAfter: t.ExpandAfter,
+			PlannedFlow: t.Flow, FlowReason: t.FlowReason,
 		})
 	}
 	return inputs

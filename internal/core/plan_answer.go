@@ -63,8 +63,23 @@ func parsePlanSpec(spec *string) planSpecView {
 			v.Questions = append(v.Questions, planQuestion{Number: n, Text: q.Question, Options: q.Options, Recommended: q.Recommended})
 		}
 	}
-	for _, t := range raw.Tasks {
+	// planned_flow は検査のときに core が spec へ足した欄で、モデルの出力の型（j2RawTask）には無い。別に読む。
+	var planned struct {
+		Tasks []struct {
+			PlannedFlow string `json:"planned_flow"`
+		} `json:"tasks"`
+	}
+	_ = json.Unmarshal([]byte(*spec), &planned)
+	for i, t := range raw.Tasks {
+		var plannedFlow, flowReason string
+		if i < len(planned.Tasks) {
+			plannedFlow = planned.Tasks[i].PlannedFlow
+		}
+		if plannedFlow != "" && t.FlowReason != nil {
+			flowReason = *t.FlowReason
+		}
 		v.Tasks = append(v.Tasks, TaskInput{
+			PlannedFlow: plannedFlow, FlowReason: flowReason,
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria, NonGoals: t.NonGoals,
 			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn, SourceKey: t.Source,
 			BudgetImplMicros: taskBudgetMicros(t.BudgetImplUSD), BudgetReviewMicros: taskBudgetMicros(t.BudgetReviewUSD),
