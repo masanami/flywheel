@@ -20,23 +20,34 @@ type landFixture struct {
 	fake *fakeRelease
 	// head は承認した中身で、委譲先のレビュー待ちの中身の識別と同じ。
 	head string
+	// trace は newLandFixtureWith が進めた間の課題の状態（着手中・検証中・完了の承認待ち・完了）。
+	trace []Status
 }
 
 // newLandFixture は、検証中のタスクの実行（レビュー待ち）を、完了の承認（反映の操作も承認）まで進める。課題は完了になる。
 func newLandFixture(t *testing.T) *landFixture {
 	t.Helper()
+	return newLandFixtureWith(t, landConnectorsJSON, nil)
+}
+
+// newLandFixtureWith は newLandFixture を、宣言 connectorsJSON（form: cli か form: flow）で、レビュー待ちの facts を facts にして行う。
+func newLandFixtureWith(t *testing.T, connectorsJSON string, facts map[string]string) *landFixture {
+	t.Helper()
 	ctx := context.Background()
-	cf := newContractFixtureWith(t, landConnectorsJSON)
+	cf := newContractFixtureWith(t, connectorsJSON)
 	j := &j5Fixture{delegateFixture: cf.delegateFixture, checks: newFakeChecks(), j5: &fakeJudgmentInvoker{result: j5Out("met", nil, nil)}}
 	verified := prChecks("open", checkDone)
 	verified.HeadSHA = reviewContentArtifact.Ref // 検証した中身は、委譲先が言う中身の識別と同じ
 	j.checks.prs["o/r#1"] = verified
-	f := &landFixture{reviewFlowFixture: &reviewFlowFixture{contractFixture: cf, j5: j}, head: reviewContentArtifact.Ref}
+	f := &landFixture{reviewFlowFixture: &reviewFlowFixture{contractFixture: cf, j5: j, facts: facts}, head: reviewContentArtifact.Ref}
 	f.setPR(1, reviewPRURL, "open", "main")
+	f.trace = append(f.trace, f.status(t, f.cid))
 	f.toVerifying(t)
+	f.trace = append(f.trace, f.status(t, f.cid))
 	if _, err := f.s.VerifyAutoJ5(ctx, f.j5.input(f.cycle(t, 300), &f.cid)); err != nil {
 		t.Fatal(err)
 	}
+	f.trace = append(f.trace, f.status(t, f.cid))
 	prev, err := f.s.PrepareApproval(ctx, f.cid)
 	if err != nil || len(prev.PendingReleases) != 1 {
 		t.Fatalf("PrepareApproval = %+v err %v", prev, err)
@@ -93,7 +104,9 @@ func (f *landFixture) opState(t *testing.T) string {
 }
 
 func (f *landFixture) queueReview() {
-	f.client.queue = []ContractLaunchOutput{reviewWaitOutFor(reviewPRURL)}
+	out := reviewWaitOutFor(reviewPRURL)
+	out.Status.Facts = f.facts
+	f.client.queue = []ContractLaunchOutput{out}
 }
 
 // 対応するタスクの実行が land を持つレビュー待ちなら、先に status で読み、{choice}=land・{approved_ref}=承認した中身・{note}=空・{answer}=land で resume する。

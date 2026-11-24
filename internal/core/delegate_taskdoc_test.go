@@ -384,19 +384,19 @@ func TestContractStart_SourcelessTaskWithTaskFileDeclaration(t *testing.T) {
 	})
 	c := &f.conn.Connectors[0]
 	t.Run("AC-57 resume の {issue_number} は空", func(t *testing.T) {
-		got, err := fillCommandArgs(c, c.Commands.Resume, "C-1", nil, "ext-1", contractAnswer{Choice: "a"})
+		got, err := f.s.fillCommandArgs(c, contractCmdResume, "C-1", nil, "ext-1", contractAnswer{Choice: "a"})
 		if err != nil || len(got) != len(c.Commands.Resume) || got[3] != "" {
 			t.Errorf("resume args = %q err = %v, want an empty {issue_number}", got, err)
 		}
 	})
 	t.Run("AC-58 cancel の {issue_number} は空", func(t *testing.T) {
-		got, err := fillCommandArgs(c, c.Commands.Cancel, "C-1", nil, "ext-1", contractAnswer{})
+		got, err := f.s.fillCommandArgs(c, contractCmdCancel, "C-1", nil, "ext-1", contractAnswer{})
 		if err != nil || len(got) != len(c.Commands.Cancel) || got[3] != "" {
 			t.Errorf("cancel args = %q err = %v, want an empty {issue_number}", got, err)
 		}
 	})
 	t.Run("AC-181 resume の {approved_ref} は空", func(t *testing.T) {
-		got, err := fillCommandArgs(c, c.Commands.Resume, "C-1", nil, "ext-1", contractAnswer{Choice: "a"})
+		got, err := f.s.fillCommandArgs(c, contractCmdResume, "C-1", nil, "ext-1", contractAnswer{Choice: "a"})
 		if err != nil || got[4] != "" {
 			t.Errorf("resume args = %q err = %v, want an empty {approved_ref}", got, err)
 		}

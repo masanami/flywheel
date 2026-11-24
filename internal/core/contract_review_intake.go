@@ -590,7 +590,7 @@ func (s *Store) undeliveredFactsUnmetAnswer(ctx context.Context, cid int64, task
 
 // respondToReview は、required_facts を満たさないレビュー待ちを読んだ同じ状態の確認の中で、同じ契約の run へ respond を返す。
 func (s *Store) respondToReview(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, rep *ContractRunReport) (*ContractRunReport, error) {
-	command, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, rep.ChallengeID, binding, *rep.PendingRespond)
+	command, err := s.fillRowCommandArgs(connector, row, contractCmdResume, rep.ChallengeID, binding, *rep.PendingRespond)
 	if err != nil {
 		return nil, err
 	}

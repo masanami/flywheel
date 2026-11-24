@@ -91,6 +91,9 @@ func contractWaitingQuestion(runID, summary string, ra *ContractRequestedAction,
 
 // resumeCarriesAnswer は宣言の resume が、保留への答えを接続ツールへ渡す差し込みを含むか。
 func resumeCarriesAnswer(c *Connector) bool {
+	if c != nil && c.Form == ConnectorFormFlow {
+		return true // flow の形の resume は、答えを --input で渡す
+	}
 	if c == nil || c.Commands == nil {
 		return false
 	}
@@ -470,7 +473,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 				State: row.State, Summary: row.Summary, Held: held}, err
 		default:
 			// 引数を埋められないまま答えを失わないよう、返すと決める前に確かめる。
-			if _, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, challengeID, binding, *rr.Answer); err != nil {
+			if _, err := s.fillRowCommandArgs(connector, row, contractCmdResume, challengeID, binding, *rr.Answer); err != nil {
 				return nil, err
 			}
 			answer, resume = *rr.Answer, true
@@ -480,7 +483,7 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 		a, ok, err := s.loadContractAnswer(ctx, row, func(answer string) error {
 			// 答えを返すと決める（結び付きを外す）前に、resume の引数を埋められることを確かめる（埋められないまま答えを失わない）。
 			// 答えが無い状態の確認（status）では resume の引数を確かめない（取り込み元を要するのが resume だけの宣言でも状態を読める）。
-			_, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, challengeID, binding, contractAnswer{Choice: answer})
+			_, err := s.fillRowCommandArgs(connector, row, contractCmdResume, challengeID, binding, contractAnswer{Choice: answer})
 			return err
 		})
 		if err != nil {
@@ -495,11 +498,11 @@ func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contract
 	// 統合先を使う課題のタスクの実行の succeeded は、統合先へ入ったかの確かめと、保留・タスクを済みにする書き込みが済むまで、終わった記録にしない
 	// （その書き込みが、同じトランザクションで終わった記録にする）。
 	row.holdSuccessEnd = integ
-	args, name := connector.Commands.Status, "status"
+	cmd, name := contractCmdStatus, "status"
 	if resume {
-		args, name = connector.Commands.Resume, "resume"
+		cmd, name = contractCmdResume, "resume"
 	}
-	command, err := fillRowCommandArgs(connector, row, args, challengeID, binding, answer)
+	command, err := s.fillRowCommandArgs(connector, row, cmd, challengeID, binding, answer)
 	if err != nil {
 		return nil, err
 	}
@@ -571,7 +574,7 @@ func stillObserving(rep *ContractRunReport) bool {
 // 引数を埋められない・resume が失敗したときは課題を保留にせず、状態の確認の読み（statusRep）を返す
 // （次の周の読み直しで再び呼ぶだけで、追加のやり直しはしない）。成功したら、返った状態を status と同じに読んで写す。
 func (s *Store) resumeObservation(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, statusRep *ContractRunReport) (*ContractRunReport, error) {
-	command, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, statusRep.ChallengeID, binding, contractAnswer{})
+	command, err := s.fillRowCommandArgs(connector, row, contractCmdResume, statusRep.ChallengeID, binding, contractAnswer{})
 	if err != nil {
 		return statusRep, nil
 	}
@@ -715,7 +718,7 @@ func (s *Store) cancelOverBudget(ctx context.Context, in ContractPollInput, row 
 	if ok, err := s.taskMayProceedFor(ctx, row.ChallengeID, row.TaskID); err != nil || !ok {
 		return err
 	}
-	command, err := fillRowCommandArgs(connector, row, connector.Commands.Cancel, rep.ChallengeID, binding, contractAnswer{})
+	command, err := s.fillRowCommandArgs(connector, row, contractCmdCancel, rep.ChallengeID, binding, contractAnswer{})
 	if err != nil {
 		return err
 	}
@@ -811,7 +814,7 @@ func (s *Store) answerSupervisorWait(ctx context.Context, in ContractPollInput, 
 			if !resumeCarriesAnswer(connector) {
 				return errors.New("宣言の resume は答えの差し込み（{answer}・{choice}）を含まない")
 			}
-			c, err := fillRowCommandArgs(connector, row, connector.Commands.Resume, rep.ChallengeID, binding, contractAnswer{Choice: answers[0].Answer})
+			c, err := s.fillRowCommandArgs(connector, row, contractCmdResume, rep.ChallengeID, binding, contractAnswer{Choice: answers[0].Answer})
 			command = c
 			return err
 		},

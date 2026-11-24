@@ -32,6 +32,8 @@ func reviewWaitOut() ContractLaunchOutput {
 type reviewFlowFixture struct {
 	*contractFixture
 	j5 *j5Fixture
+	// facts は toVerifying が読むレビュー待ちの facts（nil なら付けない）。
+	facts map[string]string
 }
 
 func newReviewFlowFixture(t *testing.T) *reviewFlowFixture {
@@ -48,7 +50,9 @@ func (f *reviewFlowFixture) toVerifying(t *testing.T) {
 	if _, err := f.start(t); err != nil {
 		t.Fatal(err)
 	}
-	f.client.queue = []ContractLaunchOutput{reviewWaitOut()}
+	out := reviewWaitOut()
+	out.Status.Facts = f.facts
+	f.client.queue = []ContractLaunchOutput{out}
 	f.poll(t)
 	if got := f.status(t, f.cid); got != StatusVerifying {
 		t.Fatalf("status = %s, want verifying", got)
