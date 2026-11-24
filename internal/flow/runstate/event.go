@@ -108,9 +108,12 @@ type RunStarted struct {
 	// ReleaseOn は定義の最上位の release_on の写し（cancelled・failed）。終わりを記録する側が、定義を読み込まずに
 	// 「終わる前に、この run が作った作業ツリーを片付けるか」を状態から読む。この版より前に始めた run には無い（片付けない）。
 	ReleaseOn []string `json:"release_on,omitempty"`
-	Origin    string   `json:"origin"`
-	Cwd       string   `json:"cwd"`
-	PID       int      `json:"pid"`
+	// Models は解決したモデルの変数（変数の名前 → 値。定義の既定の値に flow start の --model を重ねたもの）。resume の後も
+	// この値を使う。定義が models を持たない run には無い。
+	Models map[string]string `json:"models,omitempty"`
+	Origin string            `json:"origin"`
+	Cwd    string            `json:"cwd"`
+	PID    int               `json:"pid"`
 	// PIDStart は PID のプロセスの開始時刻（ProcStart。PID の再利用を見分ける。#347）。この版より前の run には無い。
 	PIDStart    string `json:"pid_start,omitempty"`
 	ScriptsDir  string `json:"scripts_dir"`
@@ -156,6 +159,8 @@ type StepStarted struct {
 	Resume           bool     `json:"resume,omitempty"` // session_id のセッションを --resume で引き継いだ
 	BudgetGrantedUSD *float64 `json:"budget_granted_usd,omitempty"`
 	PromptLog        string   `json:"prompt_log,omitempty"`
+	// Model は claude の --model へ渡した値（ステップが model: $models.<名前> で変数を指すときの解決値。指さなければ空）。
+	Model string `json:"model,omitempty"`
 }
 
 // StepProcess は llm の子プロセスを起動した記録。PID はプロセスグループの長。
@@ -187,6 +192,8 @@ type StepFinished struct {
 	CostUnknown     bool     `json:"cost_unknown,omitempty"`
 	CostReportedUSD *float64 `json:"cost_reported_usd,omitempty"`
 	SessionID       string   `json:"session_id,omitempty"` // claude が結果で報告した session_id
+	// ModelsUsed は claude の結果の modelUsage の名前（使ったモデル。辞書順。modelUsage が無ければ空）。
+	ModelsUsed []string `json:"models_used,omitempty"`
 }
 
 // GateOpened は unit がゲートで止まったこと。Builtin は runtime の組み込みゲート（interrupted）。
