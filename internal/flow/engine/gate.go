@@ -1,0 +1,565 @@
+package engine
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/masanami/flywheel/internal/flow/runstate"
+	"github.com/masanami/flywheel/internal/flow/workflow"
+)
+
+// Observer は observe 型ゲート（§3.2）の観測。resume のたびに外部の実状態を確かめ、その結果を outcome として返す
+// （人の申告を信じない）。with はゲートの with を解決した値。
+type Observer func(ctx context.Context, env ObserveEnv, with map[string]json.RawMessage) (outcome string, observed json.RawMessage, err error)
+
+// ObserveEnv は観測が外部を確かめる場所: unit のステップが動くディレクトリ（作業ツリー）と gh。
+type ObserveEnv struct {
+	Dir string
+	Gh  string
+}
+
+var observers = map[string]Observer{}
+
+// RegisterObserver は観測を登録する。outcomes は観測が返しうる値（読み込み時に on の網羅を検査する）。
+// PR の実状態を見る観測（pr-state）は pullrequest.go が登録する。
+func RegisterObserver(name string, outcomes []string, fn Observer) {
+	workflow.RegisterObservation(name, outcomes)
+	observers[name] = fn
+}
+
+// 組み込みの interrupted ゲート（§4.5）が受け付ける値。
+const (
+	InterruptedRerun = "rerun"
+	InterruptedAbort = "abort"
+)
+
+func gateOpenedEvent(unit string, g *workflow.Step, detail string) runstate.Event {
+	return runstate.Event{Type: runstate.EvGateOpened, GateOpened: &runstate.GateOpened{
+		Unit: unit, Gate: g.ID, Type: g.GateType, Decider: g.Decider, RequestedAction: g.RequestedAction,
+		Inputs: g.GateInputs, Observe: g.Observe, RequiresTTY: workflow.RequiresTTY(g.GateType, g.Decider), ContractKind: g.ContractKind, Refresh: g.Refresh,
+		Detail: detail,
+	}}
+}
+
+// InterruptEvents は、runner が生きていない run で running のまま残り、子プロセスも居ないステップ実行を
+// interrupted として打ち切り、その unit を組み込みの interrupted ゲートへ送るイベントを作る（§4.5）。実行中のステップの
+// 無い unit（ステップの間で runner が落ちた）も同じゲートへ送る（#347: running のまま残さない）。
+// 自動で再実行はしない（LLM ステップは部分的な変更を残しうるため冪等ではない）。
+// 子プロセスのグループがまだ生きている実行は対象にしない（呼び出し元が止めてから呼ぶ）。
+//
+// いまのラウンドの契機に interrupted の印（Trigger.Interrupted。遷移の interrupted: { fail: <理由> } が付けた）がある unit は、
+// interrupted ゲートを開かず、実行中のステップを打ち切って失敗への遷移と run_finished（failed・印の理由）を記録する
+// （段の間で落ちたときも同じ）。
+func InterruptEvents(st *runstate.State) []runstate.Event {
+	return interruptEvents(st, false, false)
+}
+
+// interruptEvents は InterruptEvents の本体。asRunner は、記録上の runner が呼び出し元のプロセス自身で（生きていて）、
+// その runner として諦める呼び出し（runner を起動できなかった resume）。markedOnly は印のある unit だけを対象にする。
+func interruptEvents(st *runstate.State, asRunner, markedOnly bool) []runstate.Event {
+	if runstate.Terminal(st.Status) || (!asRunner && runstate.RunnerAlive(st)) {
+		return nil
+	}
+	if stale(st) {
+		// release_on の片付けの間に、片付ける側が落ちた: 終わりだけを書く（片付けは AppendEnding が済ませる）。
+		if reason, ok := failedAwaitingFinish(st); ok {
+			return []runstate.Event{{Type: runstate.EvRunFinished, RunFinished: &runstate.RunFinished{Status: runstate.StatusFailed, Reason: reason}}}
+		}
+		if cancelledAwaitingFinish(st) {
+			return []runstate.Event{{Type: runstate.EvRunCancelled, RunCancelled: &runstate.RunCancelled{Actor: st.Cancel.Actor, Channel: st.Cancel.Channel, Note: "finished by the cleanup after the canceller stopped"}}}
+		}
+	}
+	var evs []runstate.Event
+	failReason := ""
+	for _, u := range st.Units {
+		mark := ""
+		if r := u.CurrentRound(); r != nil {
+			mark = r.Trigger.Interrupted
+		}
+		if markedOnly && mark == "" {
+			continue
+		}
+		x := u.Running()
+		if x == nil && u.Gate == nil && u.Status == runstate.StatusRunning {
+			if mark != "" {
+				evs = append(evs, markedFailure(u, mark))
+				failReason = mark
+				continue
+			}
+			// ステップとステップの間で runner が落ちた（#347）: 実行中のステップは無いが、誰も run を進めていない。running の
+			// まま残さず、同じ interrupted ゲートで待たせる。rerun は次に実行するはずだったステップ（current_step）を新しい
+			// ラウンドで実行する。
+			evs = append(evs, interruptedGate(u.Key, fmt.Sprintf("the runner (pid %d) died before step %s started; nothing is advancing the run "+
+				"and it is not continued automatically. Check the working tree, then resume with %s to run step %s or %s to fail the run",
+				st.PID, u.CurrentStep, InterruptedRerun, u.CurrentStep, InterruptedAbort)))
+			continue
+		}
+		if x == nil || (x.PID > 0 && groupAlive(x.PID)) || (x.PID == 0 && len(sessionProcesses(x.SessionID)) > 0) {
+			continue
+		}
+		fin := &runstate.StepFinished{Unit: u.Key, Step: x.Step, Attempt: x.Attempt, Interrupted: true,
+			Error: fmt.Sprintf("the runner (pid %d) is not alive and the step's process is gone; the step did not finish", st.PID)}
+		chargeUnknown(fin, x.BudgetGrantedUSD)
+		evs = append(evs, runstate.Event{Type: runstate.EvStepFinished, StepFinished: fin})
+		if mark != "" {
+			evs = append(evs, markedFailure(u, mark))
+			failReason = mark
+			continue
+		}
+		evs = append(evs, interruptedGate(u.Key, fmt.Sprintf("step %s (attempt %d) was interrupted because the runner died; it is not re-run automatically "+
+			"(an llm step may have left partial changes). Check the working tree, then resume with %s to run the step again or %s to fail the run",
+			x.Step, x.Attempt, InterruptedRerun, InterruptedAbort)))
+	}
+	if failReason != "" {
+		evs = append(evs, runstate.Event{Type: runstate.EvRunFinished, RunFinished: &runstate.RunFinished{Status: runstate.StatusFailed, Reason: failReason}})
+	}
+	return evs
+}
+
+// failedAwaitingFinish は、すべての unit が終わっていて、どれかが失敗で、run がまだ終わっていないとき、その理由を返す。
+func failedAwaitingFinish(st *runstate.State) (string, bool) {
+	reason := ""
+	for _, u := range st.Units {
+		if !runstate.Terminal(u.Status) {
+			return "", false
+		}
+		if u.Status == runstate.StatusFailed {
+			reason = u.Reason
+		}
+	}
+	return reason, reason != ""
+}
+
+// cancelledAwaitingFinish は、取り消しの要求が記録済みで、どの unit にも実行中の段が無く、run が終わっていないか。
+func cancelledAwaitingFinish(st *runstate.State) bool {
+	if st.Cancel == nil {
+		return false
+	}
+	for _, u := range st.Units {
+		if u.Running() != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// cleanupGrace は、終わりの片付け（最長 releaseTimeout）が進行中かもしれないと見る時間の余裕。
+const cleanupGrace = releaseTimeout + time.Minute
+
+// stale は、最後の記録から cleanupGrace を過ぎているか（片付けている側が落ちたと見てよいか）。読めなければ偽。
+func stale(st *runstate.State) bool {
+	t, err := time.Parse(time.RFC3339Nano, st.UpdatedAt)
+	return err == nil && time.Since(t) > cleanupGrace
+}
+
+// markedFailure は印のあるラウンドの unit を、interrupted ゲートへ送らず失敗へ送る遷移。
+func markedFailure(u *runstate.Unit, reason string) runstate.Event {
+	return runstate.Event{Type: runstate.EvTransition, Transition: &runstate.Transition{
+		Unit: u.Key, From: u.CurrentStep, Outcome: "interrupted", Action: "fail", Reason: reason}}
+}
+
+// AbandonMarked は、runner を起動できなかった呼び出し元が、自分が記録上の runner として諦める（resume --detach の detach の
+// 失敗）。印のあるラウンドの unit だけを InterruptEvents と同じに失敗で終え、記録した後の状態を返す。印の無いラウンドは
+// 何も記録しない（いまと同じく、runner の居ない running として残して次の status・resume に任せる）。
+func AbandonMarked(run *runstate.Run) (*runstate.State, error) {
+	return AppendEnding(run, func(st *runstate.State) ([]runstate.Event, error) {
+		if st.PID != os.Getpid() {
+			return nil, nil
+		}
+		return interruptEvents(st, true, true), nil
+	})
+}
+
+// interruptedGate は組み込みの interrupted ゲートを開くイベント（§4.5）。
+func interruptedGate(unit, action string) runstate.Event {
+	return runstate.Event{Type: runstate.EvGateOpened, GateOpened: &runstate.GateOpened{
+		Unit: unit, Gate: workflow.InterruptedGate, Type: workflow.GateInput, Decider: workflow.DeciderAny,
+		RequestedAction: action, Inputs: []string{InterruptedRerun, InterruptedAbort}, Builtin: true,
+	}}
+}
+
+// Interrupt は InterruptEvents をロックの中で確かめ直して記録する（status / resume が呼ぶ）。
+func Interrupt(run *runstate.Run) (*runstate.State, error) {
+	return AppendEnding(run, func(st *runstate.State) ([]runstate.Event, error) {
+		return InterruptEvents(st), nil
+	})
+}
+
+// StopOrphans は、runner が生きていない run で running のまま残ったステップ実行の子プロセスを止める
+// （resume が interrupted へ送る前に行う。記録されない結果を出し続けるプロセスを残さない）。
+func StopOrphans(st *runstate.State, grace time.Duration) {
+	if runstate.Terminal(st.Status) || runstate.RunnerAlive(st) {
+		return
+	}
+	for _, u := range st.Units {
+		x := u.Running()
+		switch {
+		case x == nil:
+		case x.PID > 0:
+			StopOrphan(x.PID, grace)
+		default:
+			// llm は session_id を記録してから起動し、PID を後から記録する。その間に runner が落ちると PID が無いので、
+			// argv に session_id を含むプロセス（自分のプロセスグループの長として起動している）を探して止める。
+			for _, pid := range sessionProcesses(x.SessionID) {
+				StopOrphan(pid, grace)
+			}
+		}
+	}
+}
+
+// sessionProcesses は argv に session_id を含む生きているプロセスを返す（pgrep -f。見つからない・pgrep が無ければ空）。
+func sessionProcesses(sid string) []int {
+	if sid == "" {
+		return nil
+	}
+	out, err := exec.Command("pgrep", "-f", sid).Output()
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, f := range strings.Fields(string(out)) {
+		if pid, err := strconv.Atoi(f); err == nil && pid != os.Getpid() {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// Reopen は run を記録した定義で開き直す。定義が開始時から変わっていれば止める（§7.3: 途中で遷移表が変わった run を
+// 黙って続けない）。
+func Reopen(run *runstate.Run, st *runstate.State) (*Engine, error) {
+	wf, err := workflow.LoadAndValidate(st.Workflow.Path, workflow.Options{ScriptsDir: st.ScriptsDir})
+	if err != nil {
+		return nil, &ReopenError{Load: true, Msg: fmt.Sprintf("cannot load the workflow the run started with (%s): %v", st.Workflow.Path, err)}
+	}
+	if wf.Hash != st.Workflow.Hash {
+		return nil, &ReopenError{Msg: fmt.Sprintf("workflow %s changed since the run started (sha256 %s, now %s); the run is not continued with a different definition",
+			st.Workflow.Path, st.Workflow.Hash, wf.Hash)}
+	}
+	if len(st.Overrides.Overrides) > 0 {
+		if wf, err = reopenOverrides(run, st); err != nil {
+			return nil, err
+		}
+	}
+	return &Engine{WF: wf, Run: run, ScriptsDir: st.ScriptsDir, Cwd: st.Cwd}, nil
+}
+
+// reopenOverrides は上書きを重ねて始めた run の定義を組み立て直す（docs/harness-runtime-overrides.md §7.2）。
+// 上書きは元のパスではなく run ディレクトリの写しを読み、開始時の sha256 と照合する（手で書き換えた写しで黙って
+// 続けない）。重ねて検査した定義の effective_hash が開始時と違えば（CLI の版が変わって重ね方・正規化が変わった）止める。
+func reopenOverrides(run *runstate.Run, st *runstate.State) (*workflow.Workflow, error) {
+	var srcs []workflow.OverrideSource
+	for _, ref := range st.Overrides.Overrides {
+		p := filepath.Join(run.Dir, ref.Copy)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, &ReopenError{Msg: fmt.Sprintf("cannot read the copy of the %s override the run started with: %v", ref.Layer, err)}
+		}
+		sum := sha256.Sum256(data)
+		if got := hex.EncodeToString(sum[:]); got != ref.SHA256 {
+			return nil, &ReopenError{Msg: fmt.Sprintf("the copy of the %s override %s changed since the run started (sha256 %s, now %s); the run is not continued with a different override",
+				ref.Layer, p, ref.SHA256, got)}
+		}
+		srcs = append(srcs, workflow.OverrideSource{Layer: ref.Layer, Path: p, Data: data})
+	}
+	wf, err := workflow.LoadWithOverrides(st.Workflow.Path, workflow.Options{ScriptsDir: st.ScriptsDir}, srcs)
+	if err != nil {
+		return nil, &ReopenError{Load: true, Msg: fmt.Sprintf("cannot apply the overrides the run started with to %s: %v", st.Workflow.Path, err)}
+	}
+	if wf.Hash != st.Workflow.Hash {
+		return nil, &ReopenError{Msg: fmt.Sprintf("workflow %s changed since the run started (sha256 %s, now %s); the run is not continued with a different definition",
+			st.Workflow.Path, st.Workflow.Hash, wf.Hash)}
+	}
+	if wf.EffectiveHash != st.Overrides.EffectiveHash {
+		return nil, &ReopenError{Effective: true, Msg: fmt.Sprintf("the overridden workflow %s does not build the same as when the run started (effective sha256 %s, now %s)",
+			st.Workflow.ID, st.Overrides.EffectiveHash, wf.EffectiveHash)}
+	}
+	return wf, nil
+}
+
+// ReopenError は run を記録した定義で開き直せないこと。Load は定義（と上書き）を読み込めなかった（無い・この CLI が
+// 読めない）。Effective は上書きを重ねた定義が開始時と同じに組み上がらなかった（CLI の重ね方・正規化が変わった）。
+// どちらでもなければ定義か上書きの写しが開始時から変わっていた。
+type ReopenError struct {
+	Load      bool
+	Effective bool
+	Msg       string
+}
+
+func (e *ReopenError) Error() string { return e.Msg }
+
+// Resolution はゲートの解決の要求（resume / approve）。
+type Resolution struct {
+	Unit     string // 空なら唯一の unit
+	Input    string
+	HasInput bool
+	Note     string
+	HasNote  bool
+	// ApprovedRef は --approved-ref（通した中身の識別。先頭のコミット）。空の文字列は「無い」。
+	ApprovedRef string
+	Actor       string // resume | approve
+	User        string
+	Channel     string // tty | non-tty
+	// GateOpenedAt は、確認を求めたときに見ていたゲートの開いた時刻（approve）。解決の時点で同じゲートが開き直して
+	// いれば（別の解決で進んでまた同じゲートに来た）、人が見ていない文脈を解決しないように拒否する。
+	GateOpenedAt string
+}
+
+// RefusedError は要求をこの経路では受け付けられないこと（状態は何も変えていない）。
+type RefusedError struct{ Msg string }
+
+func (e *RefusedError) Error() string { return e.Msg }
+
+func refused(format string, args ...any) error {
+	return &RefusedError{Msg: fmt.Sprintf(format, args...)}
+}
+
+// WaitingGate は unit が待っているゲートの定義（組み込みの interrupted は nil）。
+func (e *Engine) WaitingGate(u *runstate.Unit) *workflow.Step {
+	if u.Gate == nil || u.Gate.Builtin {
+		return nil
+	}
+	return e.WF.Step(u.Gate.Gate)
+}
+
+// PickUnit は要求の unit を決める（指定が無ければ唯一の unit）。
+func PickUnit(st *runstate.State, key string) (*runstate.Unit, error) {
+	if key == "" {
+		if len(st.Units) != 1 {
+			return nil, refused("the run has %d units; give --unit", len(st.Units))
+		}
+		return st.Units[0], nil
+	}
+	u := st.Unit(key)
+	if u == nil {
+		return nil, refused("unit %q is not in run %s", key, st.RunID)
+	}
+	return u, nil
+}
+
+// CheckResolution は、要求がゲートを解決できるかを状態を変えずに確かめる（approve が確認を求める前に使う）。
+func (e *Engine) CheckResolution(st *runstate.State, req Resolution) (*runstate.Unit, error) {
+	if runstate.Terminal(st.Status) {
+		return nil, refused("run %s already ended as %s", st.RunID, st.Status)
+	}
+	u, err := PickUnit(st, req.Unit)
+	if err != nil {
+		return nil, err
+	}
+	g := u.Gate
+	if g == nil {
+		if req.HasInput || req.Actor == "approve" {
+			return nil, refused("unit %s is %s, not waiting at a gate", u.Key, u.Status)
+		}
+		return u, nil
+	}
+	if g.Type == workflow.GateObserve {
+		if req.Actor == "approve" {
+			return nil, refused("gate %s is an observe gate: the runtime checks the external state itself; use harness resume", g.Gate)
+		}
+		if req.HasInput || req.HasNote {
+			return nil, refused("gate %s is an observe gate: it takes no --input or --note (the outcome is observed, not declared)", g.Gate)
+		}
+		return u, nil
+	}
+	if g.RequiresTTY {
+		if req.Actor != "approve" {
+			return nil, refused("gate %s is decided by a human (decider: human, type: input); resume cannot resolve it. "+
+				"A person resolves it from a terminal: harness approve %s --unit %s --input <%s>", g.Gate, st.RunID, u.Key, strings.Join(g.Inputs, "|"))
+		}
+		if req.Channel != "tty" {
+			return nil, refused("gate %s must be approved from a terminal (TTY); approve refuses to run without one", g.Gate)
+		}
+	}
+	if !req.HasInput {
+		return nil, refused("gate %s waits for an input: give --input <%s>", g.Gate, strings.Join(g.Inputs, "|"))
+	}
+	if !contains(g.Inputs, req.Input) {
+		return nil, refused("gate %s does not accept %q (accepted: %s)", g.Gate, req.Input, strings.Join(g.Inputs, ", "))
+	}
+	if step := e.WaitingGate(u); step != nil && !req.HasNote {
+		if t := step.OnFor(req.Input); t != nil && readsNote(t) {
+			return nil, refused("input %s passes $gate.note to the next step; give --note", req.Input)
+		}
+	}
+	return u, nil
+}
+
+// readsNote は遷移が --note を必須にするか（$gate.note を渡し（$gate.approved_ref だけを渡す遷移は --note を求めない）、note: optional を宣言していない。#377）。
+func readsNote(t *workflow.Transition) bool {
+	if !t.NoteOptional {
+		for _, b := range t.With {
+			if b.Value.Ref != nil && b.Value.Ref.Kind == workflow.RefGate && b.Value.Ref.Name == workflow.GateNote {
+				return true
+			}
+		}
+	}
+	return t.Exhausted != nil && readsNote(t.Exhausted)
+}
+
+func contains(xs []string, x string) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
+// Resolve はゲートを解決して次のラウンドへ進め、run がゲートか終端に達するまで進める（§5.1）。
+// 閉じたラウンドのステップ実行は再実行しない: 解決したゲートの遷移先から始める（§4.2）。
+// unit がゲートで待っていない（runner が落ちた run）なら、runner を引き継いで現在のステップから進める。
+func (e *Engine) Resolve(ctx context.Context, req Resolution) (*runstate.State, error) {
+	if _, err := e.ResolveGate(ctx, req); err != nil {
+		return nil, err
+	}
+	return e.Loop(ctx)
+}
+
+// ResolveGate は Resolve のうち、ゲートの解決（入力の検証・observe の観測・解決と遷移の記録・runner_started）だけを行い、
+// run を進めずに記録後の状態を返す。切り離した再開（resume --detach・approve --detach・contract resume。#359）は、
+// これを呼び出し元のプロセスで同期に行い、その後の進行だけを切り離した runner に渡す。runner_started にはこの
+// プロセスの PID を記録するので、このプロセスが起動した runner はそれを引き継げる（親からの引き継ぎ。#347）。
+func (e *Engine) ResolveGate(ctx context.Context, req Resolution) (*runstate.State, error) {
+	st, _, err := e.Run.Load()
+	if err != nil {
+		return nil, err
+	}
+	u, err := e.CheckResolution(st, req)
+	if err != nil {
+		return nil, err
+	}
+	// observe 型は解決の前に外部の実状態を確かめる（ロックの外で。観測は時間がかかりうる）。
+	var observed json.RawMessage
+	var observedOutcome string
+	if u.Gate != nil && u.Gate.Type == workflow.GateObserve {
+		step := e.WaitingGate(u)
+		if step == nil {
+			return nil, fmt.Errorf("gate %s is not in workflow %s", u.Gate.Gate, e.WF.ID)
+		}
+		observedOutcome, observed, err = e.observe(ctx, st, u, step)
+		if err != nil {
+			return nil, refused("gate %s: observation %s failed; the gate stays open: %v", step.ID, step.Observe, err)
+		}
+	}
+	gateAt, openedAt := "", ""
+	if u.Gate != nil {
+		gateAt, openedAt = u.Gate.Gate, u.Gate.OpenedAt
+	}
+	if req.GateOpenedAt != "" && req.GateOpenedAt != openedAt {
+		return nil, refused("gate %s of unit %s was reopened after it was shown; nothing was recorded", gateAt, u.Key)
+	}
+	return AppendEnding(e.Run, func(cur *runstate.State) ([]runstate.Event, error) {
+		cu := cur.Unit(u.Key)
+		if runstate.Terminal(cur.Status) {
+			return nil, refused("run %s already ended as %s", cur.RunID, cur.Status)
+		}
+		if (cu.Gate == nil && gateAt != "") || (cu.Gate != nil && (cu.Gate.Gate != gateAt || cu.Gate.OpenedAt != openedAt)) {
+			return nil, refused("unit %s changed while resolving (another resume?); nothing was recorded", u.Key)
+		}
+		// ゲートで待っている run には runner が居ない（run は待機で終わる）。runner が居るのは running の run だけ。
+		if cur.Status == runstate.StatusRunning && runstate.RunnerAlive(cur) && cur.PID != os.Getpid() {
+			return nil, refused("run %s is being advanced by pid %d; nothing to resume", cur.RunID, cur.PID)
+		}
+		if cu.Gate == nil && cu.Running() != nil {
+			return nil, refused("unit %s has a running step whose process is still alive; cancel the run or wait", u.Key)
+		}
+		evs := []runstate.Event{{Type: runstate.EvRunnerStarted, RunnerStarted: &runstate.RunnerStarted{PID: os.Getpid(), PIDStart: runstate.SelfStart(), Command: req.Actor}}}
+		if cu.Gate == nil {
+			return evs, nil
+		}
+		outcome := req.Input
+		if cu.Gate.Type == workflow.GateObserve {
+			outcome = observedOutcome
+		}
+		res := &runstate.GateResolved{Unit: u.Key, Gate: cu.Gate.Gate, Outcome: outcome, Observed: observed,
+			Actor: req.Actor, User: req.User, Channel: req.Channel}
+		if req.HasNote {
+			res.Note = req.Note
+		}
+		res.ApprovedRef = req.ApprovedRef
+		evs = append(evs, runstate.Event{Type: runstate.EvGateResolved, GateResolved: res})
+		next, err := e.afterGate(cur, cu, outcome, req)
+		if err != nil {
+			return nil, err
+		}
+		return append(evs, next...), nil
+	})
+}
+
+// afterGate はゲートを抜けた後のイベント（遷移と、新しいラウンドの開始／次のゲート／終端）を作る。
+func (e *Engine) afterGate(st *runstate.State, u *runstate.Unit, outcome string, req Resolution) ([]runstate.Event, error) {
+	trigger := runstate.Trigger{Kind: "gate", Gate: u.Gate.Gate, Input: outcome}
+	round := runstate.Event{Type: runstate.EvRoundStarted, RoundStarted: &runstate.RoundStarted{Unit: u.Key, Round: len(u.Rounds) + 1, Trigger: trigger}}
+	if u.Gate.Builtin {
+		switch outcome {
+		case InterruptedRerun:
+			// 打ち切ったステップを新しいラウンドでやり直す（遷移で渡された $edge の値はそのまま持ち越す）。
+			return []runstate.Event{round}, nil
+		case InterruptedAbort:
+			return []runstate.Event{
+				{Type: runstate.EvTransition, Transition: &runstate.Transition{Unit: u.Key, From: u.CurrentStep, Outcome: InterruptedAbort, Action: "fail", Reason: "interrupted"}},
+				{Type: runstate.EvRunFinished, RunFinished: &runstate.RunFinished{Status: runstate.StatusFailed, Reason: "interrupted"}},
+			}, nil
+		}
+		return nil, refused("the interrupted gate accepts %s or %s", InterruptedRerun, InterruptedAbort)
+	}
+	step := e.WaitingGate(u)
+	if step == nil {
+		return nil, fmt.Errorf("gate %s is not in workflow %s", u.Gate.Gate, e.WF.ID)
+	}
+	cur := succeeded(u)
+	cur.outcomes[step.ID] = outcome
+	if req.HasNote {
+		note := req.Note
+		cur.note = &note
+	}
+	cur.approvedRef = req.ApprovedRef
+	evs, err := e.transitionEvents(st, u, step, outcome, false, cur)
+	if err != nil {
+		return nil, err
+	}
+	if tr := evs[0].Transition; tr.Action == "step" {
+		round.RoundStarted.Trigger.Interrupted = tr.Interrupted
+		evs = append(evs, round)
+	}
+	return evs, nil
+}
+
+func (e *Engine) observe(ctx context.Context, st *runstate.State, u *runstate.Unit, step *workflow.Step) (string, json.RawMessage, error) {
+	fn := observers[step.Observe]
+	if fn == nil {
+		return "", nil, errors.New("the observation is not registered in this build")
+	}
+	with := map[string]json.RawMessage{}
+	for _, b := range step.With {
+		v, err := value(st, succeeded(u), nil, b.Value)
+		if err != nil {
+			return "", nil, err
+		}
+		with[b.Name] = v
+	}
+	dir := e.dirFor(u)
+	if _, err := os.Stat(dir); err != nil {
+		// 待っている間に作業ツリーが消された（マージの後など）: run を開始したディレクトリで確かめる。
+		dir = e.Cwd
+	}
+	outcome, observed, err := fn(ctx, ObserveEnv{Dir: dir, Gh: e.GhBin}, with)
+	if err != nil {
+		return "", nil, err
+	}
+	if !contains(step.Outcomes(), outcome) {
+		return "", nil, fmt.Errorf("the observation returned %q, which is not one of its outcomes (%s)", outcome, strings.Join(step.Outcomes(), ", "))
+	}
+	return outcome, observed, nil
+}
