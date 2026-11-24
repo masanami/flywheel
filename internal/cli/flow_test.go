@@ -15,6 +15,7 @@ import (
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/flow"
+	"github.com/masanami/flywheel/internal/flow/engine"
 )
 
 // flywheel flow（組み込みのフローの入口）の配線の試験。進め方そのものは internal/flow の試験が持つ。ここは、引数の解釈・
@@ -147,7 +148,7 @@ func TestFlowStart_WithoutTheLauncherFailsAndCreatesNothing(t *testing.T) {
 			env[i] = "PATH=" + empty
 		}
 	}
-	out, errOut, code := runFlowChild(t, env, t.TempDir(), "start", "--workspace", ws, "--input", "issue=1", "ticket")
+	out, errOut, code := runFlowChild(t, env, t.TempDir(), "start", "--workspace", ws, "--permission-mode", "auto", "--delegated-run", "R-1", "--input", "issue=1", "ticket")
 	if code == 0 || !strings.Contains(errOut, "claude-harness-run") || out != "" {
 		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
 	}
@@ -161,7 +162,7 @@ func TestFlowStart_PluginOutOfRangeReportsVersionAndRange(t *testing.T) {
 	t.Parallel()
 	ws := flowWorkspaceDir(t)
 	bin := fakeFlowPlugin(t, "6.0.0")
-	_, errOut, code := runFlowChild(t, flowChildEnv(bin), t.TempDir(), "start", "--workspace", ws, "--input", "issue=1", "ticket")
+	_, errOut, code := runFlowChild(t, flowChildEnv(bin), t.TempDir(), "start", "--workspace", ws, "--permission-mode", "auto", "--delegated-run", "R-1", "--input", "issue=1", "ticket")
 	if code == 0 {
 		t.Fatalf("exit 0, stderr %q", errOut)
 	}
@@ -286,7 +287,7 @@ func TestFlowResume_MapsEveryFlag(t *testing.T) {
 	if code := run(args, strings.NewReader(""), &out, &errb, defaultCommands()); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
-	want := flow.ResumeOptions{ID: "RUN-1", Unit: "main", Input: "land", HasInput: true, HasNote: true, ApprovedRef: "abc123", PermissionMode: "auto"}
+	want := flow.ResumeOptions{ID: "RUN-1", Unit: "main", Input: "land", HasInput: true, HasNote: true, ApprovedRef: "abc123", PermissionMode: "auto", DelegatedRun: "R-1"}
 	if got != want {
 		t.Errorf("flow.Resume got %+v, want %+v", got, want)
 	}
@@ -296,11 +297,142 @@ func TestFlowResume_MapsEveryFlag(t *testing.T) {
 func TestFlow_RefusesADirectoryThatIsNotAWorkspace(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	_, errOut, code := runFlowChild(t, flowChildEnv(fakeFlowPlugin(t, "5.3.0")), t.TempDir(), "start", "--workspace", dir, "--input", "issue=1", "ticket")
+	_, errOut, code := runFlowChild(t, flowChildEnv(fakeFlowPlugin(t, "5.3.0")), t.TempDir(), "start", "--workspace", dir, "--permission-mode", "auto", "--delegated-run", "R-1", "--input", "issue=1", "ticket")
 	if code == 0 || !strings.Contains(errOut, "ワークスペースではない") {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".flywheel")); !os.IsNotExist(err) {
 		t.Errorf(".flywheel was created (stat err: %v)", err)
+	}
+}
+
+// flowRunsDirEntries は <ws>/.flywheel/flow/runs の中の名前の一覧（無ければ空）。
+func flowRunsDirEntries(t *testing.T, ws string) []string {
+	t.Helper()
+	ents, err := os.ReadDir(filepath.Join(ws, ".flywheel", "flow", "runs"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range ents {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// AC-41〜45: start は --permission-mode（default・acceptEdits・auto のみ）と --delegated-run を必須で受け、--override を受けない。
+// いずれも使い方の誤り（終了コード 2）で、実行のフォルダを作らず、標準出力には何も出さない。
+func TestFlowStart_RequiresPermissionModeAndDelegatedRunAndRejectsOverride(t *testing.T) {
+	t.Parallel()
+	bin := fakeFlowPlugin(t, "5.3.0")
+	for _, c := range []struct {
+		name string
+		args []string
+	}{
+		{"AC-41 permission-mode 無し", []string{"--delegated-run", "R-1"}},
+		{"AC-41 permission-mode が空", []string{"--permission-mode", "", "--delegated-run", "R-1"}},
+		{"AC-42 bypassPermissions", []string{"--permission-mode", "bypassPermissions", "--delegated-run", "R-1"}},
+		{"AC-42 plan", []string{"--permission-mode", "plan", "--delegated-run", "R-1"}},
+		{"AC-42 大文字小文字違い", []string{"--permission-mode", "Auto", "--delegated-run", "R-1"}},
+		{"AC-43 delegated-run 無し", []string{"--permission-mode", "auto"}},
+		{"AC-43 delegated-run が空", []string{"--permission-mode", "auto", "--delegated-run", ""}},
+		{"AC-45 override", []string{"--permission-mode", "auto", "--delegated-run", "R-1", "--override", "x"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ws := flowWorkspaceDir(t)
+			args := append([]string{"start", "--workspace", ws, "--input", "issue=1"}, c.args...)
+			out, errOut, code := runFlowChild(t, flowChildEnv(bin), t.TempDir(), append(args, "ticket")...)
+			if code != 2 || out != "" || !strings.Contains(errOut, "usage_error") {
+				t.Fatalf("exit %d stdout %q stderr %q, want a usage error (exit 2)", code, out, errOut)
+			}
+			if _, err := os.Stat(filepath.Join(ws, ".flywheel", "flow")); !os.IsNotExist(err) {
+				t.Errorf(".flywheel/flow was created (stat err: %v)", err)
+			}
+		})
+	}
+}
+
+// 3 つの値は受け付ける（使い方の誤りにならない。プラグインが無いので別の理由で終わるが、usage_error ではない）。
+func TestFlowStart_AcceptsTheThreePermissionModes(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"default", "acceptEdits", "auto"} {
+		ws := flowWorkspaceDir(t)
+		_, errOut, code := runFlowChild(t, flowChildEnv(fakeFlowPlugin(t, "6.0.0")), t.TempDir(), "start", "--workspace", ws, "--permission-mode", mode, "--delegated-run", "R-1", "--input", "issue=1", "ticket")
+		if code == 2 || strings.Contains(errOut, "usage_error") || !strings.Contains(errOut, "6.0.0") {
+			t.Errorf("mode %q: exit %d stderr %q, want the plugin-version refusal (not a usage error)", mode, code, errOut)
+		}
+	}
+}
+
+// AC-44: resume は --permission-mode か --delegated-run が無い（または範囲外）と、実行の記録を変えずに使い方の誤りで終わる。
+func TestFlowResume_RequiresPermissionModeAndDelegatedRunAndLeavesTheRunUntouched(t *testing.T) {
+	t.Parallel()
+	ws := flowWorkspaceDir(t)
+	runDir := filepath.Join(ws, ".flywheel", "flow", "runs", "RUN-1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	events := filepath.Join(runDir, "events.jsonl")
+	if err := os.WriteFile(events, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := fakeFlowPlugin(t, "5.3.0")
+	for _, args := range [][]string{
+		{"--delegated-run", "R-1"},
+		{"--permission-mode", "auto"},
+		{"--permission-mode", "bypassPermissions", "--delegated-run", "R-1"},
+	} {
+		out, errOut, code := runFlowChild(t, flowChildEnv(bin), t.TempDir(), append([]string{"resume", "--workspace", ws}, append(args, "RUN-1")...)...)
+		if code != 2 || out != "" || !strings.Contains(errOut, "usage_error") {
+			t.Errorf("%v: exit %d stdout %q stderr %q, want a usage error (exit 2)", args, code, out, errOut)
+		}
+		if b, _ := os.ReadFile(events); string(b) != "{}\n" {
+			t.Errorf("%v: the run record changed: %q", args, b)
+		}
+	}
+}
+
+// AC-53〜56: FLYWHEEL_DELEGATED_RUN のある環境からの flow の全サブコマンド（__run-detached を含む）は、拒否の誤りで終わる。
+// start は実行のフォルダを作らず、resume・cancel は実行の記録を変えない。目印はこの試験が明示して付ける。
+func TestFlow_EverySubcommandIsRejectedFromAMarkedEnvironment(t *testing.T) {
+	t.Parallel()
+	ws := flowWorkspaceDir(t)
+	runDir := filepath.Join(ws, ".flywheel", "flow", "runs", "RUN-1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	events := filepath.Join(runDir, "events.jsonl")
+	if err := os.WriteFile(events, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := append(flowChildEnv(fakeFlowPlugin(t, "5.3.0")), core.DelegatedRunEnvVar+"=R-9")
+	launch := []string{"--permission-mode", "auto", "--delegated-run", "R-1"}
+	for _, args := range [][]string{
+		append([]string{"start", "--workspace", ws, "--input", "issue=1"}, append(launch, "ticket")...),
+		{"status", "--workspace", ws, "RUN-1"},
+		append([]string{"resume", "--workspace", ws}, append(launch, "RUN-1")...),
+		{"cancel", "--workspace", ws, "RUN-1"},
+		{flow.DetachedRunnerCmd, "--workspace", ws, "RUN-1"},
+	} {
+		out, errOut, code := runFlowChild(t, env, t.TempDir(), args...)
+		if code != 1 || out != "" || !strings.Contains(errOut, "verification_rejected") || !strings.Contains(errOut, core.DelegatedRunEnvVar) {
+			t.Errorf("%s: exit %d stdout %q stderr %q, want a refusal", args[0], code, out, errOut)
+		}
+	}
+	if got := flowRunsDirEntries(t, ws); len(got) != 1 || got[0] != "RUN-1" {
+		t.Errorf("runs dir = %v, want only RUN-1 (start must not create a run folder)", got)
+	}
+	if b, _ := os.ReadFile(events); string(b) != "{}\n" {
+		t.Errorf("the run record changed: %q", b)
+	}
+}
+
+// flow の engine が claude の子へ足す目印の名前は、cli が拒否に使う core の名前と同じ綴りである
+// （internal/flow は core を import できないので、綴りを複製している）。
+func TestFlow_EngineMarkerNameMatchesCore(t *testing.T) {
+	t.Parallel()
+	if engine.DelegatedRunEnv != core.DelegatedRunEnvVar {
+		t.Fatalf("engine.DelegatedRunEnv = %q, core.DelegatedRunEnvVar = %q", engine.DelegatedRunEnv, core.DelegatedRunEnvVar)
 	}
 }

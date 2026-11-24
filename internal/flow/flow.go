@@ -78,6 +78,7 @@ func openRun(env Env, id string) (*runstate.Run, error) {
 func tools(eng *engine.Engine, env Env) {
 	eng.ClaudeBin = env.Getenv("HARNESS_CLAUDE_BIN")
 	eng.PermissionMode = env.Getenv(PermissionModeEnv)
+	eng.DelegatedRun = env.Getenv(DelegatedRunPassEnv)
 	eng.GitBin = env.Getenv("HARNESS_GIT_BIN")
 	eng.GhBin = env.Getenv("HARNESS_GH_BIN")
 }
@@ -98,6 +99,8 @@ type StartOptions struct {
 	Inputs []string
 	// PermissionMode は llm 種類が起動する claude へ --permission-mode で渡すモード（空なら渡さない）。
 	PermissionMode string
+	// DelegatedRun は --delegated-run の値（委譲する run の ID）。claude の子の環境の FLYWHEEL_DELEGATED_RUN になる。
+	DelegatedRun string
 }
 
 // Start は run を始め、切り離した runner に進めさせて、runner が引き継いだのを確かめてから戻る。
@@ -152,7 +155,7 @@ func Start(env Env, o StartOptions) int {
 		return ExitFailed
 	}
 	logf(env.Stderr, "flywheel flow: run %s started (%s)\n", eng.Run.ID, eng.Run.Dir)
-	extra := map[string]string{ScriptsDirEnv: plugin.ScriptsDir, PluginVersionEnv: plugin.Version, PermissionModeEnv: o.PermissionMode}
+	extra := map[string]string{ScriptsDirEnv: plugin.ScriptsDir, PluginVersionEnv: plugin.Version, PermissionModeEnv: o.PermissionMode, DelegatedRunPassEnv: o.DelegatedRun}
 	_, derr := detach(env, eng.Run, cwd, extra)
 	st, _, lerr := eng.Run.Load()
 	if lerr != nil {
@@ -362,6 +365,8 @@ type ResumeOptions struct {
 	ApprovedRef string
 	// PermissionMode は、切り離した runner が起動する claude へ --permission-mode で渡すモード（空なら環境変数の値）。
 	PermissionMode string
+	// DelegatedRun は、切り離した runner が起動する claude の環境の FLYWHEEL_DELEGATED_RUN にする値（空なら環境変数の値）。
+	DelegatedRun string
 }
 
 // Resume はゲートの解決（入力の検証・観測・記録）をこのプロセスで行い（拒否はその場で返す。状態は変えない）、その後の
@@ -432,6 +437,9 @@ func Resume(env Env, o ResumeOptions) int {
 	if o.PermissionMode != "" {
 		eng.PermissionMode = o.PermissionMode
 	}
+	if o.DelegatedRun != "" {
+		eng.DelegatedRun = o.DelegatedRun
+	}
 	req := engine.Resolution{
 		Unit: o.Unit, Input: o.Input, HasInput: o.HasInput, Note: o.Note, HasNote: o.HasNote,
 		ApprovedRef: o.ApprovedRef, Actor: "resume", User: env.Getenv("USER"), Channel: "non-tty",
@@ -462,7 +470,7 @@ func Resume(env Env, o ResumeOptions) int {
 	if err != nil {
 		cwd = eng.Cwd
 	}
-	extra := map[string]string{ScriptsDirEnv: plugin.ScriptsDir, PluginVersionEnv: plugin.Version, PermissionModeEnv: o.PermissionMode}
+	extra := map[string]string{ScriptsDirEnv: plugin.ScriptsDir, PluginVersionEnv: plugin.Version, PermissionModeEnv: o.PermissionMode, DelegatedRunPassEnv: o.DelegatedRun}
 	if _, err := detach(env, run, cwd, extra); err != nil {
 		logf(env.Stderr, "flywheel flow: run %s: %v\n", run.ID, err)
 		// 印（interrupted）のあるラウンドは、runner の居ない running のまま返さず、その場で失敗で終える。印の無い

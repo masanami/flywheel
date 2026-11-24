@@ -148,6 +148,7 @@ func (e *Engine) executeLLM(ctx context.Context, st *runstate.State, u *runstate
 
 	cmd := exec.Command(e.claudeBin(), args...)
 	cmd.Dir = e.dirFor(u)
+	cmd.Env = e.claudeEnv()
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr // プロンプトは stdin で渡す（argv の長さに縛られない）
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	started.Argv = cmd.Args

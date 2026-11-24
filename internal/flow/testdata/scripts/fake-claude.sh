@@ -5,6 +5,7 @@
 #   responses/<n>.sleep があれば、自分の PID を pids へ書いて眠る（runner が落ちる場合を作る）。
 #   responses/<n>.run があれば、応答を返す前にカレントディレクトリで bash に渡す（子がコミット・push する場合を作る）。
 #   受け取った argv を calls/<n>.argv（1 行 1 引数）、stdin を calls/<n>.stdin、カレントディレクトリを calls/<n>.pwd に残す。
+#   環境の FLYWHEEL_DELEGATED_RUN の値（無ければ UNSET）を calls/<n>.marker に残す。
 #   FAKE_CLAUDE_EVENTS が指す events.jsonl に、起動した時点で session id が記録されていたかを calls/<n>.recorded に残す。
 set -u
 dir="$FAKE_CLAUDE_DIR"
@@ -14,6 +15,7 @@ echo "$n" > "$dir/count"
 printf '%s\n' "$@" > "$dir/calls/$n.argv"
 cat > "$dir/calls/$n.stdin"
 pwd -P > "$dir/calls/$n.pwd"
+printf '%s' "${FLYWHEEL_DELEGATED_RUN-UNSET}" > "$dir/calls/$n.marker"
 sid=''
 while [ $# -gt 0 ]; do
   case "$1" in

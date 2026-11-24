@@ -115,7 +115,7 @@ func newFixture(t *testing.T, pluginVersion string) *fixture {
 	f.plugin = filepath.Join(root, "plugin")
 	writeFile(t, filepath.Join(f.plugin, ".claude-plugin", "plugin.json"), fmt.Sprintf(`{"name":"claude-harness","version":%q}`, pluginVersion), 0o644)
 	writeFile(t, filepath.Join(f.plugin, "scripts", "quality-check-runner.sh"),
-		"#!/bin/bash\nprintf '%s' \"${HARNESS_PLUGIN_VERSION:-unset}\" > \"$FAKE_GH_DIR/plugin-version\"\nprintf '%s\\n' '{\"result\":\"pass\",\"auto_fix\":{},\"gates\":{\"test\":{\"status\":\"pass\"}}}'\n", 0o755)
+		"#!/bin/bash\nprintf '%s' \"${HARNESS_PLUGIN_VERSION:-unset}\" > \"$FAKE_GH_DIR/plugin-version\"\nprintf '%s' \"${FLYWHEEL_DELEGATED_RUN-UNSET}\" > \"$FAKE_GH_DIR/script-marker\"\nprintf '%s\\n' '{\"result\":\"pass\",\"auto_fix\":{},\"gates\":{\"test\":{\"status\":\"pass\"}}}'\n", 0o755)
 	writeFile(t, filepath.Join(f.plugin, "scripts", "ci-wait.sh"),
 		"#!/bin/bash\nprintf '%s\\n' '{\"ci\":\"green\",\"failed_checks\":[],\"failure_log_excerpt\":\"\",\"pr_url\":\"https://github.com/o/r/pull/7\",\"pr_number\":7,\"pr_exists\":true}'\n", 0o755)
 	// 作業ツリーの払い出しと片付け（実物のプラグインのスクリプトと同じ引数・出力の形。git の作業ツリーを作る）。
@@ -172,8 +172,15 @@ func (f *fixture) env() (Env, *bytes.Buffer, *bytes.Buffer) {
 
 func (f *fixture) start(extra ...string) (contractDoc, string, int) {
 	f.t.Helper()
+	return f.startWith(StartOptions{PermissionMode: "auto", DelegatedRun: "R-start"}, extra...)
+}
+
+// startWith は o（Name・Inputs は足す）で ticket を始める。
+func (f *fixture) startWith(o StartOptions, extra ...string) (contractDoc, string, int) {
+	f.t.Helper()
 	env, out, errb := f.env()
-	code := Start(env, StartOptions{Name: "ticket", Inputs: append([]string{"issue=42"}, extra...)})
+	o.Name, o.Inputs = "ticket", append([]string{"issue=42"}, extra...)
+	code := Start(env, o)
 	return decodeDoc(f.t, out.String()), errb.String(), code
 }
 
