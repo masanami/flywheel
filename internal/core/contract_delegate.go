@@ -523,8 +523,11 @@ func findCLIConnector(d *ConnectorsDeclaration, id string) (*Connector, error) {
 		if c.ID != id {
 			continue
 		}
-		if c.Form != ConnectorFormCLI || c.Commands == nil {
+		if !c.UsesContractCommands() {
 			return nil, fmt.Errorf("%w: connector %q is not a cli connector", ErrValidation, id)
+		}
+		if c.Commands == nil { // form: flow の起動は、commands の引数の組み立てが入るまで未対応
+			return nil, fmt.Errorf("%w: connector %q (form %s) cannot be launched yet", ErrValidation, id, c.Form)
 		}
 		return c, nil
 	}

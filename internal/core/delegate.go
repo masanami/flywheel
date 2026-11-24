@@ -878,7 +878,7 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 	}
 
 	// form: cli の接続ツールの操作は、claude の子も J3 も起動せず、契約の start を呼んで実行 ID を記録し、その周の委譲を終える。
-	if dc.Connector.Form == ConnectorFormCLI {
+	if dc.Connector.UsesContractCommands() {
 		// 契約の run もスロットは使わないが、同時委譲数（max_parallel_runs）には数える。
 		adm, err := run.admitContract(ctx)
 		if err != nil {

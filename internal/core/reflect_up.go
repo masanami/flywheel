@@ -441,6 +441,9 @@ func (s *Store) startIntegrationReflect(ctx context.Context, in DelegateInput, c
 	holdFailed := func(detail string) error {
 		return s.holdChallengeForReflect(ctx, challengeID, reflectFailedQuestion(detail), holdReasonReflectFailed)
 	}
+	if connector.Commands == nil { // form: flow の反映の依頼の起動は、引数の組み立てが入るまで未対応
+		return nil, nil, holdFailed("form: flow の委譲先の反映の依頼の起動は未対応。")
+	}
 	command, err := fillContractArgsWith(connector.Commands.Reflect, contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: ref})
 	if err != nil {
 		return nil, nil, holdFailed("宣言の commands.reflect の引数を埋められなかった（" + err.Error() + "）。")
