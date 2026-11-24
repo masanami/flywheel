@@ -177,3 +177,32 @@ func TestPollContractRuns_AbsentStepsLeaveStepRowsAndOtherColumnsAlone(t *testin
 		}
 	})
 }
+
+// AC-120・AC-121: 契約の出力の steps の effort を contract_run_step.effort へ写す（無ければ NULL）。
+func TestPollContractRuns_StepEffortIsRecorded(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	flow, effort := "ticket", "medium"
+	f.pollWith(t, withSteps(&flow, []ContractStep{
+		stepOf(1, "finished", func(s *ContractStep) { s.Effort = &effort }),
+		stepOf(2, "running", nil),
+	}))
+	for seq, want := range map[int]string{1: "medium", 2: "~"} {
+		got := f.queryString(t, fmt.Sprintf(`SELECT COALESCE(effort, '~') FROM contract_run_step WHERE seq = %d`, seq))
+		if got.String != want {
+			t.Errorf("AC-120/121 seq %d effort = %v, want %s", seq, got, want)
+		}
+	}
+	// effort が付いても、ほかの列は S1 と同じに記録する。
+	if got := f.queryString(t, `SELECT step || '|' || kind || '|' || state FROM contract_run_step WHERE seq = 1`); got.String != "analyze|agent|finished" {
+		t.Errorf("other columns = %v", got)
+	}
+	// 再読込で effort が消えたら NULL に戻る。
+	f.pollWith(t, withSteps(&flow, []ContractStep{stepOf(1, "finished", nil)}))
+	if got := f.queryString(t, `SELECT COALESCE(effort, '~') FROM contract_run_step WHERE seq = 1`); got.String != "~" {
+		t.Errorf("effort after removal = %v, want NULL", got)
+	}
+}

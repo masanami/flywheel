@@ -124,6 +124,7 @@ type ContractStep struct {
 	CostUnknown bool
 	Model       *string
 	ModelsUsed  []string
+	Effort      *string // 任意の欄。契約の出力に無い・null は nil
 }
 
 // ContractLaunchInput は ContractClient へ渡す、契約のコマンド 1 回ぶんの情報。差し込みは core が
@@ -1402,13 +1403,13 @@ func writeContractFlowAndSteps(ctx context.Context, tx *sql.Tx, rowID int64, st 
 			unknown = 1
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used, effort)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (contract_run_id, seq) DO UPDATE SET step = excluded.step, kind = excluded.kind, attempt = excluded.attempt,
 				state = excluded.state, outcome = excluded.outcome, started_at = excluded.started_at, ended_at = excluded.ended_at,
-				cost_usd = excluded.cost_usd, cost_unknown = excluded.cost_unknown, model = excluded.model, models_used = excluded.models_used`,
+				cost_usd = excluded.cost_usd, cost_unknown = excluded.cost_unknown, model = excluded.model, models_used = excluded.models_used, effort = excluded.effort`,
 			rowID, sp.Seq, sp.Step, sp.Kind, sp.Attempt, sp.State, stringPtrColumn(sp.Outcome), sp.StartedAt, stringPtrColumn(sp.EndedAt),
-			cost, unknown, stringPtrColumn(sp.Model), string(models)); err != nil {
+			cost, unknown, stringPtrColumn(sp.Model), string(models), stringPtrColumn(sp.Effort)); err != nil {
 			return err
 		}
 		seqs = append(seqs, sp.Seq)
