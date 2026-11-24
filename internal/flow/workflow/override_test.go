@@ -10,13 +10,11 @@ import (
 // 上書き（docs/harness-runtime-overrides.md・#312）の読み込み・重ね方・閉じたキーの拒否・上書き後の定義のハッシュ。
 // 元の定義は同梱の ticket.yaml（limits.budget_usd 40・rework 3、implement の budget_usd 15、resolve の timeout 2m）。
 
-const ticketPath = "../../workflows/ticket.yaml"
-
 func loadTicket(t *testing.T, srcs ...OverrideSource) (*Workflow, error) {
 	t.Helper()
 	RegisterObservation("pr-state", []string{"merged", "open", "closed"}) // 実体は engine が登録する
 	RegisterObservationInputs("pr-state", "pr")
-	return LoadWithOverrides(ticketPath, Options{ScriptsDir: "../../../plugin/scripts"}, srcs)
+	return LoadWithOverrides(bundledPath(t, "ticket"), bundledOpts(t), srcs)
 }
 
 func ov(layer, body string) OverrideSource {
@@ -34,7 +32,6 @@ func changesJSON(t *testing.T, cs []Change) string {
 
 // 上書きが無ければ元の定義そのもの（上書きの記録を持たない）。
 func TestLoadWithoutOverrides(t *testing.T) {
-	needBundledMaterials(t)
 	wf, err := loadTicket(t)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +43,6 @@ func TestLoadWithoutOverrides(t *testing.T) {
 
 // 数値のキー（§5.1）は効いた値で定義を組み立て、Hash は元の定義のまま変えない（§7.1）。
 func TestOverrideNumbers(t *testing.T) {
-	needBundledMaterials(t)
 	orig, err := loadTicket(t)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +80,6 @@ func TestOverrideNumbers(t *testing.T) {
 
 // キーごとに後ろの層が勝つ。片方の層だけが書いたキーはその層の値が効く（§3）。
 func TestOverrideLayersKeyByKey(t *testing.T) {
-	needBundledMaterials(t)
 	wf, err := loadTicket(t,
 		ov(LayerRepo, "limits: { budget_usd: 60 }\nsteps: { implement: { budget_usd: 20 } }\n"),
 		ov(LayerArg, "steps: { implement: { budget_usd: 30 } }\n"))
@@ -105,7 +100,6 @@ func TestOverrideLayersKeyByKey(t *testing.T) {
 
 // 開いたキー以外・元の定義に無い名前・型の違う値は拒否する（§4.1・§5.3）。
 func TestOverrideRejects(t *testing.T) {
-	needBundledMaterials(t)
 	cases := []struct {
 		name, body, want string
 	}{
@@ -152,7 +146,6 @@ func TestOverrideRejects(t *testing.T) {
 
 // 上書きの見出し（schema・workflow）の検査。
 func TestOverrideHeader(t *testing.T) {
-	needBundledMaterials(t)
 	cases := []struct {
 		name, data, want string
 	}{
@@ -191,7 +184,6 @@ func TestOverrideTarget(t *testing.T) {
 // 上書き後の定義のハッシュ（§12）は効いた値で決まり、上書きのファイルの書式・コメント・数の書き方・どの層が書いたかに
 // 依らない。効いた値が違えば違う。
 func TestEffectiveHash(t *testing.T) {
-	needBundledMaterials(t)
 	hash := func(srcs ...OverrideSource) string {
 		t.Helper()
 		wf, err := loadTicket(t, srcs...)

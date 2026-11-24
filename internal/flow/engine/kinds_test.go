@@ -326,7 +326,7 @@ func TestWorkspaceConflict(t *testing.T) {
 // worktree-setup.sh が conflict の判定に使う文言を今も出していることを、実物のスクリプトで確かめる
 // （文言が変わると conflict が step_error に落ちる。fail-closed だが、利用者に見える失敗の理由が変わる）。
 func TestWorktreeSetupStillPrintsTheConflictMarkers(t *testing.T) {
-	needBundledMaterials(t)
+	needPluginScripts(t)
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin", "scripts", "worktree-setup.sh"))
 	if err != nil {
 		t.Fatal(err)
@@ -571,8 +571,7 @@ func TestRenderPRBodyBehaviors(t *testing.T) {
 
 // 振る舞いの種別は implement-result.json の enum と表示名の表（behaviorKinds）で一致する（片方だけに足すと、生の値が PR 本文に出る）。
 func TestBehaviorKindsMatchTheSchema(t *testing.T) {
-	needBundledMaterials(t)
-	data, err := os.ReadFile(filepath.Join("..", "..", "workflows", "schemas", "implement-result.json"))
+	data, err := os.ReadFile(filepath.Join(bundledWorkflowDir(t), "schemas", "implement-result.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

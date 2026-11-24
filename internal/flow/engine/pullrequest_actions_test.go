@@ -642,7 +642,6 @@ func TestLandChecks(t *testing.T) {
 	}
 
 	t.Run("after-merge CI is not looked at", func(t *testing.T) {
-		needBundledMaterials(t)
 		p := newPREnv(t)
 		rgit(t, p.repo, "checkout", "-q", "main")
 		if err := os.MkdirAll(filepath.Join(p.repo, ".claude-harness"), 0o755); err != nil {
@@ -661,10 +660,8 @@ func TestLandChecks(t *testing.T) {
 		p.tl.write(p.tl.gh, "checks", `[{"name":"test","state":"FAILURE","bucket":"fail"}]`)
 		_, e := p.tl.start("pr-land", map[string]any{"json": `{"outcome":"back","detail":"x"}`, "pr": 7, "base": "main"})
 		dir := t.TempDir()
-		script, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin", "scripts", "ci-trigger.sh"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		// プラグインの ci-trigger.sh は埋め込まないので、宛先の CI が after-merge だと答える偽のスクリプトで差し替える。
+		script := []byte("#!/bin/bash\necho '{\"trigger\":\"after-merge\"}'\n")
 		if err := os.WriteFile(filepath.Join(dir, "ci-trigger.sh"), script, 0o755); err != nil {
 			t.Fatal(err)
 		}

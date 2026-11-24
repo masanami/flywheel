@@ -42,7 +42,7 @@ func resolveTicket(t *testing.T, tl *tools, body string, args ...string) (resolv
 	t.Helper()
 	issue, _ := json.Marshal(map[string]any{"number": 42, "title": "Add the widget", "body": body, "state": "OPEN"})
 	tl.write(tl.gh, "issue.json", string(issue))
-	cmd := exec.Command("bash", append([]string{filepath.Join("..", "..", "workflows", "scripts", "resolve-ticket.sh"), "--issue", "42"}, args...)...)
+	cmd := exec.Command("bash", append([]string{filepath.Join(bundledWorkflowDir(t), "scripts", "resolve-ticket.sh"), "--issue", "42"}, args...)...)
 	cmd.Env = append(os.Environ(), "PATH="+fakeBin(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -64,7 +64,6 @@ func resolveTicket(t *testing.T, tl *tools, body string, args ...string) (resolv
 
 // resolve-ticket は base を --base ＞ Base: 行 ＞ 既定ブランチの順で決め（I2）、統合ブランチが remote に無ければ base_missing（I3）。
 func TestResolveTicket(t *testing.T) {
-	needBundledMaterials(t)
 	cases := []struct {
 		name     string
 		body     string
@@ -119,7 +118,6 @@ func TestResolveTicket(t *testing.T) {
 // resolve-ticket は Issue 本文の Refs: 行・Closes: なし 行から、PR 本文に書く Issue 参照（closes・refs）を決める（#305）。
 // どちらの行も無ければ closes は Issue 自身・refs は空（従来の Closes #<issue> だけ）。読めない値は links_invalid で止める。
 func TestResolveTicketLinks(t *testing.T) {
-	needBundledMaterials(t)
 	cases := []struct {
 		name    string
 		body    string
@@ -172,10 +170,9 @@ func TestResolveTicketLinks(t *testing.T) {
 
 // gh・git の失敗は base_missing に丸めず、非 0 で終わる（runtime は step_error にする）。
 func TestResolveTicketFailures(t *testing.T) {
-	needBundledMaterials(t)
 	t.Run("issue not found", func(t *testing.T) {
 		tl := newTools(t)
-		cmd := exec.Command("bash", filepath.Join("..", "..", "workflows", "scripts", "resolve-ticket.sh"), "--issue", "42")
+		cmd := exec.Command("bash", filepath.Join(bundledWorkflowDir(t), "scripts", "resolve-ticket.sh"), "--issue", "42")
 		cmd.Env = append(os.Environ(), "PATH="+fakeBin(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 		_ = tl
 		if err := cmd.Run(); err == nil {

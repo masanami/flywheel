@@ -52,7 +52,6 @@ func TestFactsAreRejected(t *testing.T) {
 
 // facts は上書きに書けない（上書きできるのは limits と steps の決まったキーだけ）。
 func TestOverrideCannotWriteFacts(t *testing.T) {
-	needBundledMaterials(t)
 	_, err := loadTicket(t, ov(LayerArg, "facts:\n  self_review: [$steps.implement.self_review]\n"))
 	if err == nil || !strings.Contains(err.Error(), `key "facts" cannot be overridden`) {
 		t.Fatalf("err = %v", err)
@@ -61,7 +60,6 @@ func TestOverrideCannotWriteFacts(t *testing.T) {
 
 // 同梱の ticket は self_review を implement・fix・respond の順に宣言する。
 func TestTicketDeclaresSelfReviewFact(t *testing.T) {
-	needBundledMaterials(t)
 	wf, err := loadTicket(t)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +78,6 @@ func TestTicketDeclaresSelfReviewFact(t *testing.T) {
 
 // self_review は fix・respond の出力の必須の欄（#403）。無い出力はスキーマが拒み、ある出力は enum の値だけを通す。
 func TestFixAndRespondOutputsRequireSelfReview(t *testing.T) {
-	needBundledMaterials(t)
 	wf, err := loadTicket(t)
 	if err != nil {
 		t.Fatal(err)

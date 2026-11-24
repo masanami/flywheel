@@ -1,24 +1,67 @@
 package workflow
 
 import (
+	"io/fs"
 	"os"
+	"path/filepath"
+	"regexp"
+	"sync"
 	"testing"
+
+	"github.com/masanami/flywheel/internal/flow/assets"
 )
 
-// 同梱の資材（元の runtime/workflows/*.yaml と plugin/scripts）を読む試験の前提。
-// 元のリポジトリでは試験の位置から ../../workflows と ../../../plugin/scripts にあったが、
-// flywheel には資材がまだ無い（資材の埋め込みと展開は後続のタスク）。資材が無い間は
-// 読めない理由を付けて飛ばし、資材を置いたこのパッケージの試験で外す。
-func needBundledMaterials(t *testing.T) {
+// 埋め込んだ資材（internal/flow/assets）を試験ごとの一時ディレクトリへ展開し、同梱の定義を読む試験の前提を作る。
+// 展開先の版のディレクトリは不変なので、試験ごとに別のディレクトリへ展開する。
+
+// bundledRoot は埋め込んだ資材を展開したディレクトリを返す。
+func bundledRoot(t *testing.T) string {
 	t.Helper()
-	// 資材を internal/flow/assets へ置いたら、この飛ばしと呼び出しを外して試験の資材の位置を直す。
-	// 置いた後も黙って飛ばし続けないよう、ここで落とす。
-	if _, err := os.Stat("../assets"); err == nil {
-		t.Fatal("internal/flow/assets exists: remove needBundledMaterials and point these tests at the embedded materials")
+	roots.Lock()
+	defer roots.Unlock()
+	if r, ok := roots.m[t]; ok {
+		return r
 	}
-	for _, p := range []string{"../../workflows/ticket.yaml", "../../../plugin/scripts"} {
-		if _, err := os.Stat(p); err != nil {
-			t.Skipf("bundled material %s is not in this repository yet (arrives with the embedding task): %v", p, err)
+	root := filepath.Join(t.TempDir(), "runtime", "test")
+	if _, err := assets.Ensure(assets.FS, root); err != nil {
+		t.Fatal(err)
+	}
+	roots.m[t] = root
+	return root
+}
+
+// 同じ試験の中の呼び出しは同じ展開先を返す（試験ごとに 1 回だけ展開する）。
+var roots = struct {
+	sync.Mutex
+	m map[*testing.T]string
+}{m: map[*testing.T]string{}}
+
+// bundledPath は埋め込んだ定義（ticket・reflect）の展開先のパスを返す。
+func bundledPath(t *testing.T, id string) string {
+	t.Helper()
+	return filepath.Join(bundledRoot(t), "workflows", id+".yaml")
+}
+
+var agentRef = regexp.MustCompile(`agent:\s*claude-harness:([A-Za-z0-9_-]+)`)
+
+// bundledOpts は同梱の定義を検査する Options を返す。プラグインのスクリプト・エージェント定義は埋め込まないので、
+// 定義が参照するエージェントは検査のための空の写しを一時ディレクトリへ置く。
+func bundledOpts(t *testing.T) Options {
+	t.Helper()
+	agents := filepath.Join(t.TempDir(), "agents")
+	if err := os.MkdirAll(agents, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"ticket", "reflect"} {
+		data, err := fs.ReadFile(assets.FS, "workflows/"+id+".yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range agentRef.FindAllSubmatch(data, -1) {
+			if err := os.WriteFile(filepath.Join(agents, string(m[1])+".md"), []byte("---\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
+	return Options{ScriptsDir: filepath.Join(filepath.Dir(bundledPath(t, "ticket")), "scripts"), AgentsDir: agents}
 }

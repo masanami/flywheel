@@ -185,10 +185,9 @@ func TestScriptPath(t *testing.T) {
 
 // 同梱の ticket ワークフロー（runtime/workflows/ticket.yaml）が harness validate を通る。
 func TestShippedTicketWorkflowIsValid(t *testing.T) {
-	needBundledMaterials(t)
 	RegisterObservation("pr-state", []string{"merged", "open", "closed"}) // 実体は engine が登録する（workflow は engine に依存しない）
 	RegisterObservationInputs("pr-state", "pr")
-	wf, err := LoadAndValidate("../../workflows/ticket.yaml", Options{ScriptsDir: "../../../plugin/scripts"})
+	wf, err := LoadAndValidate(bundledPath(t, "ticket"), bundledOpts(t))
 	if err != nil {
 		t.Fatalf("ticket.yaml must be valid: %v", err)
 	}

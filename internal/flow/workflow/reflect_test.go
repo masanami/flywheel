@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,7 +49,6 @@ func TestReleaseOnIsRejected(t *testing.T) {
 
 // release_on は上書きに書けない。
 func TestOverrideCannotWriteReleaseOn(t *testing.T) {
-	needBundledMaterials(t)
 	_, err := loadTicket(t, ov(LayerArg, "release_on: [failed]\n"))
 	if err == nil || !strings.Contains(err.Error(), `key "release_on" cannot be overridden`) {
 		t.Fatalf("err = %v", err)
@@ -123,10 +121,7 @@ func TestPullRequestAdopt(t *testing.T) {
 
 // 同梱の reflect: release_on は [cancelled, failed]、facts は宣言しない、review は land だけを受ける。ticket は release_on を書かない。
 func TestBundledReflectAndTicket(t *testing.T) {
-	needBundledMaterials(t)
-	scripts := "../../../plugin/scripts"
-	dir := filepath.Join("..", "..", "workflows")
-	reflect, err := LoadAndValidate(filepath.Join(dir, "reflect.yaml"), Options{ScriptsDir: scripts})
+	reflect, err := LoadAndValidate(bundledPath(t, "reflect"), bundledOpts(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +138,7 @@ func TestBundledReflectAndTicket(t *testing.T) {
 	if w := reflect.Step("workspace"); w == nil || w.Kind != "workspace" {
 		t.Fatalf("workspace = %+v", w)
 	}
-	ticket, err := LoadAndValidate(filepath.Join(dir, "ticket.yaml"), Options{ScriptsDir: scripts})
+	ticket, err := LoadAndValidate(bundledPath(t, "ticket"), bundledOpts(t))
 	if err != nil {
 		t.Fatal(err)
 	}

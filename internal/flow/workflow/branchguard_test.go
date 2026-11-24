@@ -109,11 +109,9 @@ func loadRoutes2(t *testing.T, yaml, id, body string) (*Workflow, error) {
 
 // 同梱の ticket・reflect: 3 つの段は overridable.skips に無く、overridable.routes の宣言（段・候補）に出てこない。
 func TestBundledWorkflowsDeclareNothingAroundBranchGuardSteps(t *testing.T) {
-	needBundledMaterials(t)
 	registerPRState()
-	scripts := "../../../plugin/scripts"
 	for _, id := range []string{"ticket", "reflect"} {
-		wf, err := LoadAndValidate("../../workflows/"+id+".yaml", Options{ScriptsDir: scripts})
+		wf, err := LoadAndValidate(bundledPath(t, id), bundledOpts(t))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,7 +147,6 @@ func TestBundledWorkflowsDeclareNothingAroundBranchGuardSteps(t *testing.T) {
 
 // 同梱の reflect の open・retire・retire-route・adopt の遷移は、上書きで付け替えられない。ticket の integration（ensure-base）も同じ。
 func TestBundledBranchGuardTransitionsCannotBeOverridden(t *testing.T) {
-	needBundledMaterials(t)
 	registerPRState()
 	for _, c := range []struct{ wf, body, want string }{
 		{"reflect", "steps: { retire: { on: { kept: cleanup } } }\n", "steps.retire.on.kept cannot be overridden"},
@@ -162,7 +159,7 @@ func TestBundledBranchGuardTransitionsCannotBeOverridden(t *testing.T) {
 		{"ticket", "steps: { integration-route: { on: { create: analyze } } }\n", "steps.integration-route.on.create cannot be overridden"},
 	} {
 		t.Run(c.wf+" "+c.body, func(t *testing.T) {
-			_, err := LoadWithOverrides("../../workflows/"+c.wf+".yaml", Options{ScriptsDir: "../../../plugin/scripts"}, []OverrideSource{{Layer: LayerRepo, Path: "/ov/1.yaml",
+			_, err := LoadWithOverrides(bundledPath(t, c.wf), bundledOpts(t), []OverrideSource{{Layer: LayerRepo, Path: "/ov/1.yaml",
 				Data: []byte("schema: harness.workflow-override/v1\nworkflow: " + c.wf + "\n" + c.body)}})
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("err = %v, want it to contain %q", err, c.want)
@@ -173,8 +170,7 @@ func TestBundledBranchGuardTransitionsCannotBeOverridden(t *testing.T) {
 
 // 同梱の reflect の遷移（統合ブランチの名前を受ける道）。
 func TestBundledReflectIntegrationRoute(t *testing.T) {
-	needBundledMaterials(t)
-	wf, err := LoadAndValidate("../../workflows/reflect.yaml", Options{ScriptsDir: "../../../plugin/scripts"})
+	wf, err := LoadAndValidate(bundledPath(t, "reflect"), bundledOpts(t))
 	if err != nil {
 		t.Fatal(err)
 	}

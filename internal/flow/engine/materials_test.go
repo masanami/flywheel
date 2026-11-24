@@ -1,24 +1,25 @@
 package engine
 
 import (
-	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/masanami/flywheel/internal/flow/assets"
 )
 
-// 同梱の資材（元の runtime/workflows の scripts・schemas と plugin/scripts）を読む試験の前提。
-// 元のリポジトリでは試験の位置から ../../workflows と ../../../plugin/scripts にあったが、
-// flywheel には資材がまだ無い（資材の埋め込みと展開は後続のタスク）。資材が無い間は
-// 読めない理由を付けて飛ばし、資材を置いたこのパッケージの試験で外す。
-func needBundledMaterials(t *testing.T) {
+// 埋め込んだ資材（internal/flow/assets）を試験ごとの一時ディレクトリへ展開し、その workflows/ の場所を返す。
+func bundledWorkflowDir(t *testing.T) string {
 	t.Helper()
-	// 資材を internal/flow/assets へ置いたら、この飛ばしと呼び出しを外して試験の資材の位置を直す。
-	// 置いた後も黙って飛ばし続けないよう、ここで落とす。
-	if _, err := os.Stat("../assets"); err == nil {
-		t.Fatal("internal/flow/assets exists: remove needBundledMaterials and point these tests at the embedded materials")
+	l, err := assets.Ensure(assets.FS, filepath.Join(t.TempDir(), "runtime", "test"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, p := range []string{"../../workflows/scripts", "../../workflows/schemas", "../../../plugin/scripts"} {
-		if _, err := os.Stat(p); err != nil {
-			t.Skipf("bundled material %s is not in this repository yet (arrives with the embedding task): %v", p, err)
-		}
-	}
+	return l.WorkflowDir
+}
+
+// needPluginScripts は、プラグインのスクリプト（plugin/scripts）を読む試験を飛ばす。
+// プラグインのスクリプトは埋め込まず、試験は写した元のリポジトリを読まない。
+func needPluginScripts(t *testing.T) {
+	t.Helper()
+	t.Skip("plugin/scripts is not embedded and the tests do not read the source repository")
 }

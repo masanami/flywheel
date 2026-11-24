@@ -38,7 +38,7 @@ func resolveIn(t *testing.T, tl *tools, runDirEnv, issueBody string, args ...str
 	t.Helper()
 	issue, _ := json.Marshal(map[string]any{"number": 42, "title": "Add the widget", "body": issueBody, "state": "OPEN"})
 	tl.write(tl.gh, "issue.json", string(issue))
-	cmd := exec.Command("bash", append([]string{filepath.Join("..", "..", "workflows", "scripts", "resolve-ticket.sh")}, args...)...)
+	cmd := exec.Command("bash", append([]string{filepath.Join(bundledWorkflowDir(t), "scripts", "resolve-ticket.sh")}, args...)...)
 	// TMPDIR は在りえない場所にする: 文面の写しの置き場に OS の一時ディレクトリを使っていれば、ここで失敗する
 	cmd.Env = append(os.Environ(), runDirEnv, "TMPDIR="+filepath.Join(t.TempDir(), "no-such-tmp"), "PATH="+fakeBin(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	var out, errb bytes.Buffer
@@ -61,7 +61,6 @@ func resolveIn(t *testing.T, tl *tools, runDirEnv, issueBody string, args ...str
 
 // 入力どうしの条件の表（docs/harness-runtime-design.md §5.6.2）の全行。誤りは gh・git を呼ばずに input_invalid で止める。
 func TestResolveTicketInputTable(t *testing.T) {
-	needBundledMaterials(t)
 	dir := t.TempDir()
 	taskFile := filepath.Join(dir, "task.md")
 	if err := os.WriteFile(taskFile, []byte("# タスク\n"), 0o644); err != nil {
@@ -127,7 +126,6 @@ func TestResolveTicketInputTable(t *testing.T) {
 
 // task_file だけ（issue 無し）の run は gh issue view を呼ばず、issue は 0・closes は 0・refs は空。base は --base ＞ 既定ブランチ。
 func TestResolveTicketTaskFileOnly(t *testing.T) {
-	needBundledMaterials(t)
 	dir := t.TempDir()
 	taskFile := filepath.Join(dir, "task.md")
 	if err := os.WriteFile(taskFile, []byte("Base: feat/ignored\n"), 0o644); err != nil {
@@ -165,7 +163,6 @@ func TestResolveTicketTaskFileOnly(t *testing.T) {
 // issue と task_file が両方あるとき、Issue は PR が閉じる対象としてだけ読む: Refs:・Closes: なし 行は読み、Base: 行は読まない。
 // task_file が無いときは、いまと同じく Base: 行を読む。
 func TestResolveTicketIssueWithTaskFile(t *testing.T) {
-	needBundledMaterials(t)
 	dir := t.TempDir()
 	taskFile := filepath.Join(dir, "task.md")
 	if err := os.WriteFile(taskFile, []byte("x\n"), 0o644); err != nil {
@@ -195,7 +192,6 @@ func TestResolveTicketIssueWithTaskFile(t *testing.T) {
 // 文面の写しの置き場は run ディレクトリ（HARNESS_RUN_DIR）の下の task/ で、OS の一時ディレクトリではない（レビュー待ちの間に
 // 掃除されない）。写した後に元のファイルが変わっても・消えても、写しは最初の中身のまま（この段をやり直しても写し直さない）。
 func TestResolveTicketKeepsTheTaskFileCopyInTheRunDirectory(t *testing.T) {
-	needBundledMaterials(t)
 	runDir := t.TempDir()
 	taskFile := filepath.Join(t.TempDir(), "task.md")
 	if err := os.WriteFile(taskFile, []byte("first\n"), 0o644); err != nil {
@@ -239,7 +235,6 @@ func TestResolveTicketKeepsTheTaskFileCopyInTheRunDirectory(t *testing.T) {
 // 理由を出して非 0 で終わる。文面のファイルを渡していなければ run ディレクトリは要らない。task_file が読めない・絶対パスでない
 // ときの input_invalid は、run ディレクトリの有無に関わらず保つ。
 func TestResolveTicketNeedsTheRunDirectoryOnlyForATaskFile(t *testing.T) {
-	needBundledMaterials(t)
 	taskFile := filepath.Join(t.TempDir(), "task.md")
 	if err := os.WriteFile(taskFile, []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
