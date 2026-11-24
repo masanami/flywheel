@@ -208,3 +208,58 @@ func TestTaskDetail_LandingIsNilForEndedRunOrNonIntegration_AC58_AC59(t *testing
 }
 
 func ptrLanding(l TaskLanding) *TaskLanding { return &l }
+
+// AC-146〜AC-150（#1229）: 委譲の実行の flow と、ステップの行（seq の昇順・全種類・費用は USD に直す・無ければ空）。
+func TestTaskDetail_DelegateFlowAndSteps_AC146_AC150(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	id := f.newMulti(t, "d", "P2", false, multiTask{key: "a"})
+	cid, _ := parseChallengeID(id)
+	_, tid := f.tdTask(t, id, "a")
+
+	f.tdContractRun(t, cid, tid, "e1", tdCR{state: "running", summary: "s"})
+	tk, _ := f.tdTask(t, id, "a")
+	if d := tk.Detail.Delegate; d.Flow != nil || d.Steps == nil || len(d.Steps) != 0 {
+		t.Fatalf("AC-148/149: flow=%v steps=%#v, want nil and an empty non-nil slice", d.Flow, d.Steps)
+	}
+
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE contract_run SET flow = 'ticket' WHERE external_run_id = 'e1'`)
+		return err
+	})
+	tk, _ = f.tdTask(t, id, "a")
+	if d := tk.Detail.Delegate; d.Flow == nil || *d.Flow != "ticket" || len(d.Steps) != 0 {
+		t.Fatalf("AC-146: flow=%v steps=%v, want ticket with no step rows", d.Flow, d.Steps)
+	}
+
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		ins := `INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used)
+			VALUES ((SELECT id FROM contract_run WHERE external_run_id = 'e1'), ?, ?, ?, ?, ?, ?, '2026-11-01T00:00:00Z', ?, ?, ?, ?, ?)`
+		// seq 2 を先に入れる（並びが挿入順でないこと。時刻は小数の桁数が違う RFC 3339 でも読めること）。
+		if _, err := tx.Exec(ins, 2, "implement", "llm", 2, "running", nil, nil, 1942900, 1, "opus", `["opus","sonnet"]`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ins, 1, "resolve", "select", 1, "finished", "pass", "2026-11-01T00:00:05.123456789Z", 0, 0, nil, `[]`)
+		return err
+	})
+	tk, _ = f.tdTask(t, id, "a")
+	d := tk.Detail.Delegate
+	if d.Flow == nil || *d.Flow != "ticket" {
+		t.Errorf("AC-146: flow = %v, want ticket", d.Flow)
+	}
+	if len(d.Steps) != 2 || d.Steps[0].Step != "resolve" || d.Steps[1].Step != "implement" || d.Steps[0].Kind != "select" {
+		t.Fatalf("AC-147: steps = %+v, want seq order [resolve(select), implement]", d.Steps)
+	}
+	if c := d.Steps[1].CostUSD; c == nil || *c != 1.9429 || !d.Steps[1].CostUnknown {
+		t.Errorf("AC-150: cost = %v unknown=%v, want 1.9429 true", c, d.Steps[1].CostUnknown)
+	}
+	if d.Steps[0].CostUSD == nil || *d.Steps[0].CostUSD != 0 {
+		t.Errorf("AC-150: zero cost must stay a number, got %v", d.Steps[0].CostUSD)
+	}
+	if got := d.Steps[1].ModelsUsed; len(got) != 2 || got[0] != "opus" || got[1] != "sonnet" || d.Steps[1].Model == nil || *d.Steps[1].Model != "opus" {
+		t.Errorf("models = %v model=%v", got, d.Steps[1].Model)
+	}
+	if d.Steps[1].EndedAt != nil || d.Steps[1].Outcome != nil {
+		t.Errorf("running step must have nil ended_at/outcome: %+v", d.Steps[1])
+	}
+}
