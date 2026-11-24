@@ -48,6 +48,11 @@ func startServeChildPort(t *testing.T, portArg, dir string, env []string, extra 
 	t.Helper()
 	args := append([]string{"serve", "--port", portArg}, extra...)
 	cmd, _, _ = newChildCmd(args, env...)
+	if dir == "" {
+		// 作業ディレクトリを継承すると、serve は親へさかのぼってストアを探し、リポジトリを置いた外側の
+		// ワークスペース（運用中のストア）を開いてしまう。空のときは試験ごとの一時ディレクトリで起動する。
+		dir = t.TempDir()
+	}
 	cmd.Dir = dir
 	cmd.Stderr = nil
 	stderr, err := cmd.StderrPipe()

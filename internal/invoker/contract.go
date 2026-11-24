@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"time"
 
@@ -34,6 +35,9 @@ type rawContractStatus struct {
 	CostUSD json.RawMessage `json:"cost_usd"`
 	// facts は任意（名前から文字列への対応）。形が合わなければ無いものとして扱い、出力の全体は malformed にしない。
 	Facts json.RawMessage `json:"facts"`
+	// flow・steps は任意。形が合わなければ無いものとして扱い、出力の全体は malformed にしない。
+	Flow  json.RawMessage `json:"flow"`
+	Steps json.RawMessage `json:"steps"`
 }
 
 // decodeContractStatus は標準出力を core.ContractStatus へ正規化する。単一の JSON オブジェクトとして
@@ -80,6 +84,13 @@ func decodeContractStatus(stdout []byte) (*core.ContractStatus, bool) {
 	if !isJSONNull(raw.Facts) {
 		st.Facts = decodeFacts(raw.Facts)
 	}
+	if !isJSONNull(raw.Flow) {
+		var f string
+		if json.Unmarshal(raw.Flow, &f) == nil {
+			st.Flow = &f
+		}
+	}
+	st.Steps = decodeSteps(raw.Steps)
 	if !isJSONNull(raw.CostUSD) {
 		v, ok := decodeNumber(raw.CostUSD)
 		if !ok {
@@ -206,4 +217,99 @@ func decodeFacts(raw json.RawMessage) map[string]string {
 		out[k] = s
 	}
 	return out
+}
+
+// stepKeys は steps の要素の必須の欄（値が null でよい欄も、キーは必須）。
+var stepKeys = []string{"seq", "step", "kind", "attempt", "state", "outcome", "started_at", "ended_at", "cost_usd", "cost_unknown", "model", "models_used"}
+
+// decodeSteps は steps を読む。配列でない・要素に必須の欄が無い・欄の型が違う・state が 4 つの値の外・seq が 1 未満・
+// seq が重なる・attempt が 1 未満のどれか 1 つでもあれば nil（steps の全体を無いものとして扱う）。
+// 無い・null も nil。在って 0 件の配列は空の非 nil。
+func decodeSteps(raw json.RawMessage) []core.ContractStep {
+	if isJSONNull(raw) {
+		return nil
+	}
+	var elems []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &elems); err != nil || elems == nil {
+		return nil
+	}
+	out := make([]core.ContractStep, 0, len(elems))
+	seen := map[int]bool{}
+	for _, e := range elems {
+		if e == nil {
+			return nil
+		}
+		for _, k := range stepKeys {
+			if _, ok := e[k]; !ok {
+				return nil
+			}
+		}
+		var sp core.ContractStep
+		var ok bool
+		if sp.Seq, ok = stepInt(e["seq"]); !ok || sp.Seq < 1 || seen[sp.Seq] {
+			return nil
+		}
+		seen[sp.Seq] = true
+		if sp.Attempt, ok = stepInt(e["attempt"]); !ok || sp.Attempt < 1 {
+			return nil
+		}
+		if json.Unmarshal(e["step"], &sp.Step) != nil || json.Unmarshal(e["kind"], &sp.Kind) != nil ||
+			json.Unmarshal(e["state"], &sp.State) != nil || json.Unmarshal(e["started_at"], &sp.StartedAt) != nil ||
+			json.Unmarshal(e["cost_unknown"], &sp.CostUnknown) != nil || isJSONNull(e["step"]) || isJSONNull(e["kind"]) ||
+			isJSONNull(e["state"]) || isJSONNull(e["started_at"]) || isJSONNull(e["cost_unknown"]) {
+			return nil
+		}
+		switch sp.State {
+		case "running", "finished", "cancelled", "interrupted":
+		default:
+			return nil
+		}
+		if sp.Outcome, ok = stepNullableString(e["outcome"]); !ok {
+			return nil
+		}
+		if sp.EndedAt, ok = stepNullableString(e["ended_at"]); !ok {
+			return nil
+		}
+		if sp.Model, ok = stepNullableString(e["model"]); !ok {
+			return nil
+		}
+		if !isJSONNull(e["cost_usd"]) {
+			v, ok := decodeNumber(e["cost_usd"])
+			if !ok {
+				return nil
+			}
+			sp.CostUSD = &v
+		}
+		var models []string
+		if isJSONNull(e["models_used"]) || json.Unmarshal(e["models_used"], &models) != nil {
+			return nil
+		}
+		if models == nil {
+			models = []string{}
+		}
+		sp.ModelsUsed = models
+		out = append(out, sp)
+	}
+	return out
+}
+
+// stepInt は raw が整数の JSON の数なら (値, true)。
+func stepInt(raw json.RawMessage) (int, bool) {
+	v, ok := decodeNumber(raw)
+	if !ok || v != math.Trunc(v) || math.Abs(v) > 1<<31 {
+		return 0, false
+	}
+	return int(v), true
+}
+
+// stepNullableString は raw が文字列か null のとき (値か nil, true)。
+func stepNullableString(raw json.RawMessage) (*string, bool) {
+	if isJSONNull(raw) {
+		return nil, true
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return nil, false
+	}
+	return &s, true
 }

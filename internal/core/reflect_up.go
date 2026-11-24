@@ -441,7 +441,7 @@ func (s *Store) startIntegrationReflect(ctx context.Context, in DelegateInput, c
 	holdFailed := func(detail string) error {
 		return s.holdChallengeForReflect(ctx, challengeID, reflectFailedQuestion(detail), holdReasonReflectFailed)
 	}
-	command, err := fillContractArgsWith(connector.Commands.Reflect, contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: ref})
+	command, err := s.contractCommandArgs(connector, contractCmdReflect, contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: ref})
 	if err != nil {
 		return nil, nil, holdFailed("宣言の commands.reflect の引数を埋められなかった（" + err.Error() + "）。")
 	}
@@ -625,7 +625,7 @@ func (s *Store) cancelObsoleteContractRun(ctx context.Context, in ContractPollIn
 		}
 		return &ContractRunReport{ChallengeID: challengeID, ExternalRunID: row.ExternalRunID, Result: RunResultSucceeded, State: row.State, Summary: row.Summary}, nil
 	}
-	command, err := fillRowCommandArgs(connector, row, connector.Commands.Cancel, challengeID, binding, contractAnswer{})
+	command, err := s.fillRowCommandArgs(connector, row, contractCmdCancel, challengeID, binding, contractAnswer{})
 	if err != nil {
 		return nil, err
 	}

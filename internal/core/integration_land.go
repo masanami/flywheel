@@ -325,7 +325,7 @@ func (s *Store) earlierContentHadChecks(ctx context.Context, rs *contractRelease
 // sendLand は「入れてよい」を commands.resume で返す。呼ぶ前に通す中身（land_ref）を書き、届いた記録（land_delivered）は resume が
 // 成功してから真にする。resume が失敗したときは、保留にせず、次の機会に同じ「入れてよい」を返し直す。
 func (s *Store) sendLand(ctx context.Context, in ContractPollInput, cur *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64, rep *ContractRunReport) (*ContractRunReport, error) {
-	command, err := fillContractArgsWith(connector.Commands.Resume, contractFill{
+	command, err := s.contractCommandArgs(connector, contractCmdResume, contractFill{
 		ChallengeID: rep.ChallengeID, Source: binding, EmptySource: startTakesTaskFile(connector), RunID: cur.ExternalRunID,
 		Answer: contractAnswer{Choice: contractChoiceLand}, ApprovedRef: cur.VerifiedRef,
 	})

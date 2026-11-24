@@ -132,6 +132,7 @@ func newDelegateFixture(t *testing.T) *delegateFixture {
 	if err := conn.validate(); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
+	s.SetFlowExecutable(flowTestExe) // form: flow の委譲先のコマンドの先頭（実際には起動しない）
 	f := &delegateFixture{s: s, agent: defaultAgentDeclaration(), conn: conn, upstream: newFakeUpstreamThreads(), git: newFakeSlotGit(), branches: newFakeBranchSource()}
 	for p, remote := range map[string]string{"slot1": "o/r", "slot-s": "o/s", "slot-d": "o/d"} {
 		f.git.states[filepath.Join(s.Workspace(), p)] = SlotTreeState{Exists: true, PointerOK: true, OriginURL: "https://github.com/" + remote + ".git"}

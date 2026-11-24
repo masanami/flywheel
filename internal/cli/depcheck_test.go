@@ -271,33 +271,39 @@ func TestServerImportDirection(t *testing.T) {
 	}
 }
 
-// TestProductionDependenciesStayWithinAllowedSet は cmd/flywheel の本番依存のうち、標準ライブラリ・
-// この module 自身以外が modernc.org/sqlite と golang.org/x/term（とそれらの推移的依存）だけであること
-// を、go list -deps -f の Module から検査する（AC-136）。
+// TestProductionDependenciesStayWithinAllowedSet は本番の依存のうち、標準ライブラリ・この module 自身以外が
+// modernc.org/sqlite・golang.org/x/term・gopkg.in/yaml.v3・github.com/santhosh-tekuri/jsonschema/v6 と、それらの
+// 推移的依存だけであることを、go list -deps -f の Module から検査する（AC-8）。対象は cmd/flywheel と
+// internal/flow/...（フローのパッケージは internal/cli が import するので cmd/flywheel の依存にも入る。別に数えるのは、フローのパッケージ自身の依存だけを見るため）。
 func TestProductionDependenciesStayWithinAllowedSet(t *testing.T) {
 	t.Parallel()
-	cmd := exec.Command("go", "list", "-deps", "-f", "{{if .Module}}{{.Module.Path}}{{end}}", "./cmd/flywheel")
-	cmd.Dir = repoRoot(t)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("go list -deps: %v\n%s", err, stderr.String())
+	const format = "{{if .Module}}{{.Module.Path}}{{end}}"
+	list := func(args ...string) []string {
+		t.Helper()
+		cmd := exec.Command("go", append([]string{"list", "-deps", "-f", format}, args...)...)
+		cmd.Dir = repoRoot(t)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("go list -deps %v: %v\n%s", args, err, stderr.String())
+		}
+		return strings.Fields(stdout.String())
 	}
-	// 許す集合は modernc.org/sqlite と golang.org/x/term の推移的依存だけ。
+	// 許す集合は、直接の依存 4 つの推移的依存だけ。
 	allowed := map[string]bool{"github.com/masanami/flywheel": true}
-	allowedCmd := exec.Command("go", "list", "-deps", "-f", "{{if .Module}}{{.Module.Path}}{{end}}", "modernc.org/sqlite", "golang.org/x/term")
-	allowedCmd.Dir = repoRoot(t)
-	out, err := allowedCmd.Output()
-	if err != nil {
-		t.Fatalf("go list -deps sqlite/term: %v", err)
-	}
-	for _, p := range strings.Fields(string(out)) {
+	for _, p := range list("modernc.org/sqlite", "golang.org/x/term", "gopkg.in/yaml.v3", "github.com/santhosh-tekuri/jsonschema/v6") {
 		allowed[p] = true
 	}
-	for _, m := range strings.Fields(stdout.String()) {
-		if !allowed[m] {
-			t.Errorf("production dependency %q is outside the allowed set", m)
+	for _, target := range []string{"./cmd/flywheel", "./internal/flow/..."} {
+		mods := list(target)
+		if len(mods) == 0 {
+			t.Fatalf("go list -deps %s reported no module", target)
+		}
+		for _, m := range mods {
+			if !allowed[m] {
+				t.Errorf("production dependency %q of %s is outside the allowed set", m, target)
+			}
 		}
 	}
 }

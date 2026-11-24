@@ -72,6 +72,10 @@ func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, co
 
 	cmd, rest, ok := matchCommand(rawArgs, commands)
 	if !ok {
+		// flow は内部向けのコマンドで、M1 の IF/API の表（commands）には載せない（flow.go）。
+		cmd, rest, ok = matchCommand(rawArgs, flowCommands())
+	}
+	if !ok {
 		return failUsage(stderr, jsonMode, fmt.Sprintf("未知のコマンド: %s", strings.Join(rawArgs, " ")))
 	}
 
@@ -125,6 +129,10 @@ func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, co
 			return failErr(stderr, jsonMode, mapCoreErr(storeErr))
 		}
 		defer func() { _ = store.Close() }()
+		// form: flow の委譲先のコマンドの先頭に置く、自分の実行ファイルの絶対パス。取れなければ渡さない（flow の形の起動だけが失敗する）。
+		if exe, exeErr := os.Executable(); exeErr == nil {
+			store.SetFlowExecutable(exe)
+		}
 		parsed.Store = store
 		// 記録するコマンドには、印の検査をかける（印の会話が開いている・最後のオーナーの発言・返事が進行中）。
 		// 本人確認を通る操作は、core が操作の中でも同じ検査を行う。
@@ -154,6 +162,11 @@ func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, co
 		default:
 			return failErr(stderr, jsonMode, NewError(CodeInternalError, err.Error()))
 		}
+	}
+
+	// 自分で標準出力へ書き終えたコマンド（flow の契約の JSON）は、その終了コードで終わる。
+	if r, ok := data.(rawExit); ok {
+		return r.code
 	}
 
 	// 操作が成立した後で、サイクルを始めるかを決めて始める。結果は操作の出力に足すだけで、終了コードは変えない。

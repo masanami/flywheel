@@ -237,7 +237,7 @@ func newDelegationScheduler(s *Store, in DelegateInput) *delegationScheduler {
 func (sch *delegationScheduler) newWaiter(repo ConnectorRepo, c planCandidate) *schedWaiter {
 	w := &schedWaiter{repo: repo, rank: c.Rank, seq: c.Seq, taskSeq: c.TaskSeq}
 	if sch.conn != nil {
-		if _, conn := sch.conn.findConnectorRepo(repo.Name); conn != nil && conn.Form == ConnectorFormCLI {
+		if _, conn := sch.conn.findConnectorRepo(repo.Name); conn.UsesContractCommands() {
 			w.contract = true
 		}
 	}

@@ -1,0 +1,50 @@
+# モデルの変数を確かめる: plan（変数を指さない）→ implement（$models.light）→ review（ゲート）→ fix（$models.main。ゲートの後）
+schema: harness.workflow/v1
+id: llm-models
+inputs:
+  issue: { type: integer, required: true }
+limits:
+  budget_usd: 5
+models:
+  main: model-main-default
+  light: model-light-default
+steps:
+  plan:
+    kind: llm
+    prompt: prompts/implement.md
+    with: { issue: $inputs.issue }
+    output: schemas/impl.json
+    budget_usd: 1
+    on:
+      pass: implement
+      failure: { fail: plan_failed }
+  implement:
+    kind: llm
+    prompt: prompts/implement.md
+    model: $models.light
+    with: { issue: $inputs.issue }
+    output: schemas/impl.json
+    budget_usd: 1
+    on:
+      pass: { gate: review }
+      failure: { fail: implement_failed }
+  review:
+    kind: gate
+    type: input
+    decider: any
+    requested_action: wait for the review; respond to address it, ready to finish
+    inputs: [respond, ready]
+    on:
+      respond: fix
+      ready: { done: merged }
+  fix:
+    kind: llm
+    prompt: prompts/fix.md
+    model: $models.main
+    session: continue:implement
+    with: { summary: $steps.implement.summary }
+    output: schemas/impl.json
+    budget_usd: 1
+    on:
+      pass: { gate: review }
+      failure: { fail: fix_failed }

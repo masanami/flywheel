@@ -559,10 +559,26 @@ export interface TaskArtifact {
 }
 
 export interface TaskDelegate {
+  flow: string | null;
   requested_kind: string | null;
   run_id: string;
   state: string;
+  steps: TaskDelegateStep[];
   summary: string;
+}
+
+export interface TaskDelegateStep {
+  attempt: number;
+  cost_unknown: boolean;
+  cost_usd: number | null;
+  ended_at: string | null;
+  kind: string;
+  model: string | null;
+  models_used: string[];
+  outcome: string | null;
+  started_at: string;
+  state: string;
+  step: string;
 }
 
 export interface TaskVerification {

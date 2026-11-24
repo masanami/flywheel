@@ -103,6 +103,27 @@ type ContractStatus struct {
 	CostUSD *float64
 	// Facts は出力の facts（名前から文字列への対応。無い・形が合わないときは nil）。
 	Facts map[string]string
+	// Flow は出力の flow（フローの名前。無い・文字列でないときは nil）。contract_run.flow に残す。
+	Flow *string
+	// Steps は出力の steps。nil は「無い」（steps が無い・形が合わない）で、ステップの行に触らない。
+	// 空の非 nil は「在って 0 件」で、その委譲の実行のステップの行をすべて消す。
+	Steps []ContractStep
+}
+
+// ContractStep は契約の出力の steps の 1 要素（形は invoker が確かめ済み）。API の steps と同じ欄に Seq を足したもの。
+type ContractStep struct {
+	Seq         int
+	Step        string
+	Kind        string
+	Attempt     int
+	State       string // running | finished | cancelled | interrupted
+	Outcome     *string
+	StartedAt   string
+	EndedAt     *string
+	CostUSD     *float64
+	CostUnknown bool
+	Model       *string
+	ModelsUsed  []string
 }
 
 // ContractLaunchInput は ContractClient へ渡す、契約のコマンド 1 回ぶんの情報。差し込みは core が
@@ -380,6 +401,8 @@ type contractFill struct {
 	UsesIntegration  bool
 	// ApprovedRef は resume の {approved_ref}。「入れてよい」を返す反映の段だけが通す中身を入れる（それ以外は空）。
 	ApprovedRef string
+	// Flow は form: flow の start の、フローの名前（操作の flow）。cli の形では使わない。
+	Flow string
 	// ArtifactRef は reflect の {artifact_ref}（反映の操作の参照）。反映の依頼を始める反映の段だけが入れる（それ以外は空）。
 	ArtifactRef string
 }
@@ -392,21 +415,24 @@ func fillContractArgs(args []string, challengeID string, sb *sourceBinding, exte
 
 // fillCommandArgs は接続ツール connector の宣言のコマンドの引数を埋める。commands.start に {task_file} を書いた宣言では、
 // 取り込み元の無いタスクの取り込み元の差し込みを空の文字列で埋める。
-func fillCommandArgs(connector *Connector, args []string, challengeID string, sb *sourceBinding, externalRunID string, answer contractAnswer) ([]string, error) {
-	return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, Source: sb, EmptySource: startTakesTaskFile(connector), RunID: externalRunID, Answer: answer})
+func (s *Store) fillCommandArgs(connector *Connector, cmd contractCmd, challengeID string, sb *sourceBinding, externalRunID string, answer contractAnswer) ([]string, error) {
+	return s.contractCommandArgs(connector, cmd, contractFill{ChallengeID: challengeID, Source: sb, EmptySource: startTakesTaskFile(connector), RunID: externalRunID, Answer: answer})
 }
 
 // fillRowCommandArgs は契約の実行 row のコマンドの引数を埋める。反映の依頼（上げる依頼を含む）は取り込み元を持たないので、
 // 取り込み元の差し込みを空の文字列で埋める。それ以外は fillCommandArgs と同じ。
-func fillRowCommandArgs(connector *Connector, row *contractRunRow, args []string, challengeID string, sb *sourceBinding, answer contractAnswer) ([]string, error) {
+func (s *Store) fillRowCommandArgs(connector *Connector, row *contractRunRow, cmd contractCmd, challengeID string, sb *sourceBinding, answer contractAnswer) ([]string, error) {
 	if row.Kind == contractRunKindReflect {
-		return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, EmptySource: true, RunID: row.ExternalRunID, Answer: answer})
+		return s.contractCommandArgs(connector, cmd, contractFill{ChallengeID: challengeID, EmptySource: true, RunID: row.ExternalRunID, Answer: answer})
 	}
-	return fillCommandArgs(connector, args, challengeID, sb, row.ExternalRunID, answer)
+	return s.fillCommandArgs(connector, cmd, challengeID, sb, row.ExternalRunID, answer)
 }
 
 // startTakesTaskFile は、接続ツールの commands.start が {task_file} を書いているか（取り込み元の無いタスクも起動する宣言）。
 func startTakesTaskFile(c *Connector) bool {
+	if c != nil && c.Form == ConnectorFormFlow {
+		return true // flow の形の start は、いつも task_file を入力に渡す
+	}
 	if c == nil || c.Commands == nil {
 		return false
 	}
@@ -502,7 +528,7 @@ func findCLIConnector(d *ConnectorsDeclaration, id string) (*Connector, error) {
 		if c.ID != id {
 			continue
 		}
-		if c.Form != ConnectorFormCLI || c.Commands == nil {
+		if !c.UsesContractCommands() {
 			return nil, fmt.Errorf("%w: connector %q is not a cli connector", ErrValidation, id)
 		}
 		return c, nil
@@ -670,9 +696,9 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	}
 	startFill := contractFill{
 		ChallengeID: in.ChallengeID, Source: taskSource, EmptySource: startTakesTaskFile(connector),
-		TaskFile: "", TaskID: task.ID, UsesIntegration: usesIntegration,
+		TaskFile: "", TaskID: task.ID, UsesIntegration: usesIntegration, Flow: operationFlow(connector, task.Operation),
 	}
-	if _, err := fillContractArgsWith(connector.Commands.Start, startFill); err != nil {
+	if _, err := s.contractCommandArgs(connector, contractCmdStart, startFill); err != nil {
 		return nil, err
 	}
 	workDir, ok, err := s.contractRepoWorkDir(ctx, in.AgentDecl, in.ConnDecl, cid, in.WorkDir, task.Repo)
@@ -706,7 +732,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 		taskFile, writeErr = writeTaskFile(runDir, taskText)
 	}
 	startFill.TaskFile = taskFile
-	command, err := fillContractArgsWith(connector.Commands.Start, startFill)
+	command, err := s.contractCommandArgs(connector, contractCmdStart, startFill)
 	if err != nil {
 		return nil, err
 	}
@@ -896,6 +922,8 @@ func (c contractCall) keepsOpenOn(st ContractState) bool {
 
 // finishContractCall はコマンドを起動し、結果を run と contract_run へ 1 つのトランザクションで記録する。
 func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*ContractRunReport, error) {
+	// form: flow のコマンドの --delegated-run は、run の行を作った後のここで、その run の ID にする。
+	c.Launch.Command = withDelegatedRun(c.Launch.Command, formatRunID(c.RunIDInt))
 	var out ContractLaunchOutput
 	_, invokeErr := s.invokeFnWithHeartbeat(ctx, c.RunIDInt, func(ctx context.Context) (JudgmentLaunchOutput, error) {
 		o, err := c.Invoke(ctx, c.Launch)
@@ -1334,7 +1362,60 @@ func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contra
 	if err != nil {
 		return err
 	}
+	if err := writeContractFlowAndSteps(ctx, tx, rowID, st); err != nil {
+		return err
+	}
 	return countUnmetFacts(ctx, tx, c, st, rowID, report)
+}
+
+// writeContractFlowAndSteps は contract_run.flow と、委譲の実行のステップの行（contract_run_step）を出力と同じ中身にする。
+// 委譲の実行の ID と seq を鍵に足すか上書きし、出力に無い seq の行は消す。steps が無い（nil）ときはステップの行に触らない。
+func writeContractFlowAndSteps(ctx context.Context, tx *sql.Tx, rowID int64, st *ContractStatus) error {
+	var flow any
+	if st.Flow != nil {
+		flow = *st.Flow
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET flow = ? WHERE id = ?`, flow, rowID); err != nil {
+		return err
+	}
+	if st.Steps == nil {
+		return nil
+	}
+	if len(st.Steps) == 0 {
+		_, err := tx.ExecContext(ctx, `DELETE FROM contract_run_step WHERE contract_run_id = ?`, rowID)
+		return err
+	}
+	seqs := make([]any, 0, len(st.Steps)+1)
+	seqs = append(seqs, rowID)
+	marks := ""
+	for _, sp := range st.Steps {
+		models, err := json.Marshal(append([]string{}, sp.ModelsUsed...))
+		if err != nil {
+			return err
+		}
+		var cost any
+		if sp.CostUSD != nil {
+			cost = usdToMicros(*sp.CostUSD)
+		}
+		unknown := 0
+		if sp.CostUnknown {
+			unknown = 1
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (contract_run_id, seq) DO UPDATE SET step = excluded.step, kind = excluded.kind, attempt = excluded.attempt,
+				state = excluded.state, outcome = excluded.outcome, started_at = excluded.started_at, ended_at = excluded.ended_at,
+				cost_usd = excluded.cost_usd, cost_unknown = excluded.cost_unknown, model = excluded.model, models_used = excluded.models_used`,
+			rowID, sp.Seq, sp.Step, sp.Kind, sp.Attempt, sp.State, stringPtrColumn(sp.Outcome), sp.StartedAt, stringPtrColumn(sp.EndedAt),
+			cost, unknown, stringPtrColumn(sp.Model), string(models)); err != nil {
+			return err
+		}
+		seqs = append(seqs, sp.Seq)
+		marks += ", ?"
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM contract_run_step WHERE contract_run_id = ? AND seq NOT IN (`+strings.TrimPrefix(marks, ", ")+`)`, seqs...)
+	return err
 }
 
 // encodeContractFacts は facts を JSON の文字列にする（nil は NULL）。
@@ -1682,4 +1763,14 @@ func (s *Store) recordContractStartRun(sec runRecordingSection, insert func() (i
 		sec.MarkInsertedLocked()
 	}
 	return id, err
+}
+
+// operationFlow は接続ツールの操作 operation の flow（form: flow の操作が実行するフローの名前）を返す。無ければ空。
+func operationFlow(c *Connector, operation string) string {
+	for i := range c.Operations {
+		if c.Operations[i].ID == operation {
+			return c.Operations[i].Flow
+		}
+	}
+	return ""
 }

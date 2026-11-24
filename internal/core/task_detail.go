@@ -14,6 +14,26 @@ type TaskDelegate struct {
 	RunID         string
 	State         ContractState
 	Summary       string
+	// Flow は委譲の実行の記録（contract_run.flow）の値（NULL は nil。ステップの行の有無に依らない）。
+	Flow *string
+	// Steps は委譲の実行のステップの行（contract_run_step）を、始まった順（seq の昇順）に、すべての種類で持つ。行が無ければ空（nil にしない）。
+	Steps []TaskDelegateStep
+}
+
+// TaskDelegateStep は委譲の実行のステップ 1 回ぶん。CostUSD はストアの整数（USD の 100 万分の 1）を USD に直した値（無ければ nil）。
+// Outcome・EndedAt・Model は無ければ nil。ModelsUsed はストアの JSON の配列を展開したもの。
+type TaskDelegateStep struct {
+	Attempt     int64
+	CostUnknown bool
+	CostUSD     *float64
+	EndedAt     *time.Time
+	Kind        string
+	Model       *string
+	ModelsUsed  []string
+	Outcome     *string
+	StartedAt   time.Time
+	State       string
+	Step        string
 }
 
 // TaskArtifactView は課題の詳細のタスクの成果物 1 件。Kind・Ref・State は記録のまま。Role は統合先の印（`integration`）か nil。
@@ -59,15 +79,24 @@ func loadTaskDetail(ctx context.Context, tx *sql.Tx, cid int64, t *Task, integra
 	tid := taskIntID(t)
 
 	var state, summary, reqKind, facts, landRef, verifiedRef string
-	var startRun int64
+	var flow sql.NullString
+	var startRun, contractRunID int64
 	var ended bool
 	err := tx.QueryRowContext(ctx, `SELECT state, summary, COALESCE(requested_kind, ''), COALESCE(facts, ''), COALESCE(land_ref, ''), COALESCE(verified_ref, ''),
-		start_run_id, ended_at IS NOT NULL FROM contract_run
+		start_run_id, ended_at IS NOT NULL, flow, id FROM contract_run
 		WHERE challenge_id = ? AND task_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`, cid, tid, contractRunKindTask).
-		Scan(&state, &summary, &reqKind, &facts, &landRef, &verifiedRef, &startRun, &ended)
+		Scan(&state, &summary, &reqKind, &facts, &landRef, &verifiedRef, &startRun, &ended, &flow, &contractRunID)
 	switch {
 	case err == nil:
-		dg := &TaskDelegate{RunID: formatRunID(startRun), State: ContractState(state), Summary: summary}
+		dg := &TaskDelegate{RunID: formatRunID(startRun), State: ContractState(state), Summary: summary, Steps: []TaskDelegateStep{}}
+		if flow.Valid {
+			dg.Flow = &flow.String
+		}
+		steps, serr := loadTaskDelegateSteps(ctx, tx, contractRunID)
+		if serr != nil {
+			return d, serr
+		}
+		dg.Steps = steps
 		if reqKind != "" {
 			dg.RequestedKind = &reqKind
 		}
@@ -148,4 +177,55 @@ func loadTaskDetail(ctx context.Context, tx *sql.Tx, cid int64, t *Task, integra
 		return d, err
 	}
 	return d, nil
+}
+
+// loadTaskDelegateSteps は委譲の実行のステップの行を seq の昇順で読む（行が無ければ空）。
+func loadTaskDelegateSteps(ctx context.Context, tx *sql.Tx, contractRunID int64) ([]TaskDelegateStep, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used
+		FROM contract_run_step WHERE contract_run_id = ? ORDER BY seq`, contractRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []TaskDelegateStep{}
+	for rows.Next() {
+		var sp TaskDelegateStep
+		var outcome, ended, model sql.NullString
+		var started, models string
+		var cost sql.NullInt64
+		var unknown int64
+		if err := rows.Scan(&sp.Step, &sp.Kind, &sp.Attempt, &sp.State, &outcome, &started, &ended, &cost, &unknown, &model, &models); err != nil {
+			return nil, err
+		}
+		sp.CostUnknown = unknown != 0
+		if outcome.Valid {
+			sp.Outcome = &outcome.String
+		}
+		if model.Valid {
+			sp.Model = &model.String
+		}
+		if cost.Valid {
+			v := microsToUSD(cost.Int64)
+			sp.CostUSD = &v
+		}
+		// 時刻は契約の出力の文字列をそのまま持つ列で、小数の桁数が決まっていない（RFC 3339）。読めない行は、課題の詳細全体を失敗させず、その行だけ出さない。
+		t, perr := time.Parse(time.RFC3339Nano, started)
+		if perr != nil {
+			continue
+		}
+		sp.StartedAt = t
+		if ended.Valid {
+			et, perr := time.Parse(time.RFC3339Nano, ended.String)
+			if perr != nil {
+				continue
+			}
+			sp.EndedAt = &et
+		}
+		sp.ModelsUsed = []string{}
+		if err := json.Unmarshal([]byte(models), &sp.ModelsUsed); err != nil || sp.ModelsUsed == nil {
+			sp.ModelsUsed = []string{}
+		}
+		out = append(out, sp)
+	}
+	return out, rows.Err()
 }

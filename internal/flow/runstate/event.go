@@ -1,0 +1,319 @@
+// Package runstate は run の永続状態（docs/harness-runtime-design.md §4・§4.6 の F1）を持つ。
+//
+// run ごとのディレクトリに追記専用の events.jsonl（正本）を置き、状態はその畳み込み（Fold）で
+// 再構成する。state.json は畳み込んだ結果の写しで、一時ファイル＋rename で原子的に置き換える。
+// 同じ run への書き込みは run ディレクトリ内のロック（mkdir 方式）で直列化する。
+package runstate
+
+import "encoding/json"
+
+// Event の種類。
+const (
+	EvRunStarted      = "run_started"
+	EvRoundStarted    = "round_started"
+	EvStepStarted     = "step_started"
+	EvStepFinished    = "step_finished"
+	EvTransition      = "transition"
+	EvRunFinished     = "run_finished"
+	EvCancelRequested = "cancel_requested"
+	EvRunCancelled    = "run_cancelled"
+	EvStepProcess     = "step_process"   // llm の子プロセスの PID（session_id を記録した step_started の後に起動するため別に記録する）
+	EvGateOpened      = "gate_opened"    // unit がゲートで止まり、ラウンドが閉じた（§4.2）
+	EvGateResolved    = "gate_resolved"  // resume / approve がゲートを解決した（actor・channel を残す。§5.3）
+	EvRunnerStarted   = "runner_started" // resume / approve が run を進めるプロセスになった（runner の生存確認の対象を替える）
+	EvWorkspace       = "workspace"      // unit の作業ツリー（worktree）と PR の記録が変わった（§4.1 Workspace）
+)
+
+// Event は events.jsonl の 1 行。Type に対応するペイロードを 1 つだけ持つ。
+type Event struct {
+	Seq  int    `json:"seq"`
+	TS   string `json:"ts"`
+	Type string `json:"type"`
+
+	RunStarted      *RunStarted      `json:"run_started,omitempty"`
+	RoundStarted    *RoundStarted    `json:"round_started,omitempty"`
+	StepStarted     *StepStarted     `json:"step_started,omitempty"`
+	StepFinished    *StepFinished    `json:"step_finished,omitempty"`
+	Transition      *Transition      `json:"transition,omitempty"`
+	RunFinished     *RunFinished     `json:"run_finished,omitempty"`
+	CancelRequested *CancelRequested `json:"cancel_requested,omitempty"`
+	RunCancelled    *RunCancelled    `json:"run_cancelled,omitempty"`
+	StepProcess     *StepProcess     `json:"step_process,omitempty"`
+	GateOpened      *GateOpened      `json:"gate_opened,omitempty"`
+	GateResolved    *GateResolved    `json:"gate_resolved,omitempty"`
+	RunnerStarted   *RunnerStarted   `json:"runner_started,omitempty"`
+	Workspace       *WorkspaceEvent  `json:"workspace,omitempty"`
+}
+
+// WorkflowRef は run が開始時に記録するワークフロー定義の同定情報（§7.3 の再開時照合の材料）。
+type WorkflowRef struct {
+	ID     string `json:"id"`
+	Schema string `json:"schema"`
+	Hash   string `json:"hash"`
+	Path   string `json:"path"`
+}
+
+// OverridesDir は run ディレクトリの中で上書きの写しを置くディレクトリ（docs/harness-runtime-overrides.md §7.1）。
+const OverridesDir = "overrides"
+
+// OverrideRef は run が開始時に読んだ上書き 1 つ。Path は読んだファイルの絶対パス、SHA256 はそのバイト列の sha256、
+// Copy は run ディレクトリに置いた写しの相対パス（resume は Path ではなく Copy を読んで SHA256 と照合する。§7.2）。
+type OverrideRef struct {
+	Layer  string `json:"layer"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Copy   string `json:"copy"`
+}
+
+// OverrideChange は上書きで効いた値 1 つ（どの層のどのキーを何から何へ）。
+type OverrideChange struct {
+	Key   string `json:"key"`
+	From  any    `json:"from"`
+	To    any    `json:"to"`
+	Layer string `json:"layer"`
+}
+
+// OverrideRecord は上書きを重ねて始めた run の記録（§7.1）。上書きの無い run では空で、JSON には何も出ない
+// （上書きの無い run の記録は従来と同じ形）。EffectiveHash は上書き後の定義を正規化した表現の sha256。
+// SkippedSteps は遷移の付け替えでだけ到達できなくなったステップの id（定義の宣言順。§6.2 の規則 5）で、無ければ出さない。
+type OverrideRecord struct {
+	Overrides     []OverrideRef    `json:"overrides,omitempty"`
+	EffectiveHash string           `json:"effective_hash,omitempty"`
+	Changes       []OverrideChange `json:"changes,omitempty"`
+	SkippedSteps  []string         `json:"skipped_steps,omitempty"`
+}
+
+// WorkflowRecord は run_started の workflow: 定義の同定情報に上書きの記録を足したもの（JSON では同じ階層に並ぶ）。
+// Hash は上書きがあっても元の定義の YAML の sha256 のまま（§7.1）。
+type WorkflowRecord struct {
+	WorkflowRef
+	OverrideRecord
+}
+
+// FactSource は facts の値の出どころ: 段 Step の出力の欄 Field（入れ子のパス）。
+type FactSource struct {
+	Step  string   `json:"step"`
+	Field []string `json:"field"`
+}
+
+// RunStarted は run の開始。
+type RunStarted struct {
+	RunID    string                     `json:"run_id"`
+	Workflow WorkflowRecord             `json:"workflow"`
+	Inputs   map[string]json.RawMessage `json:"inputs"`
+	Limits   map[string]float64         `json:"limits,omitempty"`
+	// Facts は定義の最上位の facts の写し（名前 → 段と欄の並び）。畳み込みが step_finished のたびに unit の facts を
+	// 更新する材料。この版より前に始めた run には無い（その run は facts を出さない）。
+	Facts map[string][]FactSource `json:"facts,omitempty"`
+	// ReleaseOn は定義の最上位の release_on の写し（cancelled・failed）。終わりを記録する側が、定義を読み込まずに
+	// 「終わる前に、この run が作った作業ツリーを片付けるか」を状態から読む。この版より前に始めた run には無い（片付けない）。
+	ReleaseOn []string `json:"release_on,omitempty"`
+	// Models は解決したモデルの変数（変数の名前 → 値。定義の既定の値に flow start の --model を重ねたもの）。resume の後も
+	// この値を使う。定義が models を持たない run には無い。
+	Models map[string]string `json:"models,omitempty"`
+	Origin string            `json:"origin"`
+	Cwd    string            `json:"cwd"`
+	PID    int               `json:"pid"`
+	// PIDStart は PID のプロセスの開始時刻（ProcStart。PID の再利用を見分ける。#347）。この版より前の run には無い。
+	PIDStart    string `json:"pid_start,omitempty"`
+	ScriptsDir  string `json:"scripts_dir"`
+	WorkflowDir string `json:"workflow_dir"`
+	// CLIVersion は run を始めた CLI の版、Embedded は定義・スクリプトをその版の展開ディレクトリ（埋め込み）から読んだか
+	// （--workflow-dir / --scripts-dir で指した場合は false）。resume で別の版の CLI が続けるときの照合の材料（§7.3・N3）。
+	CLIVersion string   `json:"cli_version,omitempty"`
+	Embedded   bool     `json:"embedded,omitempty"`
+	Units      []string `json:"units"`
+	EntryStep  string   `json:"entry_step"`
+}
+
+// Trigger はラウンドの開始の契機（§4.1 Round。§5.5 の「中断」と「計画された再開」の区別）。
+type Trigger struct {
+	Kind  string `json:"kind"`           // start | gate
+	Gate  string `json:"gate,omitempty"` // どのゲートを抜けたか
+	Input string `json:"input,omitempty"`
+	// Interrupted は、このラウンドの間に runner が居なくなったら interrupted ゲートを開かず失敗で終える印（遷移の
+	// interrupted: { fail: <理由> } の理由の語。書かない遷移で始まるラウンドには無い）。status は定義を読み込まないので、
+	// 状態から読めるようここに残す。
+	Interrupted string `json:"interrupted,omitempty"`
+}
+
+// RoundStarted はラウンドの開始。
+type RoundStarted struct {
+	Unit    string  `json:"unit"`
+	Round   int     `json:"round"`
+	Trigger Trigger `json:"trigger"`
+}
+
+// StepStarted はステップ実行の開始。PID は子プロセスのプロセスグループの長。
+type StepStarted struct {
+	Unit      string   `json:"unit"`
+	Step      string   `json:"step"`
+	Attempt   int      `json:"attempt"`
+	PID       int      `json:"pid,omitempty"`
+	Argv      []string `json:"argv,omitempty"`
+	StdoutLog string   `json:"stdout_log,omitempty"`
+	StderrLog string   `json:"stderr_log,omitempty"`
+
+	// llm 種類: 起動前に採番・決定して記録する（runtime が落ちても失われない。§4.4）。
+	SessionID        string   `json:"session_id,omitempty"`
+	Resume           bool     `json:"resume,omitempty"` // session_id のセッションを --resume で引き継いだ
+	BudgetGrantedUSD *float64 `json:"budget_granted_usd,omitempty"`
+	PromptLog        string   `json:"prompt_log,omitempty"`
+	// Model は claude の --model へ渡した値（ステップが model: $models.<名前> で変数を指すときの解決値。指さなければ空）。
+	Model string `json:"model,omitempty"`
+}
+
+// StepProcess は llm の子プロセスを起動した記録。PID はプロセスグループの長。
+type StepProcess struct {
+	Unit    string `json:"unit"`
+	Step    string `json:"step"`
+	Attempt int    `json:"attempt"`
+	PID     int    `json:"pid"`
+}
+
+// StepFinished はステップ実行の終了。Cancelled なら outcome は持たない。
+type StepFinished struct {
+	Unit      string          `json:"unit"`
+	Step      string          `json:"step"`
+	Attempt   int             `json:"attempt"`
+	Outcome   string          `json:"outcome,omitempty"`
+	Reserved  bool            `json:"reserved,omitempty"`
+	Output    json.RawMessage `json:"output,omitempty"`
+	ExitCode  *int            `json:"exit_code,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	Cancelled bool            `json:"cancelled,omitempty"`
+	// Interrupted は runner が落ちて running のまま残った実行を、次の status / resume が打ち切った記録（§4.5）。
+	Interrupted bool `json:"interrupted,omitempty"`
+
+	// 費用（llm 種類）。CostUSD は unit の累計へ加える額。CostUnknown なら費用が得られず、付与した上限額を
+	// 消費したものとして CostUSD に入れている（fail-closed。Q15）。CostReportedUSD は claude が報告した値
+	// （--resume ではセッションの累計になる）。
+	CostUSD         *float64 `json:"cost_usd,omitempty"`
+	CostUnknown     bool     `json:"cost_unknown,omitempty"`
+	CostReportedUSD *float64 `json:"cost_reported_usd,omitempty"`
+	SessionID       string   `json:"session_id,omitempty"` // claude が結果で報告した session_id
+	// ModelsUsed は claude の結果の modelUsage の名前（使ったモデル。辞書順。modelUsage が無ければ空）。
+	ModelsUsed []string `json:"models_used,omitempty"`
+}
+
+// GateOpened は unit がゲートで止まったこと。Builtin は runtime の組み込みゲート（interrupted）。
+type GateOpened struct {
+	Unit            string   `json:"unit"`
+	Gate            string   `json:"gate"`
+	Type            string   `json:"type"`
+	Decider         string   `json:"decider"`
+	RequestedAction string   `json:"requested_action"`
+	Inputs          []string `json:"inputs,omitempty"`
+	Observe         string   `json:"observe,omitempty"`
+	RequiresTTY     bool     `json:"requires_tty"`
+	Builtin         bool     `json:"builtin,omitempty"`
+	// ContractKind はゲートの定義の contract_kind（§5.6.1・#372。書かれていなければ空）。contract の出力が定義を
+	// 読み直さずに kind を決められるよう、開いたときに写しておく。
+	ContractKind string `json:"contract_kind,omitempty"`
+	// Refresh はゲートの定義の refresh（pr-head。§5.6.2）。status が待っている間に PR の先頭を取り直してよいゲートの印。
+	// 開いたときに写すので、定義を読み直さずに（畳み込みの中で）許す場面を決められる。
+	Refresh string `json:"refresh,omitempty"`
+	// Detail はゲートへの遷移の detail（参照 1 つ）を解決した文（戻った理由など）。開き直すたびに置き換わる。
+	Detail string `json:"detail,omitempty"`
+}
+
+// GateResolved はゲートの解決。Outcome は input 型なら渡された値、observe 型なら観測の結果。
+// Actor は解決したコマンド（resume / approve）、User はそのプロセスの利用者名、Channel は tty / non-tty。
+type GateResolved struct {
+	Unit    string `json:"unit"`
+	Gate    string `json:"gate"`
+	Outcome string `json:"outcome"`
+	Note    string `json:"note,omitempty"`
+	// ApprovedRef は resume に --approved-ref で添えられた、通した中身の識別（先頭のコミット）。空なら省く。
+	ApprovedRef string          `json:"approved_ref,omitempty"`
+	Observed    json.RawMessage `json:"observed,omitempty"`
+	Actor       string          `json:"actor"`
+	User        string          `json:"user,omitempty"`
+	Channel     string          `json:"channel"`
+}
+
+// RunnerStarted は run を進めるプロセスが替わったこと（resume / approve・切り離して起動した runner〔detached〕）。
+type RunnerStarted struct {
+	PID      int    `json:"pid"`
+	PIDStart string `json:"pid_start,omitempty"`
+	Command  string `json:"command"`
+}
+
+// Transition は遷移の決定。Action は step / gate / fail / done（retry は同じステップへの step）。
+type Transition struct {
+	Unit    string `json:"unit"`
+	From    string `json:"from"`
+	Outcome string `json:"outcome"`
+	Action  string `json:"action"`
+	To      string `json:"to,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	// Limit は数えた limit の名前（数えたときだけ）。Retry は retry を 1 回使ったか。
+	Limit string `json:"limit,omitempty"`
+	Retry bool   `json:"retry,omitempty"`
+	// Exhausted は上限に達して exhausted の遷移を採ったとき、その上限の種類（limit / retry）。
+	Exhausted string `json:"exhausted,omitempty"`
+	// Default は予約値が on に無く、既定の fail-closed で run を失敗させたとき真。
+	Default bool `json:"default,omitempty"`
+	// Interrupted は採った goto の interrupted: { fail: <理由> } の理由。次のラウンドの契機（Trigger）へ写す。
+	Interrupted string `json:"interrupted,omitempty"`
+	// Detail は gate への遷移の detail を解決した文（開くゲートの gate_opened.detail へ写す）。
+	Detail string                     `json:"detail,omitempty"`
+	Edge   map[string]json.RawMessage `json:"edge,omitempty"`
+}
+
+// RunFinished は run の終端（succeeded / failed）。
+type RunFinished struct {
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+}
+
+// CancelRequested は cancel の要求（実行中の runner が拾って子プロセスを止める）。
+type CancelRequested struct {
+	Actor   string `json:"actor"`
+	Channel string `json:"channel"`
+}
+
+// RunCancelled は停止の記録。
+type RunCancelled struct {
+	Actor   string `json:"actor"`
+	Channel string `json:"channel"`
+	Note    string `json:"note,omitempty"`
+}
+
+// Workspace の記録の変わり方。
+const (
+	WorkspaceAcquired = "acquired" // workspace 種類の acquire が作業ツリーを得た（provided / created / reused）
+	WorkspaceReleased = "released" // workspace 種類の release が終わった（削除した・残した）
+	WorkspacePR       = "pr"       // pull-request 種類が PR を作成・更新した
+	WorkspaceHead     = "head"     // 待っている間に外から push された PR の先頭を status が取り直した（実行中の段の外で書く）
+	// WorkspaceIntegration は統合ブランチの名前と先頭を記録する（pull-request 種類の ensure-base・sync・land が段の中で、待っている間の取り直し〔RefreshHeads〕が段の外で書く。§5.6.3）。
+	WorkspaceIntegration = "integration"
+)
+
+// WorkspaceEvent は unit の作業ツリーと PR の記録（§4.1 Workspace）。Action ごとに使うフィールドが違う:
+// acquired は RepoRoot〜Created、released は Removed・Detail、pr は PRNumber〜HeadSHA、integration は Branch（統合ブランチの名前）・HeadSHA（その先頭）。
+type WorkspaceEvent struct {
+	Unit   string `json:"unit"`
+	Action string `json:"action"`
+
+	RepoRoot     string `json:"repo_root,omitempty"`
+	WorktreePath string `json:"worktree_path,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Base         string `json:"base,omitempty"`
+	// ProvidedBy は作業ツリーを用意した主体（runtime / caller）。Created は、この run が作ったか
+	// （release が消してよいのは runtime が作ったものだけ。§5.4）。
+	ProvidedBy string `json:"provided_by,omitempty"`
+	Created    bool   `json:"created,omitempty"`
+
+	Removed bool   `json:"removed,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+
+	PRNumber int    `json:"pr_number,omitempty"`
+	PRURL    string `json:"pr_url,omitempty"`
+	HeadSHA  string `json:"head_sha,omitempty"`
+	// HeadOnly は pr の HeadSHA を PR のいまの先頭（Workspace.HeadSHA）にだけ記録し、ラウンドごとの記録（head_sha_by_round）へ
+	// 書かない（push・land が書くとき。ラウンドごとの記録は publish だけが書く。§5.6.2）。
+	HeadOnly bool `json:"head_only,omitempty"`
+	// MergeCommit は land が PR を宛先へ入れた後のコミット（mergeCommit.oid）。
+	MergeCommit string `json:"merge_commit,omitempty"`
+}

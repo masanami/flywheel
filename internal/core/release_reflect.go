@@ -87,7 +87,7 @@ func (s *Store) startReflectRequest(ctx context.Context, row *operationRow, opts
 		}
 		artifactRef = integRef.String
 	}
-	command, err := fillContractArgsWith(connector.Commands.Reflect,
+	command, err := s.contractCommandArgs(connector, contractCmdReflect,
 		contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: artifactRef})
 	if err != nil {
 		j.result, j.detail = ExecutionResultUnsupported, "could not fill the reflect command: "+err.Error()

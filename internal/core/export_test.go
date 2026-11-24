@@ -21,7 +21,7 @@ import (
 
 // docs/features/m5-tom-migration-and-switchover.md S1（AC-1〜AC-16）。実ストアで書き出しと再構築を検証する。
 
-var allTablesForExportTest = []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "challenge_reopen", "chat_message", "chat_session", "contract_run", "cycle", "direct_completion", "direct_completion_artifact", "followup", "hold", "lock",
+var allTablesForExportTest = []string{"activity", "approval", "challenge", "challenge_dependency", "challenge_parent", "challenge_reopen", "chat_message", "chat_session", "contract_run", "contract_run_step", "cycle", "direct_completion", "direct_completion_artifact", "followup", "hold", "lock",
 	"occurrence", "operation", "operation_execution", "plan_answer", "run", "run_artifact", "slot", "source_binding", "source_child", "supervisor_action", "task", "task_addition", "task_dependency", "task_plan"}
 
 func newWorkspaceStore(t *testing.T) (*Store, string) {
@@ -909,5 +909,31 @@ func TestImport_HoldScopeSurvivesTheRoundTrip(t *testing.T) {
 	}
 	if got := read(dst); got.String != "task" {
 		t.Errorf("after import scope = %v, want task", got)
+	}
+}
+
+// 版 39 で足したステップの行（contract_run_step）と contract_run.flow は、書き出し→空のストアへの再構築で同じになる（AC-118・AC-119）。
+func TestExportImport_ContractRunStepRoundTrip(t *testing.T) {
+	src, srcDir := newWorkspaceStore(t)
+	coretest.FillAllTables(t, srcDir)
+	data, _, err := src.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Tables map[string][]map[string]any `json:"tables"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Tables["contract_run_step"]) == 0 {
+		t.Fatal("AC-118: the export has no contract_run_step rows")
+	}
+	dst, dstDir := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), data); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := coretest.DumpTables(t, dstDir, "contract_run_step", "contract_run"), coretest.DumpTables(t, srcDir, "contract_run_step", "contract_run"); got != want {
+		t.Errorf("AC-119: rebuilt rows differ:\n%s\nwant\n%s", got, want)
 	}
 }

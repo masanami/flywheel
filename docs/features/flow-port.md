@@ -397,6 +397,49 @@ S1 の「触るファイル数」の大半（120 から 170）は、写すだけ
 - 写した仕組みの環境変数の名前（`HARNESS_*`）と、資材の中の語を、flywheel の語へ直す（理由: 同じに動くことを確かめる範囲に、名前の変更を混ぜない）
 - 走っている途中の委譲を、外部コマンドの形から組み込みのフローへ移す（理由: 切り替えは、走っている委譲が 0 件のときに行う手順にする）
 
+## Tom の切り替えと戻し方【実装済みの S1 の手順。切り替えそのものは、オーナーの了承を取って別に行う】
+
+Tom の flywheel のリポジトリ（`repos[]` の `flywheel`。いまは `connector: harness-cli`＝`form: cli` の外部コマンド `harness` を呼ぶ形）を、組み込みのフローへ切り替える手順と、戻す手順。各段の前に、オーナーの了承を取る。走っている委譲を移す手順ではない（切り替えは、走っている委譲が 0 件のときだけ行う）。
+
+### 前提
+
+- claude-harness のプラグインと `claude-harness-run` が入っている（`claude-harness-run --plugin-root` が場所を返し、その `.claude-plugin/plugin.json` の版が 4.9.0 以上 6.0.0 未満）。入っていなければ、フローを始めるときの誤りで分かる。
+- 切り替えるのは宣言（`.flywheel/connectors.json`）だけ。`repos[]` の `connector` の指し先を変えるか、指し先の宣言を書き換える。`harness-cli` の宣言は、戻すために消さずに残す。
+
+### 切り替える手順
+
+1. **走っている委譲が 0 件であることを確かめる。** 着手中（`in_progress`）と検証中（`verifying`）の課題が 0 件（`flywheel list --status in_progress`・`flywheel list --status verifying`。`flywheel status` の一覧でも見る）で、反映の依頼も走っていない（`flywheel runs` と、各課題の `flywheel show` の委譲先の実行で、終わっていない実行が無い）こと。1 件でもあれば、終わるまで待つか、オーナーの判断で止めてから行う。サイクルは止めておく（切り替えの間に新しい委譲を始めない）。
+2. **ストアを書き出しておく（入れ替える前の、古いバイナリで）。** `flywheel export --out <ファイル>` で書き出す。新しいバイナリでストアを開くと版 39 へ上がり、バイナリより新しいストアは古いバイナリで開けないので、戻すときのバックアップはこの時点でしか取れない。
+3. **バイナリを入れ替える。** この機能を含む版（`flywheel flow` を持つもの）をビルドし（`make build`。成果物は `build/flywheel`）、Tom が使っている `flywheel` の実行ファイルを置き換える。置き換えた後、`flywheel help` に `flow`（内部向け）が出ることを確かめる。
+4. **ストアの版を確かめる。** `flywheel version` の `schema_version`（このバイナリが扱える版）が 39 以上であること。この版のバイナリでストアを開くと、ストアは版 39（`contract_run_step` の表と `contract_run.flow` の列）へ上がる。
+5. **宣言を `form: flow` へ書き換える。** `connectors.json` に `form: flow` の委譲先を足し、`repos[].connector` をそちらへ向ける（`harness-cli` の宣言は消さずに残す）。`form: flow` の委譲先には `commands`・`contract_version` を書けない。例:
+
+    ```json
+    {
+      "id": "flywheel-flow",
+      "form": "flow",
+      "permission_mode": "auto",
+      "challenge_id_prefix": "tom-",
+      "operations": [
+        {"id": "impl", "flow": "ticket", "interactive": false, "child_may_decide": true, "artifacts": "pr"}
+      ],
+      "required_facts": {"self_review": ["complete"]}
+    }
+    ```
+
+    - `permission_mode` は **`auto`** を書く。いまの外部コマンドの形は権限モードを渡さず、効くのは実行する人のユーザー設定の既定（Tom の環境では `auto`）。`default` を書くと、ユーザー設定より引数が優先され、いまより厳しくなる（相手のいない実行で、確認の要る操作が拒否される）。
+    - `challenge_id_prefix` は、いまの宣言の `--input challenge_id=tom-{challenge_id}` の `tom-` に合わせる。
+    - モデルを差し替えたいときだけ、委譲先に `models`（フロー名 → 変数 → 値）を書く。S1 で移す 2 つのフローは変数を定義していないので、書くと始めるときの誤りになる（書かない）。
+    - 反映の依頼の口は、宣言に書かなくても持つ。いまの `commands.reflect` の代わりは、`reflect_connector` を省くか `flow` の形の委譲先へ向ける。
+    - `required_facts` は、いまの `harness-cli` と同じ値を写す（例は Tom のいまの値）。
+6. **宣言を確かめる。** 次のサイクルの前に `flywheel status` が `config_invalid` にならないこと。1 件目の委譲は、状態（着手中→検証中→完了確認待ち→完了）が `cli` の形と同じ順で進み、タスクの詳細の画面の「委譲先の実行」にフローの名前とステップの一覧が出ることを、オーナーが見る。
+
+### 戻す手順
+
+1. 走っている委譲が 0 件であることを、切り替えの手順の 1 と同じに確かめる（`flow` の形で走っている実行は、戻しても外部コマンドの形へは移らない）。
+2. `connectors.json` の宣言を、元の形（`form: cli`・`harness-cli`）へ戻す。`repos[].connector` を `harness-cli` へ向け直す（宣言を消していたなら書き戻す）。バイナリとストアの版は戻さない（版 39 のストアは、版 39 以上のバイナリでだけ開く。外部コマンドの形は、ステップの欄を返さない出力と同じに読む）。
+3. `flywheel status` が `config_invalid` にならず、次の委譲が `harness contract start` で始まることを確かめる。`.flywheel/flow/` は残してよい（Git で追跡しない。要らなければ、走っている実行が無いことを確かめてから消す）。
+
 ## 受入基準
 
 > 実装対象の S1 の範囲。「実物で確かめること」のほかは、`make check` の中の試験で確かめる（試験の環境は「技術的な制約・方針」のとおり）。

@@ -64,6 +64,10 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   export --out <path>
   import --in <path>
   serve [--port <n>] [--fleet <path>]
+  flow start --permission-mode <default|acceptEdits|auto> --delegated-run <id> [--input <名前>=<値>]... <フローの名前>   （内部向け。組み込みのフローを始める。標準出力は接続契約（版 1）の JSON）
+  flow status <実行の識別>   （内部向け）
+  flow resume [--unit <u>] [--input <選んだもの>] [--note <文>] [--approved-ref <コミット>] --permission-mode <default|acceptEdits|auto> --delegated-run <id> <実行の識別>   （内部向け）
+  flow cancel <実行の識別>   （内部向け）
 
 approve・reject・answer・budget・ingest <指定>・followup promote は、成立した後に、いま始められるものがあればサイクルを 1 回始める
 （--no-cycle か宣言の auto_cycle が偽なら始めない。結果は --json のキー cycle の started と reason）。

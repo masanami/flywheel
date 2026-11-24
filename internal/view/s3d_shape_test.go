@@ -32,14 +32,14 @@ func TestTask_S3dKeysShape_927(t *testing.T) {
 	kind, role, landing := "review", "integration", "sent"
 	got := marshal(t, view.Task{
 		Artifacts:    []view.TaskArtifact{{Kind: "pr", Ref: "https://example.com/1", Role: &role, State: "open"}},
-		Delegate:     &view.TaskDelegate{RequestedKind: &kind, RunID: "R-1", State: "waiting", Summary: "要約"},
+		Delegate:     &view.TaskDelegate{RequestedKind: &kind, RunID: "R-1", State: "waiting", Steps: []view.TaskDelegateStep{}, Summary: "要約"},
 		Facts:        map[string]string{"self_review": "done"},
 		Landing:      &landing,
 		Verification: &view.TaskVerification{At: "2026-11-21T00:00:00Z", Reason: "理由", Verdict: "met"},
 	})
 	for _, want := range []string{
 		`"artifacts":[{"kind":"pr","ref":"https://example.com/1","role":"integration","state":"open"}]`,
-		`"delegate":{"requested_kind":"review","run_id":"R-1","state":"waiting","summary":"要約"}`,
+		`"delegate":{"flow":null,"requested_kind":"review","run_id":"R-1","state":"waiting","steps":[],"summary":"要約"}`,
 		`"facts":{"self_review":"done"}`,
 		`"landing":"sent"`,
 		`"verification":{"at":"2026-11-21T00:00:00Z","reason":"理由","verdict":"met"}`,
@@ -82,5 +82,19 @@ func TestClosedSets_S3d_927(t *testing.T) {
 	// phase の値の集合は変えない。
 	if !reflect.DeepEqual(got["TASK_PHASE_CODES"], []string{"running", "waiting", "next", "blocked", "done", "cancelled"}) {
 		t.Errorf("TASK_PHASE_CODES が変わっている: %v", got["TASK_PHASE_CODES"])
+	}
+}
+
+// AC-147・AC-149・AC-150（#1229）: delegate.steps の要素はキーの辞書順で、行が無ければ空の配列、flow が無ければ null。
+func TestTaskDelegate_StepsShape_1229(t *testing.T) {
+	cost := 1.9429
+	outcome := "pass"
+	got := marshal(t, view.TaskDelegate{Flow: nil, Steps: []view.TaskDelegateStep{{
+		Attempt: 1, CostUnknown: true, CostUSD: &cost, Kind: "llm", ModelsUsed: []string{"a", "b"}, Outcome: &outcome,
+		StartedAt: "2026-11-01T00:00:00Z", State: "finished", Step: "implement",
+	}}})
+	want := `{"flow":null,"requested_kind":null,"run_id":"","state":"","steps":[{"attempt":1,"cost_unknown":true,"cost_usd":1.9429,"ended_at":null,"kind":"llm","model":null,"models_used":["a","b"],"outcome":"pass","started_at":"2026-11-01T00:00:00Z","state":"finished","step":"implement"}],"summary":""}`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
