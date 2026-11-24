@@ -1,0 +1,337 @@
+# ticket の簡略版（組み込みのフロー）。ticket.yaml を元に、次の差分だけを持つ。表に無いステップ・遷移・with・limits・facts は ticket と同じ。
+#   - analyze・e2e-route・e2e を外す。作業ブランチの名前は branch（command）が feature/<鍵>-light と決める
+#   - integration-route の none・integration の created・existing は branch へ、sync の current・synced は quality へ向ける
+#   - implement・fix はエージェントを指定せず、軽いセルフレビュー（code-reviewer と design-reviewer を並べて 1 回）の指示文を使う。Codex のレビューは並べない（with に codex_review は無い）
+#   - models は main・quick とも sonnet、efforts は main: medium・quick: low。commit・sync-resolve・land-sync-resolve は quick、そのほかの llm は main
+#   - overridable（上書きの口）は持たない
+#
+schema: harness.workflow/v1
+id: ticket-light
+description: 1チケット（=1 Issue）の簡略な実装フロー。分析・E2E・懐疑のレビュー・Codex のレビューを省き、軽いセルフレビューで PR 作成後のレビュー・マージのラウンドまで進める
+inputs:
+  issue:    { type: integer }       # 省略可。PR が閉じる対象（task_file があれば範囲の正本は文面のファイル）。issue も task_file も無ければ resolve が input_invalid
+  base:     { type: string }        # 省略可。resolve-ticket が I2 の優先順で決める
+  worktree: { type: string }        # 呼び出し元がスロットを払い出した場合だけ（§5.4）
+  task_file:        { type: string }  # タスクの文面のファイルの絶対パス（UTF-8 の Markdown）。あれば作業の範囲の正本
+  task_id:          { type: string }  # T-<番号>。作業ツリーとブランチの名前の鍵（task-<番号>）になる
+  uses_integration: { type: string }  # true | false。true なら宛先は統合ブランチ（integration/<challenge_id を小文字にしたもの>）に決まり、integration で確かめて作る（§5.6.3）
+  challenge_id:     { type: string }  # uses_integration が true のとき、統合ブランチの名前の鍵（resolve だけが名前の規則を知る）。false・無しのときは受けるだけ
+models:
+  main: sonnet
+  quick: sonnet
+efforts:
+  main: medium
+  quick: low
+limits:
+  budget_usd: 40                    # この unit 全ラウンドの累計上限（仮の値。shadow run で較正する。§12）
+  rework: 3                         # Phase 4→8 の差し戻し上限（W2・Q8）
+  self_review: 1                    # セルフレビューを実行しなかった implement を戻す上限（#381）
+  sync_resolve: 3                   # 取り込みの衝突を LLM に直させる回数（この unit の累計。sync と land-sync の両方で数える）
+facts:                              # 接続契約の facts に出す値（名前 → $steps.<段>.<欄>）。最後に成功して終わり、その欄を返した段の値になる（#388 の S3-4）
+  self_review: [$steps.implement.self_review, $steps.fix.self_review, $steps.respond.self_review]
+steps:
+  resolve:
+    kind: command
+    run: resolve-ticket             # scripts/resolve-ticket.sh: gh issue view＋Base:・Refs:・Closes: 行の抽出＋統合ブランチの remote 存在確認
+    with: { issue: $inputs.issue, base: $inputs.base, task_file: $inputs.task_file, task_id: $inputs.task_id,
+            uses_integration: $inputs.uses_integration, challenge_id: $inputs.challenge_id }
+    output: schemas/resolve-ticket.json
+    timeout: 2m
+    on:
+      ok: integration-route
+      base_missing: { fail: base_missing }          # I3: 作成を促して止まる（手順は output の message に載る）
+      links_invalid: { fail: links_invalid }        # Refs:・Closes: 行が読めない（直し方は output の message に載る。#305）
+      input_invalid: { fail: input_invalid }        # 入力どうしの条件・形が誤り（直し方は output の message に載る。§5.6.2）
+
+  integration-route:                                # 統合先を使う実行（uses_integration: true）だけ、統合ブランチを確かめて作る。外部は呼ばない
+    kind: select
+    value: $steps.resolve.integration
+    on: { create: integration, none: branch }
+
+  integration:                                      # 統合ブランチが origin に無ければ既定ブランチの先頭から作る（在れば動かさない）。作業ツリーの払い出しより前
+    kind: pull-request
+    action: ensure-base
+    with: { branch: $steps.resolve.base, from: $steps.resolve.default_branch }
+    on:
+      created:     branch
+      existing:    branch
+      refused:     { fail: integration_create_failed }   # origin が作ることを拒んだ（保護の決まり・権限・integration という名前のブランチが在る）
+      unavailable: { fail: remote_unavailable }          # origin へ届かない
+
+  branch:                                           # 作業ブランチの名前を決める（feature/<鍵>-light）。claude は呼ばない。分析のステップが無いので、名前はつなぎのスクリプトが決める
+    kind: command
+    run: ticket-light-branch                        # scripts/ticket-light-branch.sh: resolve の key から feature/<鍵>-light を返す
+    with: { key: $steps.resolve.key }
+    output: schemas/ticket-light-branch.json
+    timeout: 1m
+    on: { ok: workspace }
+
+  workspace:
+    kind: workspace
+    action: acquire
+    with: { issue: $steps.resolve.issue, key: $steps.resolve.key, branch: $steps.branch.branch,
+            base: $steps.resolve.base, provided: $inputs.worktree }
+    on:
+      provided: implement
+      created:  implement
+      reused:   implement
+      conflict: { fail: worktree_conflict }         # 別ブランチの worktree・未登録ディレクトリ・別のリポジトリ
+
+  implement:                                        # エージェントは指定しない。軽いセルフレビュー（code-reviewer と design-reviewer を並べて 1 回）は指示文が行う
+    kind: llm
+    prompt: prompts/ticket-light-implement.md
+    model: $models.main
+    effort: $efforts.main
+    session: new
+    add_dirs: [ $steps.resolve.task_dir ]
+    with: { issue: $steps.resolve.issue, task_file: $steps.resolve.task_file }
+    output: schemas/implement-result.json
+    budget_usd: 15
+    timeout: 90m
+    on:
+      pass:      self-review-route                  # #381: セルフレビューを実行したかを見てから commit へ
+      skip:      self-review-route                  # I7: 未検証は pull-request が本文に明記する。skip でもセルフレビューは省けない（#381）
+      failure:   { fail: quality_gate }             # W2: 初回 failure は再委譲しない
+      deviation: { gate: design-deviation }         # I8
+      review_incomplete: { fail: self_review_incomplete }  # #262: セルフレビューと合流できないまま PR へ進めない
+
+  self-review-route:                                # #381: 変更の種類（テストだけ・文書だけを含む）に関わらずセルフレビューを必須にする
+    kind: select
+    value: $steps.implement.self_review
+    on:
+      complete:   commit
+      incomplete: { goto: implement, limit: self_review, exhausted: { fail: self_review_incomplete } }
+      not_run:    { goto: implement, limit: self_review, exhausted: { fail: self_review_incomplete } }
+
+  fix:                                              # W1: スコープ付き修正（Step a〜e を開始しない）
+    kind: llm
+    prompt: prompts/ticket-light-fix.md
+    model: $models.main
+    effort: $efforts.main
+    session: continue:implement                     # Q11: 差し戻し系の既定は continue（shadow の M1・M3 で見直す）
+    with: { failure: $edge.failure }
+    output: schemas/fix-result.json
+    budget_usd: 8
+    timeout: 60m
+    on:
+      pass:      commit
+      failure:   { fail: quality_gate }
+      deviation: { gate: design-deviation }         # W3: 逸脱は再試行しない
+
+  commit:
+    kind: llm
+    prompt: prompts/ticket-commit.md                # git で直接コミットする（品質ゲートは後段の quality が機械で回す。#326）
+    model: $models.quick
+    effort: $efforts.quick
+    session: continue:implement
+    output: schemas/commit-result.json
+    budget_usd: 2
+    timeout: 30m
+    on: { committed: sync, failure: { fail: commit } }
+
+  sync:                                             # #388: 最初のレビュー待ちの前に、宛先の最新をマージのコミットで取り込む（push はしない）
+    kind: pull-request
+    action: sync
+    with: { base: $steps.resolve.base }             # expect_head は渡さない（まだ PR が無く、手元の作業ブランチが正本）
+    on:
+      current: quality
+      synced:  quality
+      conflict: { goto: sync-resolve, limit: sync_resolve, exhausted: { fail: sync_conflict } }
+      unresolved:     { fail: sync_conflict }
+      not_merge_only: { fail: sync_not_merge_only }
+      diverged:       { fail: branch_diverged }
+      head_moved:     { fail: local_head_mismatch } # expect_head を渡さないので、ここでは出ない
+      unavailable:    { fail: remote_unavailable }  # 戻るレビュー待ちがまだ無い
+
+  sync-resolve:
+    kind: llm
+    prompt: prompts/sync-resolve.md
+    model: $models.quick
+    effort: $efforts.quick
+    session: continue:implement
+    with: { base: $steps.resolve.base }
+    output: schemas/sync-resolve-result.json
+    budget_usd: 4
+    timeout: 30m
+    on: { resolved: sync, failure: { fail: sync_conflict } }
+
+  quality:                                          # #326: push するコミットに対して品質ゲートを機械で回し、結果を SHA と一緒に残す
+    kind: command
+    run: quality-gate                               # scripts/quality-gate.sh: base の .claude-harness/quality-gate.json → plugin/scripts/quality-check-runner.sh
+    with: { base: $steps.resolve.base }
+    output: schemas/quality-gate.json
+    outcome_field: result
+    timeout: 30m
+    on:
+      pass: publish
+      fail: { goto: fix, with: { failure: $steps.quality.failure_excerpt },
+              limit: rework, exhausted: { fail: quality_gate_red } }
+      undeclared: { fail: quality_gate_undeclared }  # 宣言が無い・読めない・ゲートが 1 つも走らない（直し方は output の message に載る）
+
+  publish:
+    kind: pull-request
+    with:
+      base: $steps.resolve.base
+      closes: $steps.resolve.closes                 # 既定は Issue 自身。Issue 本文の Closes: なし 行で 0（書かない。#305）
+      refs: $steps.resolve.refs                     # Issue 本文の Refs: 行（#305）
+      title: $steps.implement.pr_title
+      summary: $steps.implement.summary
+      behaviors: $steps.implement.behaviors         # #304: 振る舞いの一覧（テスト名・ケース名・シグネチャと保証すること）
+      quality: $steps.implement.outcome
+      residual_findings: $steps.implement.residual_findings
+      unverified: $steps.implement.unverified
+      cross_repo: $steps.implement.cross_repo_attestation
+    on: { opened: ci, updated: ci }
+
+  ci:
+    kind: command
+    run: ci-wait-pr                                 # scripts/ci-wait-pr.sh → plugin/scripts/ci-wait.sh
+    with: { pr: $steps.publish.pr_number, base: $steps.resolve.base }   # base: CI の運用の宣言を読む宛先（#363）
+    output: schemas/ci-wait.json
+    outcome_field: ci
+    timeout: 20m
+    on:
+      green: review
+      none:  review                                 # CI 未設定は green 相当
+      skipped: review                               # #363: 宣言が after-merge。PR では CI が走らない（マージの後だけ。待たない）
+      red:   { goto: fix, with: { failure: $steps.ci.failure_log_excerpt },
+               limit: rework, exhausted: { fail: ci_red } }
+      red_no_log: { gate: ci-pending }              # #278: 何を直すかの入力が無いので fix へ送らない（W1）
+      timeout: { retry: 1, exhausted: { gate: ci-pending } }   # Q10: 失敗にせずラウンドを区切る
+
+  ci-pending:                                       # CI を待ちきれなかった・失敗ログの無い red（新情報が無いので fix へは送らない。W1）
+    kind: gate
+    type: input
+    decider: any
+    requested_action: CI の結果から直すべき失敗を読み取れなかった（時間内に終わらなかった、または失敗ログが空だった）。CI を確かめてから recheck を渡して resume（止めるなら abort）
+    inputs: [recheck, abort]
+    on: { recheck: ci, abort: { fail: ci_timeout } }   # #278: 失敗ログが空で止まった場合も ci_timeout（呼び出し側から見える値なので据え置く）
+
+  review:                                           # ラウンドの区切り R1
+    kind: gate
+    type: input
+    decider: any
+    requested_action: PR のレビューを待つ。対応が要れば respond。この中身を宛先へ入れてよければ land（--approved-ref に通した先頭のコミット）。呼び出し元の側で反映まで済ませたなら ready を渡して resume
+    inputs: [respond, ready, land]
+    contract_kind: review                           # 接続契約で review（レビュー待ち）として見せる（受け付けを宣言した呼び出し元だけ。§5.6.1・#372）
+    refresh: pr-head                                # 待っている間に外から push されても、status が PR の先頭を取り直す（契約の commit が新しい先頭になる。§5.6.2）
+    on:
+      respond: { goto: respond, with: { note: $gate.note }, note: optional }   # #377: 添え書き（差し戻しの理由）を respond へ。無ければ空文字
+      ready: merge-route                            # 変えない（land とは別の道）
+      land: { goto: land, with: { approved_ref: $gate.approved_ref }, interrupted: { fail: interrupted_after_land } }   # 入れ終えるかレビュー待ちへ戻るまで、runner が落ちても別の待ちへ移らない（失敗で終える）
+
+  land:                                             # 先頭の一致と宛先の最新を含むことを確かめ、満たすときだけ入れる（squash。確かめと入れる操作は 1 つの段の中）
+    kind: pull-request
+    action: land
+    with: { pr: $steps.publish.pr_number, base: $steps.resolve.base, approved_ref: $edge.approved_ref }
+    on:
+      landed:   cleanup
+      behind:   land-sync
+      mismatch: { gate: review, detail: $steps.land.detail }
+      blocked:  { gate: review, detail: $steps.land.detail }
+      closed:       { fail: pr_closed }
+      merged_other: { fail: merged_unapproved }
+      base_changed: { fail: pr_base_changed }
+      not_confirmed: { fail: merge_not_confirmed }
+
+  land-sync:                                        # sync と同じ action。land が一致を確かめた PR の先頭（expect_head）から取り込む
+    kind: pull-request
+    action: sync
+    with: { base: $steps.resolve.base, expect_head: $steps.land.head_sha }
+    on:
+      current: land-push
+      synced:  land-push
+      conflict: { goto: land-sync-resolve, limit: sync_resolve, exhausted: { fail: sync_conflict } }
+      unresolved:     { fail: sync_conflict }
+      not_merge_only: { fail: sync_not_merge_only }
+      diverged:       { fail: branch_diverged }
+      head_moved:     { fail: local_head_mismatch }
+      unavailable:    { gate: review, detail: $steps.land-sync.detail }   # 何も変えていないのでレビュー待ちへ戻す
+
+  land-sync-resolve:                                # sync-resolve と同じ指示文。レビュー待ちは長いので session は new
+    kind: llm
+    prompt: prompts/sync-resolve.md
+    model: $models.quick
+    effort: $efforts.quick
+    session: new
+    with: { base: $steps.resolve.base }
+    output: schemas/sync-resolve-result.json
+    budget_usd: 4
+    timeout: 30m
+    on: { resolved: land-sync, failure: { fail: sync_conflict } }
+
+  land-push:                                        # 取り込んだコミットを push する（強制しない）。宛先へは入れず、新しい先頭を出してレビュー待ちへ戻る
+    kind: pull-request
+    action: push
+    with: { pr: $steps.publish.pr_number, base: $steps.resolve.base }
+    on:
+      pushed:    { gate: review, detail: $steps.land-push.detail }
+      unchanged: { gate: review, detail: $steps.land-push.detail }
+      rejected:    { fail: push_rejected }
+      unavailable: { fail: push_failed }
+
+  respond:
+    kind: llm
+    prompt: prompts/ticket-respond.md               # /pr-review-respond を呼ぶ
+    model: $models.main
+    effort: $efforts.main
+    session: new
+    with: { pr: $steps.publish.pr_number, note: $edge.note }   # note は review・review-human の resume の添え書き（#377。無ければ空文字）
+    output: schemas/respond-result.json
+    budget_usd: 8
+    timeout: 60m
+    on:
+      pushed:      quality                          # R4: respond が自分で push した後（強制しない）。quality → publish（既存の PR なので updated）→ ci（#339）。quality を省く上書き（pushed: ci）でも、コミットは返す時点で PR のブランチに在る
+      no_change:   review
+      needs_human: { gate: review-human }           # R2 qcFailed・R3 design_change/critical
+
+  review-human:
+    kind: gate
+    type: input
+    decider: human                                  # R2・R3 を 1 つのゲートのまま扱う（N2 で決定。PR-5 までに見直す）
+    requested_action: レビュー対応で人の判断が要る（内容は respond の出力を参照）
+    inputs: [respond, abort]
+    on:
+      respond: { goto: respond, with: { note: $gate.note }, note: optional }   # #377: 人の判断・マージできなかった理由の添え書きも respond へ
+      abort: { fail: aborted_by_human }
+
+  merge-route:
+    kind: select
+    value: $steps.resolve.base_kind
+    on: { integration: merge, default: human-merge }
+
+  merge:
+    kind: llm
+    prompt: prompts/ticket-merge.md                 # /pr-merge（統合ブランチ宛のみ。本番非反映・可逆）
+    model: $models.main
+    effort: $efforts.main
+    session: new
+    with: { pr: $steps.publish.pr_number, base: $steps.resolve.base }
+    output: schemas/merge-result.json
+    budget_usd: 3
+    timeout: 30m
+    on: { merged: cleanup, blocked: { gate: review-human } }
+
+  human-merge:                                      # R5: 既定ブランチへのマージは runtime が行わない
+    kind: gate
+    type: observe
+    decider: human                                  # observe 型なので TTY を要求しない（N1 で決定）
+    observe: pr-state                               # resume 時に gh で PR の実状態を確認
+    with: { pr: $steps.publish.pr_number }
+    requested_action: この PR のマージは人が行う（既定ブランチ宛と、上書きで統合ブランチ宛も人のマージにした場合）。マージ後に resume
+    on: { merged: cleanup, open: { gate: human-merge }, closed: { fail: pr_closed } }
+
+  design-deviation:
+    kind: gate
+    type: input
+    decider: human                                  # Q9: input 型の human ゲートは TTY 必須（§5.3）
+    requested_action: クリティカル設計の逸脱を検知（implement / fix の deviation_report を参照）
+    inputs: [follow-decision, abort]
+    on:
+      follow-decision: { goto: fix, with: { failure: $gate.note } }  # 人の指示文を修正ステップへ
+      abort: { fail: aborted_by_human }
+
+  cleanup:
+    kind: workspace
+    action: release                                 # 自分が作った worktree だけを消す（P12 の 3 条件は到達経路で満たされる）
+    on: { released: { done: merged }, kept: { done: merged }, dirty: { done: merged_worktree_dirty } }
