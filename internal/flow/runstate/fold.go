@@ -154,6 +154,8 @@ type Round struct {
 
 // StepExecution はステップの 1 回の実行（§4.1）。
 type StepExecution struct {
+	// Seq はこの実行が始まった記録（step_started）の、記録の通し番号（Event.Seq）。
+	Seq        int             `json:"seq,omitempty"`
 	Step       string          `json:"step"`
 	Attempt    int             `json:"attempt"`
 	Status     string          `json:"status"` // running | finished | cancelled | interrupted
@@ -357,7 +359,7 @@ func Apply(s *State, ev *Event) (*State, error) {
 			return nil, fmt.Errorf("step_started (seq %d) while unit %q is %s", ev.Seq, u.Key, u.Status)
 		}
 		r.Steps = append(r.Steps, &StepExecution{
-			Step: p.Step, Attempt: p.Attempt, Status: "running", StartedAt: ev.TS,
+			Seq: ev.Seq, Step: p.Step, Attempt: p.Attempt, Status: "running", StartedAt: ev.TS,
 			PID: p.PID, Argv: p.Argv, StdoutLog: p.StdoutLog, StderrLog: p.StderrLog,
 			SessionID: p.SessionID, Resume: p.Resume, BudgetGrantedUSD: p.BudgetGrantedUSD, PromptLog: p.PromptLog,
 		})
