@@ -937,3 +937,64 @@ func TestExportImport_ContractRunStepRoundTrip(t *testing.T) {
 		t.Errorf("AC-119: rebuilt rows differ:\n%s\nwant\n%s", got, want)
 	}
 }
+
+// 版 40 で足した task.planned_flow・task.flow_reason・contract_run_step.effort は、書き出しに含まれ、空のストアへの再構築で同じになる（AC-129〜AC-134）。
+func TestExportImport_FlowChoiceColumnsRoundTrip(t *testing.T) {
+	src, srcDir := newWorkspaceStore(t)
+	coretest.FillAllTables(t, srcDir)
+	data, _, err := src.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Tables map[string][]map[string]any `json:"tables"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	has := func(table, col string) bool {
+		for _, row := range doc.Tables[table] {
+			if v, ok := row[col].(string); ok && v != "" {
+				return true
+			}
+		}
+		return false
+	}
+	for _, c := range []struct{ ac, table, col string }{
+		{"AC-129", "task", "planned_flow"}, {"AC-131", "task", "flow_reason"}, {"AC-133", "contract_run_step", "effort"},
+	} {
+		if !has(c.table, c.col) {
+			t.Errorf("%s: the export has no %s.%s value", c.ac, c.table, c.col)
+		}
+	}
+	dst, dstDir := newWorkspaceStore(t)
+	if _, err := dst.Import(context.Background(), data); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := coretest.DumpTables(t, dstDir, "task", "contract_run_step"), coretest.DumpTables(t, srcDir, "task", "contract_run_step"); got != want {
+		t.Errorf("AC-130・AC-132・AC-134: rebuilt rows differ:\n%s\nwant\n%s", got, want)
+	}
+}
+
+// タスクの記録の読み取り（loadTask）が planned_flow・flow_reason を取り違えずに Task へ写す。NULL は ""。
+func TestLoadTask_ReadsPlannedFlowAndFlowReason(t *testing.T) {
+	s, dir := newWorkspaceStore(t)
+	coretest.FillAllTables(t, dir)
+	read := func(id int64) *Task {
+		var got *Task
+		if err := s.db.Read(context.Background(), func(tx *sql.Tx) error {
+			var err error
+			got, err = loadTask(context.Background(), tx, id)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := read(1); got.PlannedFlow != "ticket-light" || got.FlowReason != `小さな変更なので "quoted"` {
+		t.Errorf("task 1: PlannedFlow=%q FlowReason=%q", got.PlannedFlow, got.FlowReason)
+	}
+	if got := read(2); got.PlannedFlow != "" || got.FlowReason != "" {
+		t.Errorf("task 2 (NULL): PlannedFlow=%q FlowReason=%q, want empty", got.PlannedFlow, got.FlowReason)
+	}
+}
