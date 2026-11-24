@@ -88,37 +88,24 @@ func TestModelsRejects(t *testing.T) {
 	}
 }
 
-// ResolveModels は定義の既定の値に渡した値を重ねる。定義に無い変数・空の値は誤り。models を持たない定義は、渡さない限り nil。
+// ResolveModels は定義の models をそのまま写像にする。models を持たない定義は nil。
 func TestResolveModels(t *testing.T) {
 	path, scripts := setup(t, "w", modelsBase)
 	wf, err := LoadAndValidate(path, Options{ScriptsDir: scripts})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := ResolveModels(wf, nil)
-	if err != nil || got["main"] != "model-main" || got["light"] != "model-light" || len(got) != 2 {
-		t.Errorf("defaults = %v, %v", got, err)
-	}
-	got, err = ResolveModels(wf, map[string]string{"light": "x"})
-	if err != nil || got["main"] != "model-main" || got["light"] != "x" {
-		t.Errorf("overlay = %v, %v", got, err)
-	}
-	if _, err := ResolveModels(wf, map[string]string{"heavy": "x"}); err == nil || !strings.Contains(err.Error(), `"heavy" is not defined`) {
-		t.Errorf("undefined variable: %v", err)
-	}
-	if _, err := ResolveModels(wf, map[string]string{"main": ""}); err == nil {
-		t.Error("an empty value was accepted")
+	got := ResolveModels(wf)
+	if got["main"] != "model-main" || got["light"] != "model-light" || len(got) != 2 {
+		t.Errorf("defaults = %v", got)
 	}
 	plain, scripts2 := setup(t, "w", base)
 	bare, err := LoadAndValidate(plain, Options{ScriptsDir: scripts2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := ResolveModels(bare, nil); err != nil || got != nil {
-		t.Errorf("no models: %v, %v", got, err)
-	}
-	if _, err := ResolveModels(bare, map[string]string{"main": "x"}); err == nil {
-		t.Error("a variable was accepted by a definition without models")
+	if got := ResolveModels(bare); got != nil {
+		t.Errorf("no models: %v", got)
 	}
 }
 

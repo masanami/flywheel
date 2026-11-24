@@ -57,13 +57,14 @@ type contractDoc struct {
 }
 
 // contractStep は steps の要素（ステップ 1 回ぶん。キーは辞書順）。Seq は step_started の記録の通し番号。
-// Model は変数を指したステップの解決値（claude の --model に付けた値。指さなければ null）、ModelsUsed は claude の結果の
+// Effort は変数を指したステップの解決値（claude の --effort に付けた値。指さなければ null）、Model は変数を指したステップの解決値（claude の --model に付けた値。指さなければ null）、ModelsUsed は claude の結果の
 // modelUsage の名前（無ければ []）。
 type contractStep struct {
 	Attempt     int      `json:"attempt"`
 	CostUnknown bool     `json:"cost_unknown"`
 	CostUSD     *float64 `json:"cost_usd"`
 	EndedAt     *string  `json:"ended_at"`
+	Effort      *string  `json:"effort"`
 	Kind        string   `json:"kind"`
 	Model       *string  `json:"model"`
 	ModelsUsed  []string `json:"models_used"`
@@ -217,6 +218,10 @@ func contractSteps(v *runView) []contractStep {
 		for _, x := range r.Steps {
 			cs := contractStep{Attempt: x.Attempt, CostUnknown: x.CostUnknown, CostUSD: x.CostUSD, Kind: v.Kinds[x.Step],
 				ModelsUsed: []string{}, Seq: x.Seq, StartedAt: x.StartedAt, State: x.Status, Step: x.Step}
+			if x.Effort != "" {
+				e := x.Effort
+				cs.Effort = &e
+			}
 			if x.Model != "" {
 				m := x.Model
 				cs.Model = &m

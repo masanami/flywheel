@@ -48,6 +48,8 @@ type State struct {
 	ReleaseOn []string `json:"release_on,omitempty"`
 	// Models は run_started に記録した解決済みのモデルの変数（名前 → 値）。無ければ空。
 	Models map[string]string `json:"models,omitempty"`
+	// Efforts は run_started に記録した effort の変数（名前 → 値）。無ければ空。
+	Efforts map[string]string `json:"efforts,omitempty"`
 
 	// Overrides は run_started の上書きの記録（resume が同じ上書きで定義を組み立て直す材料。§7.2）。state.json には
 	// 出さない。status --json は cli の statusView が workflow の下に overrides・changes・skipped_steps を足して出す（#314）。
@@ -185,6 +187,8 @@ type StepExecution struct {
 	// Model は claude へ --model で渡した値（変数を指したステップ）。ModelsUsed は claude の結果が報告した使ったモデルの名前。
 	Model      string   `json:"model,omitempty"`
 	ModelsUsed []string `json:"models_used,omitempty"`
+	// Effort は claude へ --effort で渡した値（変数を指したステップ）。
+	Effort string `json:"effort,omitempty"`
 }
 
 // Unit は key で unit を引く。
@@ -303,7 +307,7 @@ func Apply(s *State, ev *Event) (*State, error) {
 		p := ev.RunStarted
 		s = &State{
 			RunID: p.RunID, Workflow: p.Workflow.WorkflowRef, Overrides: p.Workflow.OverrideRecord, Inputs: p.Inputs, Limits: p.Limits,
-			FactSources: p.Facts, ReleaseOn: p.ReleaseOn, Models: p.Models, Status: StatusRunning, CreatedAt: ev.TS, Origin: p.Origin, Cwd: p.Cwd, PID: p.PID, PIDStart: p.PIDStart,
+			FactSources: p.Facts, ReleaseOn: p.ReleaseOn, Models: p.Models, Efforts: p.Efforts, Status: StatusRunning, CreatedAt: ev.TS, Origin: p.Origin, Cwd: p.Cwd, PID: p.PID, PIDStart: p.PIDStart,
 			ScriptsDir: p.ScriptsDir, WorkflowDir: p.WorkflowDir, CLIVersion: p.CLIVersion, Embedded: p.Embedded, Units: []*Unit{},
 		}
 		for _, k := range p.Units {
@@ -366,7 +370,7 @@ func Apply(s *State, ev *Event) (*State, error) {
 		r.Steps = append(r.Steps, &StepExecution{
 			Seq: ev.Seq, Step: p.Step, Attempt: p.Attempt, Status: "running", StartedAt: ev.TS,
 			PID: p.PID, Argv: p.Argv, StdoutLog: p.StdoutLog, StderrLog: p.StderrLog,
-			SessionID: p.SessionID, Resume: p.Resume, BudgetGrantedUSD: p.BudgetGrantedUSD, PromptLog: p.PromptLog, Model: p.Model,
+			SessionID: p.SessionID, Resume: p.Resume, BudgetGrantedUSD: p.BudgetGrantedUSD, PromptLog: p.PromptLog, Model: p.Model, Effort: p.Effort,
 		})
 	case EvStepProcess:
 		p := ev.StepProcess
