@@ -11,7 +11,6 @@ import (
 // ticket.yaml が宣言するのは保守側の 2 行と、quality（品質ゲート。#326）を省く付け替えだけ（O2）。省く付け替えは
 // e2e-route.no と e2e.pass の候補 publish・respond.pushed の候補 ci で、quality を overridable.skips に挙げている。
 func TestTicketDeclaredRoutes(t *testing.T) {
-	needBundledMaterials(t)
 	wf, err := loadTicket(t)
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +33,6 @@ func TestTicketDeclaredRoutes(t *testing.T) {
 // 省いたことは skipped_steps に出る。1 本でも残すと、その経路では quality を通るので skipped_steps には出ない
 // （3 行そろえる。overrides.md §5.2）。
 func TestOverrideRouteSkipsQuality(t *testing.T) {
-	needBundledMaterials(t)
 	wf, err := loadTicket(t, ov(LayerRepo, "steps:\n  e2e-route: { on: { no: publish } }\n  e2e: { on: { pass: publish } }\n  respond: { on: { pushed: ci } }\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +65,6 @@ func TestOverrideRouteSkipsQuality(t *testing.T) {
 
 // 統合ブランチ宛も人のマージにすると、merge（/pr-merge）は到達できなくなり、誤りにせず skipped_steps に出る。
 func TestOverrideRouteToHumanMerge(t *testing.T) {
-	needBundledMaterials(t)
 	orig, err := loadTicket(t)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +92,6 @@ func TestOverrideRouteToHumanMerge(t *testing.T) {
 
 // E2E 不要の判断でも E2E を書く付け替えは、どのステップも到達できなくしない。数値の上書きと同じファイルに書ける。
 func TestOverrideRouteToE2E(t *testing.T) {
-	needBundledMaterials(t)
 	wf, err := loadTicket(t, ov(LayerArg, "limits: { budget_usd: 50 }\nsteps:\n  e2e-route: { on: { no: e2e } }\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +106,6 @@ func TestOverrideRouteToE2E(t *testing.T) {
 
 // 層が重なれば後ろの層が勝つ。元の遷移先へ戻す上書きも書ける（そのときは到達できなくなるステップが無い）。
 func TestOverrideRouteLayers(t *testing.T) {
-	needBundledMaterials(t)
 	wf, err := loadTicket(t,
 		ov(LayerRepo, "steps: { merge-route: { on: { integration: human-merge } } }\n"),
 		ov(LayerArg, "steps: { merge-route: { on: { integration: merge } } }\n"))
@@ -128,7 +123,6 @@ func TestOverrideRouteLayers(t *testing.T) {
 // 宣言の無い遷移・候補外の値・ステップ id 以外の値・人のゲート（規則 1）・人のゲートと fail へ向かう遷移（規則 2）は
 // 上書きに書けない。ゲートの名前ではなく decider: human と fail への遷移で決まる。
 func TestOverrideRouteRejects(t *testing.T) {
-	needBundledMaterials(t)
 	cases := []struct{ name, body, want string }{
 		{"undeclared", "steps: { ci: { on: { green: merge-route } } }\n",
 			"steps.ci.on.green cannot be overridden: workflow ticket does not declare ci.green in overridable.routes (declared: merge-route.integration, e2e-route.no, e2e.pass, respond.pushed)"},
@@ -527,7 +521,6 @@ func TestSkipsDeclarationRejects(t *testing.T) {
 
 // ticket.yaml の保守側の 2 本の宣言は規則 6 に当たらない。両方を同時に付け替えても通る（quality の省略は skips で許す。#326）。
 func TestTicketRoutesPassRule6(t *testing.T) {
-	needBundledMaterials(t)
 	wf, err := loadTicket(t, ov(LayerRepo, "steps:\n  merge-route: { on: { integration: human-merge } }\n  e2e-route: { on: { no: e2e } }\n"))
 	if err != nil {
 		t.Fatal(err)
