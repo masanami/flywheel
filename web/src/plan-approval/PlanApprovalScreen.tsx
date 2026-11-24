@@ -7,7 +7,15 @@ import type {
   PlanTopic,
 } from "../api/types.gen.ts";
 import { APPROVAL_REJECT_NOTE, guidesForContext } from "../guidance.ts";
-import { LOADING_TEXT, RELOAD_TEXT } from "../labels.ts";
+import {
+  FLOW_LABELS,
+  LOADING_TEXT,
+  PLAN_TASK_FLOWS_HEADING,
+  PLAN_TASK_FLOW_REASON_LABEL,
+  RELOAD_TEXT,
+  TASK_FLOW_LABEL,
+  label,
+} from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { ClampedText } from "../parts/ClampedText.tsx";
@@ -351,6 +359,35 @@ function PlanView({
               </h3>
               {/* 承認の前はタスクの ID が無いので、箱は押せない（リンクにしない） */}
               <TaskTree tasks={plan.tasks} />
+            </section>
+          )}
+          {plan?.tasks.some((t) => t.planned_flow !== null) && (
+            <section
+              aria-label={PLAN_TASK_FLOWS_HEADING}
+              data-testid="plan-task-flows"
+            >
+              <h3>{PLAN_TASK_FLOWS_HEADING}</h3>
+              <ul>
+                {plan.tasks
+                  .filter((t) => t.planned_flow !== null)
+                  .map((t) => (
+                    <li key={t.key} data-testid="plan-task-flow">
+                      <b>{t.title}</b>
+                      <div data-testid="plan-task-flow-name">
+                        {TASK_FLOW_LABEL}:{" "}
+                        {label(FLOW_LABELS, t.planned_flow ?? "")}
+                      </div>
+                      {t.flow_reason !== null ? (
+                        <div
+                          data-testid="plan-task-flow-reason"
+                          style={{ whiteSpace: "pre-wrap" }}
+                        >
+                          {PLAN_TASK_FLOW_REASON_LABEL}: {t.flow_reason}
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+              </ul>
             </section>
           )}
           <FigureView figure={figure} />

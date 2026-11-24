@@ -335,3 +335,26 @@ func TestFlowLaunch_LegacyApprovedPlanWithoutFlowReasonStarts(t *testing.T) {
 		t.Fatalf("starts = %q, want one flow start", f.client.starts)
 	}
 }
+
+// AC-139・AC-140: 承認の前の計画の読み取りは、計画の出力の記録の planned_flow・flow_reason を出す。flow の形でない操作は空。
+func TestPlanView_PreApprovalFlowAndReasonFromSpec_AC139_AC140(t *testing.T) {
+	t.Parallel()
+	f := newJ2Fixture(t)
+	decl, err := parseConnectorsDeclaration([]byte(j2FlowConnectorsJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.conn = decl
+	ch := f.newClassified(t, "flow plan", "P1")
+	out := flowPlanOutput("flow-repo", "light", func(m map[string]any) { m["flow_reason"] = "文書だけ" })
+	if _, err := f.run(t, succeededInvoker(out), idPtr(ch.ID)); err != nil {
+		t.Fatalf("PlanAutoJ2: %v", err)
+	}
+	pv, err := f.s.GetPlanView(t.Context(), ch.ID, f.agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pv.Tasks) != 1 || pv.Tasks[0].PlannedFlow != "ticket-light" || pv.Tasks[0].FlowReason != "文書だけ" {
+		t.Errorf("tasks = %+v, want ticket-light and 文書だけ", pv.Tasks)
+	}
+}
