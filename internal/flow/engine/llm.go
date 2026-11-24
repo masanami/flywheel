@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"syscall"
 
@@ -78,6 +79,13 @@ func (e *Engine) executeLLM(ctx context.Context, st *runstate.State, u *runstate
 		return fail(outcome, msg, nil)
 	}
 
+	if step.Model != "" {
+		value, ok := e.Models[step.Model]
+		if !ok || value == "" {
+			return notLaunched("step_error", fmt.Sprintf("model variable %q has no resolved value in the run record; the step is not launched", step.Model))
+		}
+		started.Model = value
+	}
 	if u.Budget == nil {
 		return notLaunched("step_error", "the unit has no budget (limits.budget_usd); an llm step is not launched without one")
 	}
@@ -107,6 +115,9 @@ func (e *Engine) executeLLM(ctx context.Context, st *runstate.State, u *runstate
 	args = append(args, "--json-schema", schema)
 	if step.Agent != "" {
 		args = append(args, "--agent", step.Agent)
+	}
+	if started.Model != "" {
+		args = append(args, "--model", started.Model)
 	}
 	if e.PermissionMode != "" {
 		args = append(args, "--permission-mode", e.PermissionMode)
@@ -199,9 +210,11 @@ func (e *Engine) executeLLM(ctx context.Context, st *runstate.State, u *runstate
 	res.costUSD, res.costUnknown, res.costReportedUSD = charge(u, started, code, env)
 	if env != nil {
 		res.sessionID = env.sessionID
+		res.modelsUsed = env.modelsUsed
 	}
 	withCost := func(r result) result {
 		r.costUSD, r.costUnknown, r.costReportedUSD, r.sessionID = res.costUSD, res.costUnknown, res.costReportedUSD, res.sessionID
+		r.modelsUsed = res.modelsUsed
 		return r
 	}
 
@@ -239,6 +252,8 @@ type envelope struct {
 	cost       *float64 // total_cost_usd。--resume ではセッションの累計
 	structured json.RawMessage
 	result     string
+	// modelsUsed は modelUsage（モデルの名前 → 使用量）の名前を辞書順に並べたもの。無い・オブジェクトでなければ空。
+	modelsUsed []string
 }
 
 // parseEnvelope は結果の JSON を読む。JSON のオブジェクトでなければ nil。
@@ -257,6 +272,13 @@ func parseEnvelope(out []byte) *envelope {
 	_ = json.Unmarshal(m["is_error"], &env.isError)
 	_ = json.Unmarshal(m["session_id"], &env.sessionID)
 	_ = json.Unmarshal(m["result"], &env.result)
+	var usage map[string]json.RawMessage
+	if err := json.Unmarshal(m["modelUsage"], &usage); err == nil {
+		for name := range usage {
+			env.modelsUsed = append(env.modelsUsed, name)
+		}
+		sort.Strings(env.modelsUsed)
+	}
 	// 数値だけを費用とみなす（json.Number は数字を含む文字列も受け付けるので、文字列は先に除く）。
 	if raw, ok := m["total_cost_usd"]; ok && len(raw) > 0 && raw[0] != '"' {
 		var n json.Number

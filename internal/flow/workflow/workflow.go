@@ -7,7 +7,12 @@
 // 個別の名前は、拒否の理由を読み手に伝えるためにだけ持つ（exprKeys）。
 package workflow
 
-import "time"
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+)
 
 // SchemaV1 は本実装が読み込めるワークフローのスキーマ版（§3.1）。
 const SchemaV1 = "harness.workflow/v1"
@@ -92,7 +97,9 @@ type Workflow struct {
 	// ReleaseOn は最上位の release_on（cancelled・failed）。その終わり方をするとき、終わりを書く前に、この run が作った作業ツリーを
 	// 片付ける（docs/harness-runtime-design.md §5.6.2）。succeeded は書けない（入れた後の片付けは cleanup の段が行う）。
 	ReleaseOn []string
-	Steps     []*Step
+	// Models は最上位の models（変数の名前 → 既定のモデルの名前）。llm ステップの model が $models.<名前> で指す。
+	Models []*ModelVar
+	Steps  []*Step
 	// Routes は overridable.routes（docs/harness-runtime-overrides.md §5.2）。上書きで付け替えてよい遷移と候補。
 	Routes []*RouteDecl
 	// Skips は overridable.skips（§5.2・§6.2 の規則 6）。付け替えで省いてよいと定義が明示した、fail へ落ちうるステップ。
@@ -132,6 +139,71 @@ func (w *Workflow) Input(name string) *Input {
 	}
 	return nil
 }
+
+// Model は名前でモデルの変数を引く。無ければ nil。
+func (w *Workflow) Model(name string) *ModelVar {
+	for _, m := range w.Models {
+		if m.Name == name {
+			return m
+		}
+	}
+	return nil
+}
+
+// ModelVar は models の 1 行: 変数の名前と既定の値（空でない文字列）。
+type ModelVar struct {
+	Name  string
+	Value string
+	Line  int
+}
+
+// ResolveModels は定義の既定の値に、flow start の --model の値（変数の名前 → 値）を重ねた解決値を返す。
+// 定義が持たない変数の値を渡す・値が空なのは誤り。定義が models を持たなければ、渡す値が無い限り nil を返す。
+func ResolveModels(wf *Workflow, given map[string]string) (map[string]string, error) {
+	for _, name := range sortedKeys(given) {
+		if wf.Model(name) == nil {
+			return nil, fmt.Errorf("model variable %q is not defined by workflow %s (defined: %s)", name, wf.ID, modelNames(wf))
+		}
+		if given[name] == "" {
+			return nil, fmt.Errorf("model variable %q has an empty value", name)
+		}
+	}
+	if len(wf.Models) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(wf.Models))
+	for _, m := range wf.Models {
+		out[m.Name] = m.Value
+		if v, ok := given[m.Name]; ok {
+			out[m.Name] = v
+		}
+	}
+	return out, nil
+}
+
+func modelNames(wf *Workflow) string {
+	if len(wf.Models) == 0 {
+		return "none"
+	}
+	names := make([]string, 0, len(wf.Models))
+	for _, m := range wf.Models {
+		names = append(names, m.Name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// ModelRefPrefix は llm ステップの model に書ける参照の接頭辞（$models.<名前>）。
+const ModelRefPrefix = "$models."
 
 // FactDecl は facts の 1 行。Refs は $steps.<段>.<欄> だけ（読み込みで、段が在り、欄が出力スキーマの文字列であることを検査する）。
 type FactDecl struct {
@@ -217,7 +289,9 @@ type Step struct {
 	Agent  string // claude-harness:<エージェント名>（--agent へ渡す）
 	// AddDirs は claude の --add-dir へ渡すフォルダ（作業ディレクトリの外のファイルを読ませる。§5.6.2）。
 	// 値は参照かリテラルの文字列。解決した値が空の文字列なら渡さない。
-	AddDirs     []*Binding
+	AddDirs []*Binding
+	// Model は model: $models.<名前> の <名前>（モデルの変数。書かなければ空で、claude に --model を渡さない）。
+	Model       string
 	Session     string  // new | continue
 	SessionFrom string  // continue:<step> の <step>
 	BudgetUSD   float64 // --max-budget-usd の上限（残予算と小さいほうを付与する）

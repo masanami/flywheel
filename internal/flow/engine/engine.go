@@ -29,6 +29,8 @@ type Engine struct {
 	Run        *runstate.Run
 	ScriptsDir string
 	Cwd        string
+	// Models は解決したモデルの変数（run_started の値）。変数を指す llm ステップだけが、その値を --model に付ける。
+	Models map[string]string
 
 	// ClaudeBin は llm 種類が起動する claude の実行ファイル（空なら PATH の claude）。テストは偽の claude を指す。
 	ClaudeBin string
@@ -63,6 +65,8 @@ type StartParams struct {
 	WorkflowDir string
 	Cwd         string
 	Origin      string
+	// Models は解決したモデルの変数（定義の既定の値に --model の値を重ねたもの）。run_started に記録する。
+	Models map[string]string
 	// CLIVersion・Embedded は run_started に記録する（§7.3・N3）。
 	CLIVersion string
 	Embedded   bool
@@ -106,6 +110,7 @@ func Start(p StartParams) (*Engine, error) {
 			Limits:      limits,
 			Facts:       facts,
 			ReleaseOn:   p.WF.ReleaseOn,
+			Models:      p.Models,
 			Origin:      p.Origin,
 			Cwd:         p.Cwd,
 			PID:         os.Getpid(),
@@ -124,7 +129,7 @@ func Start(p StartParams) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{WF: p.WF, Run: run, ScriptsDir: p.ScriptsDir, Cwd: p.Cwd}, nil
+	return &Engine{WF: p.WF, Run: run, ScriptsDir: p.ScriptsDir, Cwd: p.Cwd, Models: p.Models}, nil
 }
 
 // overrideLayers は上書きの層の番号（docs/harness-runtime-overrides.md §3 の表の層）。写しの名前に使う。
@@ -268,6 +273,7 @@ type result struct {
 	costUnknown     bool
 	costReportedUSD *float64
 	sessionID       string
+	modelsUsed      []string
 
 	// extra は step_finished の前に記録するイベント（workspace 種類・pull-request 種類の作業ツリーと PR の記録）。
 	extra []runstate.Event
@@ -289,7 +295,7 @@ func (e *Engine) decide(st *runstate.State, u *runstate.Unit, step *workflow.Ste
 	evs := append(append([]runstate.Event{}, res.extra...), runstate.Event{Type: runstate.EvStepFinished, StepFinished: &runstate.StepFinished{
 		Unit: u.Key, Step: step.ID, Attempt: res.attempt, Outcome: res.outcome, Reserved: res.reserved,
 		Output: res.output, ExitCode: res.exitCode, Error: res.errText,
-		CostUSD: res.costUSD, CostUnknown: res.costUnknown, CostReportedUSD: res.costReportedUSD, SessionID: res.sessionID,
+		CostUSD: res.costUSD, CostUnknown: res.costUnknown, CostReportedUSD: res.costReportedUSD, SessionID: res.sessionID, ModelsUsed: res.modelsUsed,
 	}})
 	// 遷移の with が $steps.<このステップ> を読むとき、いま得た出力を使う。
 	cur := succeeded(u)

@@ -97,6 +97,8 @@ type StartOptions struct {
 	Name string
 	// Inputs は --input NAME=VALUE。
 	Inputs []string
+	// Models は --model <変数>=<値>（そのフローが定義している変数だけ）。定義の既定の値に重ねた解決値を、実行の始まりの記録に持つ。
+	Models []string
 	// PermissionMode は llm 種類が起動する claude へ --permission-mode で渡すモード（空なら渡さない）。
 	PermissionMode string
 	// DelegatedRun は --delegated-run の値（委譲する run の ID）。claude の子の環境の FLYWHEEL_DELEGATED_RUN になる。
@@ -141,6 +143,15 @@ func Start(env Env, o StartOptions) int {
 		logf(env.Stderr, "flywheel flow: %v\n", err)
 		return writeContract(env.Stdout, env.Stderr, failedDoc(nil, fmt.Sprintf("no run was started: %v", err)))
 	}
+	given, err := ParseModelFlags(o.Models)
+	var models map[string]string
+	if err == nil {
+		models, err = workflow.ResolveModels(wf, given)
+	}
+	if err != nil {
+		logf(env.Stderr, "flywheel flow: %v\n", err)
+		return writeContract(env.Stdout, env.Stderr, failedDoc(nil, fmt.Sprintf("no run was started: %v", err)))
+	}
 	cwd, err := env.Getwd()
 	if err != nil {
 		logf(env.Stderr, "flywheel flow: %v\n", err)
@@ -148,7 +159,7 @@ func Start(env Env, o StartOptions) int {
 	}
 	eng, err := engine.Start(engine.StartParams{
 		RunsDir: runsDir(env.Workspace), WF: wf, Inputs: inputs, ScriptsDir: plugin.ScriptsDir, WorkflowDir: layout.WorkflowDir,
-		Cwd: cwd, Origin: "flow", CLIVersion: env.Version, Embedded: true,
+		Cwd: cwd, Origin: "flow", CLIVersion: env.Version, Embedded: true, Models: models,
 	})
 	if err != nil {
 		logf(env.Stderr, "flywheel flow: cannot start the run: %v\n", err)

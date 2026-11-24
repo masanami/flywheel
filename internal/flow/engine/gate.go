@@ -251,7 +251,7 @@ func Reopen(run *runstate.Run, st *runstate.State) (*Engine, error) {
 			return nil, err
 		}
 	}
-	return &Engine{WF: wf, Run: run, ScriptsDir: st.ScriptsDir, Cwd: st.Cwd}, nil
+	return &Engine{WF: wf, Run: run, ScriptsDir: st.ScriptsDir, Cwd: st.Cwd, Models: st.Models}, nil
 }
 
 // reopenOverrides は上書きを重ねて始めた run の定義を組み立て直す（docs/harness-runtime-overrides.md §7.2）。

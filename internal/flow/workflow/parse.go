@@ -73,7 +73,7 @@ type kindSpec struct {
 // 種類を足すときは、ここと engine の実行器の両方に足す。
 var kinds = map[string]kindSpec{
 	"command": {keys: []string{"kind", "description", "run", "with", "output", "outcome_field", "exit", "timeout", "on"}},
-	"llm":     {keys: []string{"kind", "description", "prompt", "agent", "session", "add_dirs", "with", "output", "budget_usd", "timeout", "on"}},
+	"llm":     {keys: []string{"kind", "description", "prompt", "agent", "model", "session", "add_dirs", "with", "output", "budget_usd", "timeout", "on"}},
 	"gate":    {keys: []string{"kind", "description", "type", "decider", "requested_action", "inputs", "observe", "contract_kind", "refresh", "with", "on"}},
 	// select は参照 1 つの enum 値をそのまま outcome にする（副作用なし）。with・output は持たない。
 	"select": {keys: []string{"kind", "description", "value", "on"}},
@@ -263,7 +263,7 @@ func Parse(path string, data []byte) (*Workflow, error) {
 	if !ok {
 		return nil, p.problems
 	}
-	p.allowKeys(top, "workflow", "schema", "id", "description", "inputs", "limits", "facts", "release_on", "overridable", "steps")
+	p.allowKeys(top, "workflow", "schema", "id", "description", "inputs", "limits", "models", "facts", "release_on", "overridable", "steps")
 	var stepsNode *yaml.Node
 	for _, pr := range top {
 		switch pr.key {
@@ -277,6 +277,8 @@ func Parse(path string, data []byte) (*Workflow, error) {
 			wf.Inputs = p.inputs(pr.val)
 		case "limits":
 			wf.Limits = p.limits(pr.val)
+		case "models":
+			wf.Models = p.models(pr.val)
 		case "facts":
 			wf.Facts = p.facts(pr.val)
 		case "release_on":
@@ -420,6 +422,46 @@ func (p *parser) limits(n *yaml.Node) []*Limit {
 	return out
 }
 
+// models は最上位の models（変数の名前 → 既定のモデルの名前）を読む。値は空でない文字列だけ。
+func (p *parser) models(n *yaml.Node) []*ModelVar {
+	pairs, ok := p.mapping(n, "models")
+	if !ok {
+		return nil
+	}
+	var out []*ModelVar
+	for _, pr := range pairs {
+		what := "models." + pr.key
+		if !reIdent.MatchString(pr.key) {
+			p.errf(pr.knode, "model variable name %q must match %s", pr.key, reIdent.String())
+			continue
+		}
+		v, ok := p.str(pr.val, what)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(v) == "" {
+			p.errf(pr.val, "%s must not be an empty string", what)
+			continue
+		}
+		out = append(out, &ModelVar{Name: pr.key, Value: v, Line: pr.knode.Line})
+	}
+	return out
+}
+
+// modelRef は llm ステップの model（$models.<名前>）を読み、変数の名前を返す。モデルの名前の直書きは拒否する。
+func (p *parser) modelRef(n *yaml.Node, what string) (string, bool) {
+	s, ok := p.str(n, what)
+	if !ok {
+		return "", false
+	}
+	name, found := strings.CutPrefix(s, ModelRefPrefix)
+	if !found || !reIdent.MatchString(name) {
+		p.errf(n, "%s must be a model variable reference ($models.<name>); a model name is not written on a step (got %q)", what, s)
+		return "", false
+	}
+	return name, true
+}
+
 // facts は最上位の facts（名前 → 参照の配列）を読む。参照は $steps.<段>.<欄> の形だけ。
 func (p *parser) facts(n *yaml.Node) []*FactDecl {
 	pairs, ok := p.mapping(n, "facts")
@@ -541,7 +583,12 @@ func (p *parser) step(id string, knode, n *yaml.Node) *Step {
 		p.errf(n, "%s: kind %q is not a registered step kind (registered kinds: %s)", what, s.Kind, strings.Join(Kinds(), ", "))
 		return nil
 	}
-	p.allowKeys(fields, what, spec.keys...)
+	for _, f := range fields {
+		if f.key == "model" && s.Kind != "llm" {
+			p.errf(f.knode, "%s: model is only allowed on an llm step (kind is %s)", what, s.Kind)
+		}
+	}
+	p.allowKeys(withoutKey(fields, "model", s.Kind != "llm"), what, spec.keys...)
 	var onNode *yaml.Node
 	for _, f := range fields {
 		fw := what + "." + f.key
@@ -571,6 +618,10 @@ func (p *parser) step(id string, knode, n *yaml.Node) *Step {
 			s.Prompt, _ = p.str(f.val, fw)
 		case "agent":
 			s.Agent, _ = p.matched(f.val, fw, reAgent)
+		case "model":
+			if s.Kind == "llm" {
+				s.Model, _ = p.modelRef(f.val, fw)
+			}
 		case "add_dirs":
 			s.AddDirs = p.valueList(f.val, fw)
 		case "session":
@@ -623,6 +674,20 @@ func (p *parser) step(id string, knode, n *yaml.Node) *Step {
 		s.On = p.onTable(onNode, what+".on")
 	}
 	return s
+}
+
+// withoutKey は drop が真のとき key のキーを除いた並びを返す（別に理由を報告したキーを、許可リストの検査で二重に報告しない）。
+func withoutKey(pairs []pair, key string, drop bool) []pair {
+	if !drop {
+		return pairs
+	}
+	out := make([]pair, 0, len(pairs))
+	for _, pr := range pairs {
+		if pr.key != key {
+			out = append(out, pr)
+		}
+	}
+	return out
 }
 
 // outcomeList は input 型ゲートの inputs（outcome の値の列）を読む。
