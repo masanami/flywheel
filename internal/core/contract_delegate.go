@@ -124,6 +124,7 @@ type ContractStep struct {
 	CostUnknown bool
 	Model       *string
 	ModelsUsed  []string
+	Effort      *string // 任意の欄。契約の出力に無い・null は nil
 }
 
 // ContractLaunchInput は ContractClient へ渡す、契約のコマンド 1 回ぶんの情報。差し込みは core が
@@ -575,7 +576,7 @@ func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration
 	if !planOK || conn == nil {
 		return "", false, nil
 	}
-	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: agent, Conn: conn, HasSource: binding != nil})
+	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: agent, Conn: conn, HasSource: binding != nil, SkipFlowReason: true})
 	if !vok {
 		return "", false, nil
 	}
@@ -664,6 +665,11 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	}
 	task := tasks[0]
 	taskID := taskIDPtr(&task)
+	// 承認したフロー（planned_flow）があるのに、いまのタスクのリポジトリの委譲先が flow の形でないときは、承認していない形で
+	// 走らせない。契約のコマンドを起動せず、オーナーへの保留にする。
+	if task.PlannedFlow != "" && connector.Form != ConnectorFormFlow {
+		return nil, s.holdPlannedFlowUnrunnable(ctx, in.ChallengeID, task, connector)
+	}
 	if err := checkPlannedContractOperation(plan, connector, binding != nil, task.Operation); err != nil {
 		return nil, err
 	}
@@ -696,7 +702,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	}
 	startFill := contractFill{
 		ChallengeID: in.ChallengeID, Source: taskSource, EmptySource: startTakesTaskFile(connector),
-		TaskFile: "", TaskID: task.ID, UsesIntegration: usesIntegration, Flow: operationFlow(connector, task.Operation),
+		TaskFile: "", TaskID: task.ID, UsesIntegration: usesIntegration, Flow: taskStartFlow(connector, task),
 	}
 	if _, err := s.contractCommandArgs(connector, contractCmdStart, startFill); err != nil {
 		return nil, err
@@ -1402,13 +1408,13 @@ func writeContractFlowAndSteps(ctx context.Context, tx *sql.Tx, rowID int64, st 
 			unknown = 1
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used, effort)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (contract_run_id, seq) DO UPDATE SET step = excluded.step, kind = excluded.kind, attempt = excluded.attempt,
 				state = excluded.state, outcome = excluded.outcome, started_at = excluded.started_at, ended_at = excluded.ended_at,
-				cost_usd = excluded.cost_usd, cost_unknown = excluded.cost_unknown, model = excluded.model, models_used = excluded.models_used`,
+				cost_usd = excluded.cost_usd, cost_unknown = excluded.cost_unknown, model = excluded.model, models_used = excluded.models_used, effort = excluded.effort`,
 			rowID, sp.Seq, sp.Step, sp.Kind, sp.Attempt, sp.State, stringPtrColumn(sp.Outcome), sp.StartedAt, stringPtrColumn(sp.EndedAt),
-			cost, unknown, stringPtrColumn(sp.Model), string(models)); err != nil {
+			cost, unknown, stringPtrColumn(sp.Model), string(models), stringPtrColumn(sp.Effort)); err != nil {
 			return err
 		}
 		seqs = append(seqs, sp.Seq)
@@ -1773,4 +1779,51 @@ func operationFlow(c *Connector, operation string) string {
 		}
 	}
 	return ""
+}
+
+// taskStartFlow は委譲を始めるときに、始めるコマンドの最後の引数にするフローの名前を返す。計画の承認で記録した planned_flow があれば
+// それを使い（承認の後に宣言の操作の flow を書き換えても変えない）、無い（NULL。計画を作るときにフローを選ぶ前に承認したタスク）なら、
+// そのときの宣言の操作の flow を使う。
+func taskStartFlow(c *Connector, task Task) string {
+	if task.PlannedFlow != "" {
+		return task.PlannedFlow
+	}
+	return operationFlow(c, task.Operation)
+}
+
+// holdPlannedFlowUnrunnable は、承認したフロー（task.planned_flow）で走れない（いまのタスクのリポジトリの委譲先が flow の形でない）
+// ときの保留を立て、起動しないことを表す ErrValidation の誤りを返す。保留は既存の作り（理由なしの人間への保留。タスクを止める
+// 保留として重ねられるときはタスクに結び付ける）で、新しい保留の種類は作らない。課題が着手中でも人間対応待ちでもなければ、保留は立てない。
+func (s *Store) holdPlannedFlowUnrunnable(ctx context.Context, challengeID string, task Task, c *Connector) error {
+	question := fmt.Sprintf("タスク %s は、計画の承認でフロー %q で進めると決めたが、リポジトリ %q の委譲先 %q はいま flow の形ではないので、承認したフローで走れない。"+
+		"契約のコマンドは起動していない。宣言を flow の形へ戻すか、計画を作り直すか。",
+		task.ID, task.PlannedFlow, task.Repo, c.ID)
+	actor, err := s.resolveActor()
+	if err != nil {
+		return err
+	}
+	taskInt := taskIntID(&task)
+	_, herr := s.runTransition(context.WithoutCancel(ctx), runTransitionParams{
+		actor: actor, channel: ChannelInvoker, verification: VerificationNone, id: challengeID, op: OpHold, preceding: NoStatus,
+	}, func(ctx context.Context, tc *transitionCtx) error {
+		if tc.current.Status != StatusInProgress && tc.current.Status != StatusAwaitingHuman {
+			return errReconcileNotEligible
+		}
+		if taskInt > 0 {
+			tc.taskID = &taskInt
+		}
+		scoped, err := taskStopOptions(ctx, tc, HoldOptionsInput{})
+		if err != nil {
+			return err
+		}
+		if tc.current.Status == StatusAwaitingHuman && scoped.Scope != HoldScopeTask {
+			return errReconcileNotEligible // 人間対応待ちに重ねられるのは、タスクを止める保留だけ
+		}
+		_, err = s.insertHoldWithOccurrenceOptions(ctx, tc, question, holdReasonNone, "", scoped)
+		return err
+	})
+	if herr != nil && !errors.Is(herr, ErrInvalidTransition) && !errors.Is(herr, ErrTerminalState) && !errors.Is(herr, errReconcileNotEligible) {
+		return herr
+	}
+	return fmt.Errorf("%w: task %s has planned flow %q but the connector %q is not a flow form; the contract command was not started", ErrValidation, task.ID, task.PlannedFlow, c.ID)
 }

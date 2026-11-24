@@ -523,7 +523,7 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 		return nil, fmt.Errorf("%w: the challenge has no approved plan with a structured spec", ErrValidation)
 	}
 
-	validated, ok := validateJ2Output([]byte(dc.Plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: dc.Binding != nil})
+	validated, ok := validateJ2Output([]byte(dc.Plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: dc.Binding != nil, SkipFlowReason: true})
 	if !ok || validated.Verdict != J2VerdictPlan {
 		return nil, fmt.Errorf("%w: the approved plan does not match the current declarations", ErrValidation)
 	}
@@ -875,6 +875,15 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 				Detail: budgetShortfallDetail(bucketRemaining{Impl: dc.ImplBudgetMicros, Review: dc.ReviewBudgetMicros})}, nil
 		}
 		return nil, nil, ErrBudgetExceeded
+	}
+
+	// 承認したフロー（planned_flow）があるのに委譲先が flow の形でないときは、形によらず（plugin・brief を含む）起動せず保留にする。
+	if dc.Task.PlannedFlow != "" && dc.Connector.Form != ConnectorFormFlow {
+		err := s.holdPlannedFlowUnrunnable(ctx, ch.ID, dc.Task, &dc.Connector)
+		if jc != nil && errors.Is(err, ErrValidation) {
+			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable, Detail: err.Error()}, nil
+		}
+		return nil, nil, err
 	}
 
 	// form: cli の接続ツールの操作は、claude の子も J3 も起動せず、契約の start を呼んで実行 ID を記録し、その周の委譲を終える。

@@ -292,6 +292,8 @@ export function alphaDetailExtras(id: string): Extras {
       const tid = `T-${40 + i}`;
       return {
         added: null,
+        flow_reason: null,
+        planned_flow: null,
         budget_impl_usd: 0,
         budget_review_usd: 0,
         artifacts: [],

@@ -60,6 +60,10 @@ type TaskInput struct {
 	BudgetReviewMicros *int64
 	// ExpandAfter は、このタスクの後に続きのタスクを足すかを決めるタスクか（task.expand_after）。
 	ExpandAfter bool
+	// PlannedFlow・FlowReason は計画が選んだフローとその理由（task.planned_flow・task.flow_reason。"" は NULL）。
+	// flow の形の委譲先の操作を選んだタスクだけが持つ。FlowReason は書くときに前後の空白を除く（createTasksWith）。
+	PlannedFlow string
+	FlowReason  string
 }
 
 // Task はタスク 1 件（前提のタスクの ID つき）。ID・DependsOn の要素は表示形（"T-<n>"）、ChallengeID は "C-<n>"。
@@ -81,6 +85,9 @@ type Task struct {
 	SourceKey string
 	// ExpandAfter は、このタスクの後に続きのタスクを足すかを決めるタスクか（task.expand_after）。
 	ExpandAfter bool
+	// PlannedFlow は計画が選んだフロー（task.planned_flow）、FlowReason はその理由（task.flow_reason）。"" は NULL。
+	PlannedFlow string
+	FlowReason  string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	// BudgetImplUSD・BudgetReviewUSD・SpentUSD はタスクの実装の枠・レビュー対応の枠（増額を含む実効値）と、そのタスクの実行の費用の合計（USD）。
@@ -185,12 +192,14 @@ func createTasksWith(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cha
 			}
 			nonGoals = string(b)
 		}
+		plannedFlow, flowReason := plannedFlowColumns(t.PlannedFlow, t.FlowReason)
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id, planned_flow, flow_reason)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			challengeID, planVersion, nullableTextColumn(t.Key), t.Title, t.Body, t.DoneCriteria, nonGoals, t.Repo, t.Operation,
 			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr,
-			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros), t.ExpandAfter, int64PtrColumn(opts.AdditionID))
+			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros), t.ExpandAfter, int64PtrColumn(opts.AdditionID),
+			plannedFlow, flowReason)
 		if store.IsUniqueViolation(err) {
 			return nil, errDuplicateTaskKey
 		}
@@ -227,23 +236,25 @@ func createTasksWith(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cha
 	return out, nil
 }
 
-const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, expand_after, created_at, updated_at FROM task`
+const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, expand_after, planned_flow, flow_reason, created_at, updated_at FROM task`
 
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var (
 		id, challengeID, planVersion int64
 		key, nonGoals, sourceKey     sql.NullString
+		plannedFlow, flowReason      sql.NullString
 		status, createdAt, updatedAt string
 		expandAfter                  int64
 		t                            Task
 	)
 	if err := row.Scan(&id, &challengeID, &planVersion, &key, &t.Title, &t.Body, &t.DoneCriteria, &nonGoals, &t.Repo, &t.Operation,
-		&status, &sourceKey, &expandAfter, &createdAt, &updatedAt); err != nil {
+		&status, &sourceKey, &expandAfter, &plannedFlow, &flowReason, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	t.ID, t.ChallengeID, t.PlanVersion, t.Key, t.Status = formatTaskID(id), formatChallengeID(challengeID), planVersion, key.String, TaskStatus(status)
 	t.SourceKey = sourceKey.String
 	t.ExpandAfter = expandAfter != 0
+	t.PlannedFlow, t.FlowReason = plannedFlow.String, flowReason.String
 	if nonGoals.Valid {
 		if err := json.Unmarshal([]byte(nonGoals.String), &t.NonGoals); err != nil {
 			return nil, fmt.Errorf("task %s non_goals: %w", t.ID, err)
@@ -643,4 +654,13 @@ func hasDependencyCycle(in []TaskInput, byKey map[string]int) bool {
 		}
 	}
 	return false
+}
+
+// plannedFlowColumns は task.planned_flow・task.flow_reason の列の値。フローが空（flow の形でない委譲先のタスク）なら、
+// 両方を NULL にする。理由は前後の空白を除いた値で、空なら NULL。
+func plannedFlowColumns(flow, reason string) (any, any) {
+	if strings.TrimSpace(flow) == "" {
+		return nil, nil
+	}
+	return flow, nullableTextColumn(strings.TrimSpace(reason))
 }

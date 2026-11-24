@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // --- J2 の出力スキーマ・検査 ---
@@ -86,6 +87,8 @@ type j2RawTask struct {
 	Source string `json:"source"`
 	// ExpandAfter は、このタスクの後に、続きのタスクを足すかを決めるか（任意。統合先を使う計画だけ真にできる）。
 	ExpandAfter *bool `json:"expand_after"`
+	// FlowReason は flow の形の委譲先の操作を選んだ理由（flow の形の操作では必須。そうでない操作では空以外が不正）。
+	FlowReason *string `json:"flow_reason"`
 }
 
 // j2Topic は検査済みの論点 1 つ。
@@ -112,6 +115,9 @@ type j2Task struct {
 	BudgetReviewUSD *float64
 	// ExpandAfter は続きのタスクを足すかを決めるタスクか（出力の値。無い・null は偽）。
 	ExpandAfter bool
+	// Flow は選んだ操作の flow（flow の形の委譲先の操作だけ。そうでなければ空）。FlowReason は出力の flow_reason（flow の形のときだけ。空白を除かない）。
+	Flow       string
+	FlowReason string
 }
 
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
@@ -193,6 +199,9 @@ type j2ValidationContext struct {
 	// CheckLimit が真のとき、上限を見込みと比べる（J2 の出力の確定だけが立てる）。偽のとき（承認済みの計画を委譲の段で読み直すとき）は、
 	// 上限の額と理由の形だけを検査する。見込みは承認の後に動きうる（宣言の既定・済みのタスク）うえ、読み直しは済みのタスクの枠を持たない。
 	CheckLimit bool
+	// SkipFlowReason が真のとき、flow_reason の検査と planned_flow の書き足しをしない（承認済みの計画・保留中の足す依頼の spec を、
+	// 委譲の段・回答の段で検査し直すとき。S2 より前に承認した計画は flow_reason を持たず、宣言もその後に変わりうる）。
+	SkipFlowReason bool
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -269,6 +278,7 @@ func j2OutputSchema() []byte {
 				"repo":          map[string]any{"type": "string"},
 				"operation":     map[string]any{"type": "string"},
 				"source":        nullableString,
+				"flow_reason":   map[string]any{"type": []string{"string", "null"}, "maxLength": MaxFlowReasonRunes},
 
 				"budget_impl_usd":   nullableNumber,
 				"budget_review_usd": nullableNumber,
@@ -638,6 +648,9 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 		Question:          raw.Question,
 		Spec:              spec.Bytes(),
 	}
+	if !vc.SkipFlowReason {
+		v.Spec = addPlannedFlow(v.Spec, tasks)
+	}
 	if vc.CheckSource {
 		v.OpenChildKeys = vc.OpenChildKeys
 	}
@@ -740,6 +753,19 @@ func validateJ2TaskFields(t j2RawTask, vc j2ValidationContext, requireBudgets bo
 	if checkOperationLaunchable(connector, op, vc.HasSource) != nil {
 		return j2Task{}, "operation cannot be launched for this challenge"
 	}
+	flow, flowReason, reason := "", "", ""
+	if !vc.SkipFlowReason {
+		flow, flowReason, reason = checkJ2FlowReason(connector, op, t.FlowReason)
+	} else if connector.Form == ConnectorFormFlow {
+		// 検査し直しでは理由を求めないが、タスクの記録へ写す値は落とさない（保存済みの出力の理由と、いまの宣言の操作の flow）。
+		flow = op.Flow
+		if t.FlowReason != nil {
+			flowReason = *t.FlowReason
+		}
+	}
+	if reason != "" {
+		return j2Task{}, reason
+	}
 	nonGoals, err := NormalizeNonGoals(t.NonGoals)
 	if err != nil {
 		return j2Task{}, validationReason(err)
@@ -761,7 +787,84 @@ func validateJ2TaskFields(t j2RawTask, vc j2ValidationContext, requireBudgets bo
 		NonGoals: nonGoals, DependsOn: t.DependsOn, Repo: t.Repo, Operation: t.Operation, Source: t.Source,
 		BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD,
 		ExpandAfter: t.ExpandAfter != nil && *t.ExpandAfter,
+		Flow:        flow, FlowReason: flowReason,
 	}, ""
+}
+
+// MaxFlowReasonRunes は flow_reason の文字数の上限（2000 文字は通し、2001 文字は不正）。
+const MaxFlowReasonRunes = 2000
+
+// flowDisplayNames は flow の識別子の表示名の表（判断点の入力と計画の本文で使う）。表に無い識別子は識別子だけで出す。
+var flowDisplayNames = map[string]string{
+	"ticket":       "標準の実装",
+	"ticket-light": "簡略な実装",
+	"reflect":      "統合ブランチを上げる",
+}
+
+// flowLabel は「<名前>（<識別子>）」（表に無い識別子は識別子だけ）。
+func flowLabel(flow string) string {
+	if name, ok := flowDisplayNames[flow]; ok {
+		return name + "（" + flow + "）"
+	}
+	return flow
+}
+
+// checkJ2FlowReason は選んだ操作 op の flow_reason を検査する。flow の形の委譲先の操作では、あり・空白だけでなく・2000 文字以内が必須。
+// そうでない操作では、空でない値が不正（無い・null・空の文字列は通る）。flow の形のとき、操作の flow と出力の理由を返す。
+func checkJ2FlowReason(connector *Connector, op *ConnectorOperation, reason *string) (string, string, string) {
+	if connector.Form != ConnectorFormFlow {
+		if reason != nil && *reason != "" {
+			return "", "", "flow_reason must be empty unless the operation is a flow"
+		}
+		return "", "", ""
+	}
+	if reason == nil || strings.TrimSpace(*reason) == "" {
+		return "", "", "flow_reason is required for a flow operation and must not be blank"
+	}
+	if utf8.RuneCountInString(*reason) > MaxFlowReasonRunes {
+		return "", "", fmt.Sprintf("flow_reason must be at most %d characters", MaxFlowReasonRunes)
+	}
+	return op.Flow, *reason, ""
+}
+
+// addPlannedFlow は検査済みの出力の JSON（空白を除いた spec）の tasks[] の、flow の形の操作を選んだ要素へ planned_flow
+// （そのときの宣言の操作の flow）を足す。ほかの欄と並びは変えない。
+func addPlannedFlow(spec []byte, tasks []j2Task) []byte {
+	var top struct {
+		Tasks json.RawMessage `json:"tasks"`
+	}
+	var elems []json.RawMessage
+	if json.Unmarshal(spec, &top) != nil || json.Unmarshal(top.Tasks, &elems) != nil || len(elems) != len(tasks) {
+		return spec
+	}
+	changed := false
+	for i, e := range elems {
+		if tasks[i].Flow == "" || len(e) < 2 || e[len(e)-1] != '}' {
+			continue
+		}
+		pf, _ := json.Marshal(tasks[i].Flow)
+		buf := append(append([]byte{}, e[:len(e)-1]...), []byte(`,"planned_flow":`)...)
+		elems[i] = append(append(buf, pf...), '}')
+		changed = true
+	}
+	if !changed {
+		return spec
+	}
+	// json.Marshal は RawMessage の < > & を \u 表記へ換えるので使わず、要素をそのまま , でつなぐ。
+	newTasks := []byte("[")
+	for i, e := range elems {
+		if i > 0 {
+			newTasks = append(newTasks, ',')
+		}
+		newTasks = append(newTasks, e...)
+	}
+	newTasks = append(newTasks, ']')
+	// tasks の値は空白を除いた spec の中に 1 度だけ、そのままの並びで現れる（値の中の引用符は \" に換わるので文字列とは重ならない）。
+	var compactOld bytes.Buffer
+	if json.Compact(&compactOld, top.Tasks) != nil {
+		return spec
+	}
+	return bytes.Replace(spec, compactOld.Bytes(), newTasks, 1)
 }
 
 // validateJ2BudgetLimit は計画の上限（budget_limit_usd）と理由（budget_limit_reason）を検査する。省いた上限は nil（見込みと同じ額）。
@@ -910,6 +1013,10 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(t.Title))
 		b.WriteString("   - 対象リポジトリ: " + t.Repo + "\n")
 		b.WriteString("   - 操作: " + t.Operation + "\n")
+		if t.Flow != "" {
+			b.WriteString("   - フロー: " + flowLabel(t.Flow) + "\n")
+			b.WriteString("   - フローを選んだ理由: " + oneLine(t.FlowReason) + "\n")
+		}
 		if t.BudgetImplUSD != nil && t.BudgetReviewUSD != nil {
 			b.WriteString("   - 枠: 実装 " + formatUSDAmount(*t.BudgetImplUSD) + " USD・レビュー対応 " + formatUSDAmount(*t.BudgetReviewUSD) + " USD\n")
 		}
@@ -1300,6 +1407,9 @@ func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, age
 			switch {
 			case !hasSource && (invocationNeedsSource(op.Invocation) || (!startTakesTaskFile(connector) && cliCommandsNeedSource(connector))):
 				line += "｜注記: 取り込み元の Issue の情報を必要とするため、この課題では選べない"
+			}
+			if connector.Form == ConnectorFormFlow && op.Flow != "" {
+				line += "｜フロー: " + flowLabel(op.Flow)
 			}
 			b.WriteString(line + "\n")
 		}

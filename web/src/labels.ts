@@ -621,12 +621,21 @@ export const STEP_LABELS: Record<string, string> = {
   adopt: "成果物の受け取り",
   describe: "PR の説明",
   push: "push",
+  branch: "作業ブランチ名の決定",
 };
 
 // フローの名前の表示。表に無い名前は、名前だけを出す。
 export const FLOW_LABELS: Record<string, string> = {
   ticket: "標準の実装（ticket）",
+  "ticket-light": "簡略な実装（ticket-light）",
+  reflect: "統合ブランチを上げる（reflect）",
 };
+
+// タスクにフローを出す行の見出しと、理由の見出し・行頭。
+export const TASK_FLOW_LABEL = "フロー";
+export const TASK_FLOW_REASON_HEADING = "フローを選んだ理由";
+export const PLAN_TASK_FLOW_REASON_LABEL = "理由";
+export const PLAN_TASK_FLOWS_HEADING = "タスクのフロー";
 
 export const STEP_STATE_LABELS: Record<string, string> = {
   running: "実行中…",

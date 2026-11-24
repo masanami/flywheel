@@ -117,34 +117,34 @@ func TestFlowCommand_Builder(t *testing.T) {
 			t.Fatalf("start = %q err %v, want an empty issue input", got, err)
 		}
 	})
-	t.Run("AC-139 models の ticket の変数は、変数名の辞書順に --input の前へ入る", func(t *testing.T) {
-		c := flowConnector(t, `, "models": {"ticket": {"REVIEW": "sonnet", "IMPL": "opus"}, "reflect": {"R": "haiku"}}`)
-		got, err := s.contractCommandArgs(c, contractCmdStart, startFill)
-		if err != nil {
-			t.Fatal(err)
+	t.Run("AC-117 始めるコマンドは --model を含まない", func(t *testing.T) {
+		got, err := s.contractCommandArgs(flowConnector(t, ""), contractCmdStart, startFill)
+		if err != nil || argsContain(got, "--model") {
+			t.Fatalf("start = %q err %v, want no --model", got, err)
 		}
-		want := join(pre, []string{"start", "--workspace", ws}, delegated, []string{"--model", "IMPL=opus", "--model", "REVIEW=sonnet"}, inputs("C-186"), []string{"ticket"})
+		want := join(pre, []string{"start", "--workspace", ws}, delegated, inputs("C-186"), []string{"ticket"})
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("start = %q\nwant  %q", got, want)
 		}
 	})
-	t.Run("AC-140 models に ticket の分が無ければ --model を含まない", func(t *testing.T) {
-		c := flowConnector(t, `, "models": {"reflect": {"R": "haiku"}}`)
-		got, err := s.contractCommandArgs(c, contractCmdStart, startFill)
-		if err != nil || argsContain(got, "--model") {
-			t.Fatalf("start = %q err %v, want no --model", got, err)
-		}
-	})
-	t.Run("AC-81・AC-141 反映の依頼: 並びは表のとおり、reflect の models を含む", func(t *testing.T) {
-		c := flowConnector(t, `, "challenge_id_prefix": "tom-", "models": {"ticket": {"IMPL": "opus"}, "reflect": {"W": "x", "A": "y"}}`)
+	t.Run("AC-118 反映の依頼のコマンドは --model を含まない", func(t *testing.T) {
+		c := flowConnector(t, `, "challenge_id_prefix": "tom-"`)
 		got, err := s.contractCommandArgs(c, contractCmdReflect, contractFill{ChallengeID: "C-186", ArtifactRef: "feat/integration-1", EmptySource: true})
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := join(pre, []string{"start", "--workspace", ws}, delegated, []string{"--model", "A=y", "--model", "W=x"},
+		want := join(pre, []string{"start", "--workspace", ws}, delegated,
 			[]string{"--input", "artifact_ref=feat/integration-1", "--input", "challenge_id=tom-C-186", "reflect"})
-		if !reflect.DeepEqual(got, want) {
+		if !reflect.DeepEqual(got, want) || argsContain(got, "--model") {
 			t.Fatalf("reflect = %q\nwant    %q", got, want)
+		}
+	})
+	t.Run("ticket-light の操作の始めるコマンドは末尾が ticket-light", func(t *testing.T) {
+		f := startFill
+		f.Flow = "ticket-light"
+		got, err := s.contractCommandArgs(flowConnector(t, ""), contractCmdStart, f)
+		if err != nil || got[len(got)-1] != "ticket-light" || argsContain(got, "--model") {
+			t.Fatalf("start = %q err %v", got, err)
 		}
 	})
 	t.Run("AC-78 状態を読む", func(t *testing.T) {
@@ -541,6 +541,8 @@ func TestFlowLaunch_AC145_J2TaskFieldsHaveNoModel(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{"body", "budget_impl_usd", "budget_review_usd", "depends_on", "done_criteria", "expand_after", "key", "non_goals", "operation", "repo", "source", "title"}
+	want = append(want, "flow_reason")
+	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("task fields = %v, want %v", got, want)
 	}

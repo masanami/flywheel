@@ -285,6 +285,28 @@ func TestContractCommand_FlowAndStepsAreNormalized(t *testing.T) {
 	}
 }
 
+// steps の要素の effort は任意。文字列ならそのまま、無い・null なら nil、それ以外なら steps の全体を無いものとして扱う。
+func TestContractCommand_StepEffort(t *testing.T) {
+	withEffort := func(v string) string {
+		return strings.Replace(stepJSON, `"models_used"`, `"effort": `+v+`, "models_used"`, 1)
+	}
+	if got := statusWithSteps(t, `"steps": [`+withEffort(`"medium"`)+`]`); got.Status == nil || len(got.Status.Steps) != 1 || got.Status.Steps[0].Effort == nil || *got.Status.Steps[0].Effort != "medium" {
+		t.Errorf("effort string: %+v", got.Status)
+	}
+	for name, extra := range map[string]string{"absent": `"steps": [` + stepJSON + `]`, "null": `"steps": [` + withEffort(`null`) + `]`} {
+		got := statusWithSteps(t, extra)
+		if got.Status == nil || len(got.Status.Steps) != 1 || got.Status.Steps[0].Effort != nil {
+			t.Errorf("%s: %+v", name, got.Status)
+		}
+	}
+	for name, v := range map[string]string{"number": `3`, "bool": `true`, "array": `["a"]`, "object": `{}`} {
+		got := statusWithSteps(t, `"flow": "ticket", "steps": [`+withEffort(v)+`]`)
+		if got.Result != core.RunResultSucceeded || got.Status == nil || got.Status.Steps != nil || got.Status.RunID != "r-1" {
+			t.Errorf("%s: want steps dropped but a normal read, got %v %+v", name, got.Result, got.Status)
+		}
+	}
+}
+
 // steps の形が合わないとき（AC-111）、steps の全体を無いものとして扱い、出力は malformed にせず、ほかの欄は従来どおり読む。
 func TestContractCommand_MalformedStepsAreDroppedWithoutMalformedOutput(t *testing.T) {
 	bad := map[string]string{

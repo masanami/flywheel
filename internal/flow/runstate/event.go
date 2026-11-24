@@ -108,12 +108,14 @@ type RunStarted struct {
 	// ReleaseOn は定義の最上位の release_on の写し（cancelled・failed）。終わりを記録する側が、定義を読み込まずに
 	// 「終わる前に、この run が作った作業ツリーを片付けるか」を状態から読む。この版より前に始めた run には無い（片付けない）。
 	ReleaseOn []string `json:"release_on,omitempty"`
-	// Models は解決したモデルの変数（変数の名前 → 値。定義の既定の値に flow start の --model を重ねたもの）。resume の後も
+	// Models は解決したモデルの変数（変数の名前 → 値。定義の models の値）。resume の後も
 	// この値を使う。定義が models を持たない run には無い。
 	Models map[string]string `json:"models,omitempty"`
-	Origin string            `json:"origin"`
-	Cwd    string            `json:"cwd"`
-	PID    int               `json:"pid"`
+	// Efforts は定義の efforts（変数の名前 → effort）。resume の後もこの値を使う。定義が efforts を持たない run には無い。
+	Efforts map[string]string `json:"efforts,omitempty"`
+	Origin  string            `json:"origin"`
+	Cwd     string            `json:"cwd"`
+	PID     int               `json:"pid"`
 	// PIDStart は PID のプロセスの開始時刻（ProcStart。PID の再利用を見分ける。#347）。この版より前の run には無い。
 	PIDStart    string `json:"pid_start,omitempty"`
 	ScriptsDir  string `json:"scripts_dir"`
@@ -161,6 +163,8 @@ type StepStarted struct {
 	PromptLog        string   `json:"prompt_log,omitempty"`
 	// Model は claude の --model へ渡した値（ステップが model: $models.<名前> で変数を指すときの解決値。指さなければ空）。
 	Model string `json:"model,omitempty"`
+	// Effort は claude の --effort へ渡した値（ステップが effort: $efforts.<名前> で変数を指すときの解決値。指さなければ空）。
+	Effort string `json:"effort,omitempty"`
 }
 
 // StepProcess は llm の子プロセスを起動した記録。PID はプロセスグループの長。

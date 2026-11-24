@@ -55,6 +55,8 @@ const plan = (over: Partial<ApprovalPlan> = {}): ApprovalPlan => ({
       key: "a",
       title: "調べる",
       depends_on: [],
+      flow_reason: null,
+      planned_flow: null,
       phase: "next",
       source: null,
       budget_impl_usd: null,
@@ -64,6 +66,8 @@ const plan = (over: Partial<ApprovalPlan> = {}): ApprovalPlan => ({
       key: "b",
       title: "作る",
       depends_on: ["a"],
+      flow_reason: null,
+      planned_flow: null,
       phase: "blocked",
       source: null,
       budget_impl_usd: null,
@@ -347,6 +351,8 @@ const five = Array.from({ length: 5 }, (_, i) => ({
   key: `k${i}`,
   title: `タスク${i}`,
   depends_on: i === 0 ? [] : [`k${i - 1}`],
+  flow_reason: null,
+  planned_flow: null,
   phase: i === 0 ? "next" : "blocked",
   source: null,
   budget_impl_usd: null,
@@ -966,4 +972,84 @@ it("#811: 過去の形の計画の本文に、論点を不要とした根拠の�
   ).toBeInTheDocument();
   expect(body.textContent).not.toContain("論点を不要とした根拠");
   expect(body.textContent).not.toContain("QUOTE-ONE");
+});
+
+// ---- フローと理由の行（#1263。AC-143〜146・151）----
+const flowTask = (key: string, p: Record<string, unknown>) => ({
+  key,
+  title: `タスク ${key}`,
+  depends_on: [],
+  flow_reason: null,
+  planned_flow: null,
+  phase: "next",
+  source: null,
+  budget_impl_usd: null,
+  budget_review_usd: null,
+  ...p,
+});
+
+it("AC-143 AC-144 #1263: ticket-light のタスクに「フロー: 簡略な実装（ticket-light）」と理由が出る", async () => {
+  await opened(
+    summary({
+      plan: plan({
+        tasks: [
+          flowTask("a", {
+            planned_flow: "ticket-light",
+            flow_reason: "小さな修正のため",
+          }),
+        ],
+      }),
+    }),
+  );
+  expect(screen.getByTestId("plan-task-flow-name").textContent).toBe(
+    "フロー: 簡略な実装（ticket-light）",
+  );
+  expect(screen.getByTestId("plan-task-flow-reason").textContent).toBe(
+    "理由: 小さな修正のため",
+  );
+});
+
+it("AC-145 #1263: planned_flow が null のタスクには、フローと理由の行を出さない", async () => {
+  await opened(
+    summary({
+      plan: plan({
+        tasks: [
+          flowTask("a", {}),
+          flowTask("b", { planned_flow: "ticket", flow_reason: "標準" }),
+        ],
+      }),
+    }),
+  );
+  const items = screen.getAllByTestId("plan-task-flow");
+  expect(items).toHaveLength(1);
+  expect(items[0]?.textContent).toContain("タスク b");
+  expect(screen.queryByText("タスク a", { selector: "b" })).toBeNull();
+});
+
+it("AC-145 #1263: どのタスクも planned_flow が null なら、フローの区画ごと出さない", async () => {
+  await opened(summary({ plan: plan({ tasks: [flowTask("a", {})] }) }));
+  expect(screen.queryByTestId("plan-task-flows")).toBeNull();
+});
+
+it("AC-146 #1263: planned_flow があり flow_reason が null なら、フローの行だけを出す", async () => {
+  await opened(
+    summary({
+      plan: plan({ tasks: [flowTask("a", { planned_flow: "ticket" })] }),
+    }),
+  );
+  expect(screen.getByTestId("plan-task-flow-name").textContent).toBe(
+    "フロー: 標準の実装（ticket）",
+  );
+  expect(screen.queryByTestId("plan-task-flow-reason")).toBeNull();
+});
+
+it("AC-151 #1263: 表に無いフローの識別子は、識別子だけを出す", async () => {
+  await opened(
+    summary({
+      plan: plan({ tasks: [flowTask("a", { planned_flow: "custom-flow" })] }),
+    }),
+  );
+  expect(screen.getByTestId("plan-task-flow-name").textContent).toBe(
+    "フロー: custom-flow",
+  );
 });

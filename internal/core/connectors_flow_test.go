@@ -33,6 +33,8 @@ func TestLoadConnectorsDeclaration_FlowForm(t *testing.T) {
 		{"AC-62 contract_version を書く", flow("auto", flowOp, `, "contract_version": 1`), true},
 		{"AC-63 操作に flow が無い", flow("auto", "", ""), true},
 		{"AC-64 flow が reflect", flow("auto", `, "flow": "reflect"`, ""), true},
+		{"AC-39 ticket と ticket-light の操作を並べられる", flow("auto", flowOp+`}, {"id": "op2", "flow": "ticket-light"`, ""), false},
+		{"AC-40 flow が ticket-light だけでもよい", flow("auto", `, "flow": "ticket-light"`, ""), false},
 		{"AC-64 flow が unknown", flow("auto", `, "flow": "unknown"`, ""), true},
 		{"AC-65 cli の操作に flow を書く", declWith(`{"id": "c", "form": "cli", "permission_mode": "auto", "contract_version": 1,
 			"commands": {"start": ["s"], "status": ["st"], "resume": ["r"], "cancel": ["x"]},
@@ -47,9 +49,9 @@ func TestLoadConnectorsDeclaration_FlowForm(t *testing.T) {
 		{"challenge_id_prefix は flow の形に書ける", flow("auto", flowOp, `, "challenge_id_prefix": "C"`), false},
 		{"AC-67 permission_mode が bypassPermissions", flow("bypassPermissions", flowOp, ""), true},
 		{"AC-68 required_facts を書ける", flow("auto", flowOp, `, "required_facts": {"self_review": ["complete"]}`), false},
-		{"AC-142 models のフロー名が不明", flow("auto", flowOp, `, "models": {"other": {"V": "m"}}`), true},
-		{"AC-142 models に ticket・reflect を書ける", flow("auto", flowOp, `, "models": {"ticket": {"V": "m"}, "reflect": {"W": "n"}}`), false},
-		{"AC-143 models の値が空の文字列", flow("auto", flowOp, `, "models": {"ticket": {"V": ""}}`), true},
+		{"AC-116 flow の形に models を書く", flow("auto", flowOp, `, "models": {"ticket": {"V": "m"}}`), true},
+		{"AC-116 flow の形に空の models を書く", flow("auto", flowOp, `, "models": {}`), true},
+		{"AC-119 flow の形に efforts を書く", flow("auto", flowOp, `, "efforts": {"ticket": {"V": "low"}}`), true},
 		{"AC-144 cli に models を書く", declWith(cliConnectorWithKey(`"models": {"ticket": {"V": "m"}}`), ""), true},
 		{"AC-144 plugin に models を書く", declWith(`{"id": "p", "form": "plugin", "permission_mode": "auto",
 			"models": {"ticket": {"V": "m"}}, "operations": [{"id": "op", "invocation": "/x"}]}`, ""), true},
@@ -76,13 +78,13 @@ func TestLoadConnectorsDeclaration_FlowForm(t *testing.T) {
 func TestLoadConnectorsDeclaration_FlowFormFields(t *testing.T) {
 	t.Parallel()
 	d, err := LoadConnectorsDeclaration(writeConnectorsJSON(t, declWith(flowConnectorJSON("f", "auto", flowOp,
-		`, "challenge_id_prefix": "FLW", "models": {"ticket": {"IMPL": "opus"}}, "required_facts": {"a": ["b"]}`), "")))
+		`, "challenge_id_prefix": "FLW", "required_facts": {"a": ["b"]}`), "")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := d.Connectors[0]
 	if c.Form != ConnectorFormFlow || c.Operations[0].Flow != "ticket" || c.ChallengeIDPrefix != "FLW" ||
-		c.Models["ticket"]["IMPL"] != "opus" || c.RequiredFacts["a"][0] != "b" {
+		c.RequiredFacts["a"][0] != "b" {
 		t.Fatalf("connector = %+v", c)
 	}
 }
@@ -123,7 +125,7 @@ func TestJ2TaskFieldsHaveNoModel(t *testing.T) {
 		tags = append(tags, rt.Field(i).Tag.Get("json"))
 	}
 	wantTags := []string{"key", "title", "body", "done_criteria", "non_goals", "depends_on", "repo", "operation",
-		"budget_impl_usd", "budget_review_usd", "source", "expand_after"}
+		"budget_impl_usd", "budget_review_usd", "source", "expand_after", "flow_reason"}
 	if !reflect.DeepEqual(tags, wantTags) {
 		t.Fatalf("j2RawTask json tags = %v, want %v", tags, wantTags)
 	}
@@ -133,7 +135,7 @@ func TestJ2TaskFieldsHaveNoModel(t *testing.T) {
 		names = append(names, vt.Field(i).Name)
 	}
 	wantNames := []string{"Key", "Title", "Body", "DoneCriteria", "NonGoals", "DependsOn", "Repo", "Operation", "Source",
-		"BudgetImplUSD", "BudgetReviewUSD", "ExpandAfter"}
+		"BudgetImplUSD", "BudgetReviewUSD", "ExpandAfter", "Flow", "FlowReason"}
 	if !reflect.DeepEqual(names, wantNames) {
 		t.Fatalf("j2Task fields = %v, want %v", names, wantNames)
 	}

@@ -1169,8 +1169,9 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`UPDATE task SET verify_not_met_streak = 2 WHERE id = 1`, nil},
 			{`UPDATE contract_run SET upstream_unreadable_rounds = 3 WHERE id = 1`, nil},
 			{`UPDATE contract_run SET flow = 'ticket' WHERE id = 1`, nil},
-			{`INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used)
-			  VALUES (1, 1, 'analyze', 'agent', 1, 'finished', 'ok', ?, ?, 1234567, 1, 'm1', '["m1","m2"]')`, []any{at, at}},
+			{`UPDATE task SET planned_flow = 'ticket-light', flow_reason = '小さな変更なので "quoted"' WHERE id = 1`, nil},
+			{`INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used, effort)
+			  VALUES (1, 1, 'analyze', 'agent', 1, 'finished', 'ok', ?, ?, 1234567, 1, 'm1', '["m1","m2"]', 'medium')`, []any{at, at}},
 			{`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
 			  VALUES (?, 'tester', 'cli', 'none', 'challenge', 1, 'create', NULL, '{"title":"c1"}', 1)`, []any{at}},
 			{`INSERT INTO occurrence (challenge_id, activity_id, kind, outcome, source, created_at) VALUES (1, 1, 'completion_rejected', 'bad', 'core', ?)`, []any{at}},

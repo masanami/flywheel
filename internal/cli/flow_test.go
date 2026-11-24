@@ -437,28 +437,26 @@ func TestFlow_EngineMarkerNameMatchesCore(t *testing.T) {
 	}
 }
 
-// AC-129・AC-130: start の --model が <変数>=<値> の形でない・フローが定義していない変数のとき、使い方の誤り（終了コード 2）で、
-// 実行のフォルダを作らず、標準出力には何も出さない。ticket は models を持たないので、どの変数も未定義になる。
-func TestFlowStart_RejectsBadModelFlagsWithoutCreatingARun(t *testing.T) {
+// AC-95・AC-96: start は --model と --effort を受け付けない（使い方の誤り〔終了コード 2〕で、実行のフォルダを作らず、
+// 標準出力には何も出さない）。モデルと effort は埋め込んだフローの定義だけで決まる。
+func TestFlowStart_RejectsModelAndEffortFlagsWithoutCreatingARun(t *testing.T) {
 	t.Parallel()
 	bin := fakeFlowPlugin(t, "5.3.0")
 	for _, c := range []struct {
-		name  string
-		model []string
-		want  string
+		name string
+		flag []string
 	}{
-		{"AC-129 undefined variable", []string{"--model", "main=some-model"}, "not defined"},
-		{"AC-130 no equals sign", []string{"--model", "main"}, "<variable>=<value>"},
-		{"AC-130 empty value", []string{"--model", "main="}, "empty value"},
-		{"AC-130 empty variable", []string{"--model", "=x"}, "empty variable name"},
+		{"AC-95 --model", []string{"--model", "main=some-model"}},
+		{"AC-96 --effort", []string{"--effort", "high"}},
+		{"AC-96 --effort with a variable", []string{"--effort", "main=high"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			ws := flowWorkspaceDir(t)
-			args := append([]string{"start", "--workspace", ws, "--permission-mode", "auto", "--delegated-run", "R-1", "--input", "issue=1"}, c.model...)
+			args := append([]string{"start", "--workspace", ws, "--permission-mode", "auto", "--delegated-run", "R-1", "--input", "issue=1"}, c.flag...)
 			out, errOut, code := runFlowChild(t, flowChildEnv(bin), t.TempDir(), append(args, "ticket")...)
-			if code != 2 || out != "" || !strings.Contains(errOut, "usage_error") || !strings.Contains(errOut, c.want) {
-				t.Fatalf("exit %d stdout %q stderr %q, want a usage error (exit 2) mentioning %q", code, out, errOut, c.want)
+			if code != 2 || out != "" || !strings.Contains(errOut, "usage_error") || !strings.Contains(errOut, c.flag[0]) {
+				t.Fatalf("exit %d stdout %q stderr %q, want a usage error (exit 2) naming %q", code, out, errOut, c.flag[0])
 			}
 			if names := flowRunsDirEntries(t, ws); len(names) != 0 {
 				t.Errorf("a run folder was created: %v", names)

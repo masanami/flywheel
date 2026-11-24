@@ -1,0 +1,26 @@
+# with の文字列の定数（codex_review: "on"）が、最初の起動にも、ゲートの後に戻って起動し直すステップにも、添付データで渡ることを確かめる
+schema: harness.workflow/v1
+id: llm-literal-with
+inputs:
+  issue: { type: integer, required: true }
+limits:
+  budget_usd: 5
+steps:
+  implement:
+    kind: llm
+    prompt: prompts/implement.md
+    with: { issue: $inputs.issue, codex_review: "on" }
+    output: schemas/impl.json
+    budget_usd: 1
+    on:
+      pass: { gate: review }
+      failure: { fail: implement_failed }
+  review:
+    kind: gate
+    type: input
+    decider: any
+    requested_action: wait; respond to run implement again, ready to finish
+    inputs: [respond, ready]
+    on:
+      respond: implement
+      ready: { done: merged }

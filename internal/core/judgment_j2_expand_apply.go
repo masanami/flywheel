@@ -48,6 +48,8 @@ type j2ExpandValidationContext struct {
 	Origin      TaskAdditionOrigin
 	FrameImpl   *int64
 	FrameReview *int64
+	// SkipFlowReason は保存済みの足す依頼の spec を回答の段で検査し直すときに真（flow_reason の検査をしない。j2ValidationContext と同じ）。
+	SkipFlowReason bool
 }
 
 // validateJ2ExpandOutput は「足す」の形の出力を検査する。次のいずれかで ok=false:
@@ -133,7 +135,7 @@ func validateJ2ExpandOutputReason(data []byte, vc j2ExpandValidationContext) (*j
 	if hasDependencyCycle(inputs, byKey) {
 		return nil, "tasks.depends_on has a cycle"
 	}
-	jc := j2ValidationContext{Agent: vc.Agent, Conn: vc.Conn, HasSource: vc.HasSource}
+	jc := j2ValidationContext{Agent: vc.Agent, Conn: vc.Conn, HasSource: vc.HasSource, SkipFlowReason: vc.SkipFlowReason}
 	for i, t := range in {
 		if t.Repo != vc.Repos[0] {
 			return nil, fmt.Sprintf("tasks[%d].repo differs from the repo of the existing tasks", i)
@@ -400,6 +402,7 @@ func j2ExpandTaskInputs(tasks []j2Task) []TaskInput {
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria, NonGoals: t.NonGoals,
 			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn,
 			BudgetImplMicros: taskBudgetMicros(t.BudgetImplUSD), BudgetReviewMicros: taskBudgetMicros(t.BudgetReviewUSD), ExpandAfter: t.ExpandAfter,
+			PlannedFlow: t.Flow, FlowReason: t.FlowReason,
 		})
 	}
 	return inputs
