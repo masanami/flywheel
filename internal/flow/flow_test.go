@@ -3,6 +3,7 @@ package flow
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"testing"
@@ -91,7 +92,7 @@ func TestStartHandsOverToADetachedRunnerUnderTheWorkspace(t *testing.T) {
 func TestStartFailsWhenTheRunnerDoesNotTakeOver(t *testing.T) {
 	f := newFixture(t, "5.3.0")
 	stub := filepath.Join(f.root, "slow-runner.sh")
-	writeFile(t, stub, "#!/bin/sh\necho $$ > "+filepath.Join(f.root, "stub-pid")+"\nexec sleep 5\n", 0o755)
+	writeFile(t, stub, "#!/bin/sh\necho $$ > "+filepath.Join(f.root, "stub-pid")+"\nexec sleep 60\n", 0o755)
 	oldExe, oldWait := selfExecutable, detachWait
 	selfExecutable = func() (string, error) { return stub, nil }
 	detachWait = 1500 * time.Millisecond
@@ -109,11 +110,12 @@ func TestStartFailsWhenTheRunnerDoesNotTakeOver(t *testing.T) {
 		t.Errorf("the run id must still be reported so the caller can find the run: %+v", d)
 	}
 	// 失敗として返した以上、起動した runner は止められている（遅れて引き継いで run を進めない）。
-	b, err := os.ReadFile(filepath.Join(f.root, "stub-pid"))
-	if err != nil || atoi(strings.TrimSpace(string(b))) == 0 {
-		t.Fatalf("the stub runner never started (stub-pid: %q, %v)", b, err)
+	// 止めた pid は start の標準エラーに出る（負荷時はスタブが pid を書く前に止められうるので、stub-pid には頼らない）。
+	m := regexp.MustCompile(`runner（pid (\d+)）`).FindStringSubmatch(errOut)
+	if m == nil {
+		t.Fatalf("stderr does not name the runner pid:\n%s", errOut)
 	}
-	pid := atoi(strings.TrimSpace(string(b)))
+	pid := atoi(m[1])
 	deadline := time.Now().Add(5 * time.Second)
 	for runstate.Alive(pid) && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)

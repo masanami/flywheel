@@ -253,7 +253,7 @@ func TestExtractedScriptsAreExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	scripts, _ := filepath.Glob(filepath.Join(l.WorkflowDir, "scripts", "*.sh"))
-	if len(scripts) != 3 {
+	if len(scripts) != 4 {
 		t.Fatalf("scripts = %v", scripts)
 	}
 	for _, s := range scripts {
