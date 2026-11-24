@@ -53,7 +53,7 @@ func (s *Store) startReflectRequest(ctx context.Context, row *operationRow, opts
 		return outside, nil
 	}
 	connector := opts.Connectors.ReflectConnectorFor(*decl)
-	if connector == nil {
+	if connector == nil || connector.Commands == nil { // form: flow の起動は、引数の組み立てが入るまで未対応（口は無い扱い）
 		return outside, nil
 	}
 	// 起動の前に分かる結果（契約の実行が無い）の route は null。route は始めた結果・始められなかった結果にだけ付ける。
