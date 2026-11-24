@@ -58,7 +58,7 @@ func TestShowSourceBindingNullAndPlanSpec(t *testing.T) {
 // （CLI の --json の出力をバイト単位で保つ前提。encoding/json は map のキーを辞書順で出していた）。
 func TestStructFieldsAreInKeyOrder(t *testing.T) {
 	types := []any{
-		view.Challenge{}, view.Plan{}, view.PlanDetail{}, view.Approval{}, view.Hold{}, view.Operation{},
+		view.Challenge{}, view.Task{}, view.ApprovalPlanTask{}, view.TaskDelegateStep{}, view.Plan{}, view.PlanDetail{}, view.Approval{}, view.Hold{}, view.Operation{},
 		view.SourceBinding{}, view.Run{}, view.Activity{}, view.ChallengeResponse{}, view.ChallengeWithPlanResponse{},
 		view.ChallengeApprovalResponse{}, view.ChallengeHoldResponse{}, view.OperationResponse{},
 		view.OperationApprovalResponse{}, view.ListResponse{}, view.ShowResponse{}, view.LogResponse{},

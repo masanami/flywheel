@@ -41,6 +41,8 @@ const BASE = "/api/v1/workspaces/alpha";
 
 const T = (id: string, p: Partial<Task> = {}): Task => ({
   added: null,
+  flow_reason: null,
+  planned_flow: null,
   body: "",
   budget_impl_usd: 0,
   budget_review_usd: 0,
@@ -1511,6 +1513,7 @@ const S = (p: Partial<StepRow> = {}): StepRow => ({
   attempt: 1,
   cost_unknown: false,
   cost_usd: 1,
+  effort: null,
   ended_at: "2026-01-01T00:00:10Z",
   kind: "llm",
   model: null,
@@ -1576,7 +1579,7 @@ it("AC-157 AC-158 AC-159 AC-160 #1229: 名前は表にあれば「日本語名 �
   ]);
 });
 
-it("AC-157 #1229: 表の 25 件すべてが「日本語名 識別子」で出る（仕様の表の文字列を固定）", async () => {
+it("AC-157 #1229: 表の 26 件すべてが「日本語名 識別子」で出る（仕様の表の文字列を固定）", async () => {
   const want = [
     "入力の確かめ resolve",
     "統合ブランチの用意 integration",
@@ -1603,12 +1606,13 @@ it("AC-157 #1229: 表の 25 件すべてが「日本語名 識別子」で出る
     "成果物の受け取り adopt",
     "PR の説明 describe",
     "push push",
+    "作業ブランチ名の決定 branch",
   ];
   const sec = await openSteps(
     want.map((w) => S({ step: w.slice(w.lastIndexOf(" ") + 1) })),
   );
   expect(rowsOf(sec).map((r) => r[0])).toEqual(want);
-  expect(Object.keys(STEP_LABELS).length).toBe(25);
+  expect(Object.keys(STEP_LABELS).length).toBe(26);
 });
 
 it("AC-158 #1229: Object の継承キー（constructor）は表にある識別子として扱わず、識別子だけを出す", async () => {
@@ -1702,4 +1706,70 @@ it("AC-173 #1229: flow が null でなければフローの名前を出し、nul
   cleanup();
   const none = await openSteps([S()], null);
   expect(none.queryByTestId("delegate-flow")).toBeNull();
+});
+
+// ---- フロー・理由・effort・branch の名前（#1263。AC-143〜155 の画面の分）----
+const openTask = async (p: Partial<Task>) => {
+  const { root } = await open(show({ tasks: [T("T-2", p)] }));
+  return within(root);
+};
+
+it("AC-147 #1263: planned_flow が ticket のタスクに「フロー: 標準の実装（ticket）」が出る", async () => {
+  const v = await openTask({ planned_flow: "ticket" });
+  expect(v.getByTestId("task-planned-flow").textContent).toBe(
+    "フロー標準の実装（ticket）",
+  );
+});
+
+it("AC-148 #1263: flow_reason があるタスクに「フローを選んだ理由」と理由が出る", async () => {
+  const v = await openTask({
+    planned_flow: "ticket-light",
+    flow_reason: "小さな修正のため",
+  });
+  const sec = within(v.getByTestId("task-flow-reason"));
+  expect(sec.getByRole("heading", { name: "フローを選んだ理由" })).toBeTruthy();
+  expect(sec.getByText("小さな修正のため")).toBeTruthy();
+  expect(v.getByTestId("task-planned-flow").textContent).toContain(
+    "簡略な実装（ticket-light）",
+  );
+});
+
+it("AC-149 #1263: planned_flow があり flow_reason が null なら、フローの行だけを出す", async () => {
+  const v = await openTask({ planned_flow: "ticket", flow_reason: null });
+  expect(v.getByTestId("task-planned-flow")).toBeTruthy();
+  expect(v.queryByTestId("task-flow-reason")).toBeNull();
+  expect(v.queryByText("フローを選んだ理由")).toBeNull();
+});
+
+it("AC-150 #1263: planned_flow が null なら、フローと理由の行を出さない", async () => {
+  const v = await openTask({ planned_flow: null, flow_reason: null });
+  expect(v.queryByTestId("task-planned-flow")).toBeNull();
+  expect(v.queryByTestId("task-flow-reason")).toBeNull();
+});
+
+it("AC-151 #1263: 表に無いフローの識別子は、識別子だけを出す", async () => {
+  const v = await openTask({ planned_flow: "custom-flow" });
+  expect(v.getByTestId("task-planned-flow").textContent).toBe(
+    "フローcustom-flow",
+  );
+});
+
+it("AC-152 AC-153 AC-154 #1263: モデルの欄は effort が null でなければ（effort: 値）を添える。models_used が空なら「—（effort: medium）」", async () => {
+  const sec = await openSteps([
+    S({ models_used: ["opus"], effort: "medium" }),
+    S({ models_used: ["opus"], effort: null }),
+    S({ models_used: [], effort: "medium" }),
+    S({ models_used: [], effort: null }),
+  ]);
+  expect(rowsOf(sec).map((r) => r[4])).toEqual([
+    "opus（effort: medium）",
+    "opus",
+    "—（effort: medium）",
+    "—",
+  ]);
+});
+
+it("AC-155 #1263: 識別子 branch の行は「作業ブランチ名の決定 branch」で出る", async () => {
+  const sec = await openSteps([S({ step: "branch", kind: "command" })]);
+  expect(rowsOf(sec).map((r) => r[0])).toEqual(["作業ブランチ名の決定 branch"]);
 });

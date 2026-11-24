@@ -9,6 +9,7 @@ import "github.com/masanami/flywheel/internal/core"
 // budget_impl_usd・budget_review_usd はタスクの枠（増額を含む）、spent_usd はそのタスクの実行の費用の合計。
 //
 // artifacts・delegate・facts・landing・verification は委譲先の実行・成果物・作業ログから core が組み立てる値の口で、
+// planned_flow・flow_reason はタスクの記録の、計画が選んだフローとその理由（flow の形でない委譲先・記録の無いタスクは null）。
 // 値が無いときは artifacts が `[]`、delegate・landing・verification が null、facts が `{}`。
 type Task struct {
 	// Added は計画の後に足されたタスクの印。計画の承認で作ったタスクは null。
@@ -21,11 +22,13 @@ type Task struct {
 	DependsOn       []string          `json:"depends_on"`
 	DoneCriteria    string            `json:"done_criteria"`
 	Facts           map[string]string `json:"facts"`
+	FlowReason      *string           `json:"flow_reason"`
 	ID              string            `json:"id"`
 	Landing         *string           `json:"landing"`
 	NonGoals        []string          `json:"non_goals"`
 	Operation       string            `json:"operation"`
 	PlanVersion     int64             `json:"plan_version"`
+	PlannedFlow     *string           `json:"planned_flow"`
 	Repo            string            `json:"repo"`
 	SourceKey       *string           `json:"source_key"`
 	SpentUSD        float64           `json:"spent_usd"`
@@ -102,11 +105,12 @@ type TaskDelegate struct {
 }
 
 // TaskDelegateStep は delegate.steps の要素（ステップ 1 回ぶん）。cost_usd は USD に直した数（無ければ null）、models_used は使ったモデルの名前、
-// state は `running`・`finished`・`cancelled`・`interrupted`。
+// state は `running`・`finished`・`cancelled`・`interrupted`。effort はステップの記録の、書いた effort（無ければ null）。
 type TaskDelegateStep struct {
 	Attempt     int64    `json:"attempt"`
 	CostUnknown bool     `json:"cost_unknown"`
 	CostUSD     *float64 `json:"cost_usd"`
+	Effort      *string  `json:"effort"`
 	EndedAt     *string  `json:"ended_at"`
 	Kind        string   `json:"kind"`
 	Model       *string  `json:"model"`
@@ -139,8 +143,8 @@ func FromTasks(ts []core.Task) []Task {
 		out = append(out, Task{
 			Added: fromTaskAdded(t.Added), Artifacts: fromTaskArtifacts(t.Detail.Artifacts), Delegate: fromTaskDelegate(t.Detail.Delegate),
 			Facts: fromTaskFacts(t.Detail.Facts), Landing: fromTaskLanding(t.Detail.Landing), Verification: fromTaskVerification(t.Detail.Verification),
-			SourceKey: strOrNil(t.SourceKey),
-			Body:      t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,
+			SourceKey: strOrNil(t.SourceKey), PlannedFlow: strOrNil(t.PlannedFlow), FlowReason: strOrNil(t.FlowReason),
+			Body: t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,
 			NonGoals: append([]string{}, t.NonGoals...), Operation: t.Operation, PlanVersion: t.PlanVersion,
 			Repo: t.Repo, Status: string(t.Status), Title: t.Title,
 			BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD, SpentUSD: t.SpentUSD,
@@ -165,7 +169,7 @@ func fromTaskDelegate(d *core.TaskDelegate) *TaskDelegate {
 	for _, sp := range d.Steps {
 		steps = append(steps, TaskDelegateStep{
 			Attempt: sp.Attempt, CostUnknown: sp.CostUnknown, CostUSD: sp.CostUSD, EndedAt: ts(sp.EndedAt), Kind: sp.Kind, Model: sp.Model,
-			ModelsUsed: append([]string{}, sp.ModelsUsed...), Outcome: sp.Outcome, StartedAt: FormatTimestamp(sp.StartedAt), State: sp.State, Step: sp.Step,
+			Effort: sp.Effort, ModelsUsed: append([]string{}, sp.ModelsUsed...), Outcome: sp.Outcome, StartedAt: FormatTimestamp(sp.StartedAt), State: sp.State, Step: sp.Step,
 		})
 	}
 	return &TaskDelegate{Flow: d.Flow, RequestedKind: d.RequestedKind, RunID: d.RunID, State: string(d.State), Steps: steps, Summary: d.Summary}
