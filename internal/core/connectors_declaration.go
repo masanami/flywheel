@@ -163,9 +163,6 @@ type Connector struct {
 	RequiredFacts map[string][]string
 	// ChallengeIDPrefix は form: flow の委譲先の任意のキー（"" は省略）。flow の形以外では書けない。
 	ChallengeIDPrefix string
-	// Models は form: flow の委譲先の任意のキー。フローの名前から、変数の名前→モデルの値への対応（nil は「無い」）。
-	// flow の形以外では書けない。変数がフローに定義されているかは読み込みでは確かめない。
-	Models map[string]map[string]string
 }
 
 // UsesContractCommands は c が契約のコマンドを使って起動・確認・再開・取り消しをする委譲先（form: cli か form: flow）か。
@@ -174,11 +171,10 @@ func (c *Connector) UsesContractCommands() bool {
 	return c != nil && (c.Form == ConnectorFormCLI || c.Form == ConnectorFormFlow)
 }
 
-// flowOperationNames は form: flow の操作の flow に書けるフロー名（S1 は ticket だけ）。
-var flowOperationNames = map[string]bool{"ticket": true}
-
-// flowModelsNames は form: flow の models のキーに書けるフロー名。
-var flowModelsNames = map[string]bool{"ticket": true, "reflect": true}
+// flowOperationNames は form: flow の操作の flow に書けるフロー名（ticket と ticket-light の閉集合）。
+// モデル・effort・Codex のレビューを使うかはフローの定義だけで決めるので、宣言には models・efforts の欄を持たない
+// （書くと未知のキーとして設定の誤りになる）。
+var flowOperationNames = map[string]bool{"ticket": true, "ticket-light": true}
 
 // ConnectorRepoSlots は repos[].slots。Paths は provider が clone のとき、
 // Base・Count は worktree のときだけ使う（合わないキーは未知のキーとして拒否）。
@@ -254,7 +250,7 @@ var humanQuestionKindKeys = map[string]bool{"id": true, "label": true}
 var connectorKeys = map[string]bool{
 	"id": true, "form": true, "permission_mode": true, "operations": true,
 	"commands": true, "contract_version": true, "required_facts": true,
-	"challenge_id_prefix": true, "models": true,
+	"challenge_id_prefix": true,
 }
 var operationKeys = map[string]bool{
 	"id": true, "invocation": true, "interactive": true, "counterpart": true,
@@ -440,16 +436,6 @@ func parseConnectors(raw json.RawMessage) ([]Connector, bool, error) {
 			if err := json.Unmarshal(v, &c.ChallengeIDPrefix); err != nil {
 				return nil, false, fmt.Errorf("[%d].challenge_id_prefix: %w", i, err)
 			}
-		}
-		if v, ok := rc["models"]; ok {
-			if isJSONNull(v) {
-				return nil, false, fmt.Errorf("[%d].models: must not be null", i)
-			}
-			var m map[string]map[string]string
-			if err := json.Unmarshal(v, &m); err != nil {
-				return nil, false, fmt.Errorf("[%d].models: %w", i, err)
-			}
-			c.Models = m
 		}
 		if v, ok := rc["contract_version"]; ok {
 			cv, err := decodeIntLiteral(v)
@@ -887,7 +873,7 @@ func validateConnector(c Connector, connectorIDs map[string]bool) error {
 }
 
 // validateFlowConnector は form: flow の委譲先の固有の検査をする。commands・contract_version は書けず（実行ファイルは
-// 起動の時に決まる）、models は ticket・reflect のフロー名ごとに、空でない名前と空でない値だけを持つ。
+// 起動の時に決まる）。
 // 操作の flow は validateOperation が検査する。permission_mode の 3 値の検査は全ての形で済んでいる。
 func validateFlowConnector(c Connector) error {
 	if c.Commands != nil {
@@ -896,39 +882,13 @@ func validateFlowConnector(c Connector) error {
 	if c.ContractVersion != nil {
 		return fmt.Errorf("%w: connector %q (form flow) must not have contract_version", ErrConfigInvalid, c.ID)
 	}
-	flows := make([]string, 0, len(c.Models))
-	for name := range c.Models {
-		flows = append(flows, name)
-	}
-	sort.Strings(flows)
-	for _, flow := range flows {
-		if !flowModelsNames[flow] {
-			return fmt.Errorf("%w: connector %q models has invalid flow name %q (want ticket or reflect)", ErrConfigInvalid, c.ID, flow)
-		}
-		vars := make([]string, 0, len(c.Models[flow]))
-		for name := range c.Models[flow] {
-			vars = append(vars, name)
-		}
-		sort.Strings(vars)
-		for _, name := range vars {
-			if name == "" {
-				return fmt.Errorf("%w: connector %q models[%q] has an empty variable name", ErrConfigInvalid, c.ID, flow)
-			}
-			if c.Models[flow][name] == "" {
-				return fmt.Errorf("%w: connector %q models[%q][%q] must not be empty", ErrConfigInvalid, c.ID, flow, name)
-			}
-		}
-	}
 	return nil
 }
 
-// validateNotFlowKeys は form: flow でない委譲先が、flow の形だけのキー（challenge_id_prefix・models）を書いていないか検査する。
+// validateNotFlowKeys は form: flow でない委譲先が、flow の形だけのキー（challenge_id_prefix）を書いていないか検査する。
 func validateNotFlowKeys(c Connector) error {
 	if c.ChallengeIDPrefix != "" {
 		return fmt.Errorf("%w: connector %q (form %s) must not have challenge_id_prefix (only form flow)", ErrConfigInvalid, c.ID, c.Form)
-	}
-	if c.Models != nil {
-		return fmt.Errorf("%w: connector %q (form %s) must not have models (only form flow)", ErrConfigInvalid, c.ID, c.Form)
 	}
 	return nil
 }
@@ -1035,7 +995,7 @@ func validateOperation(c Connector, op ConnectorOperation, opIDs map[string]bool
 			return fmt.Errorf("%w: connector %q (form flow) operation %q has no flow", ErrConfigInvalid, c.ID, op.ID)
 		}
 		if !flowOperationNames[op.Flow] {
-			return fmt.Errorf("%w: connector %q operation %q has invalid flow %q (want ticket)", ErrConfigInvalid, c.ID, op.ID, op.Flow)
+			return fmt.Errorf("%w: connector %q operation %q has invalid flow %q (want ticket or ticket-light)", ErrConfigInvalid, c.ID, op.ID, op.Flow)
 		}
 	} else if op.Flow != "" {
 		return fmt.Errorf("%w: connector %q (form %s) operation %q must not have flow (only form flow)", ErrConfigInvalid, c.ID, c.Form, op.ID)

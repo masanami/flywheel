@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"sort"
 )
 
 // contractCmd は契約のコマンドの種類。
@@ -86,7 +85,6 @@ func (s *Store) flowCommandArgs(c *Connector, cmd contractCmd, f contractFill) (
 			return nil, fmt.Errorf("%w: the operation of connector %q has no flow", ErrValidation, c.ID)
 		}
 		args := append(append(append(base, "start"), ws...), perm...)
-		args = append(args, flowModelArgs(c, f.Flow)...)
 		args = append(args,
 			"--input", "issue="+issue,
 			"--input", "task_file="+f.TaskFile,
@@ -97,7 +95,6 @@ func (s *Store) flowCommandArgs(c *Connector, cmd contractCmd, f contractFill) (
 		return args, nil
 	case contractCmdReflect:
 		args := append(append(append(base, "start"), ws...), perm...)
-		args = append(args, flowModelArgs(c, "reflect")...)
 		args = append(args,
 			"--input", "artifact_ref="+f.ArtifactRef,
 			"--input", "challenge_id="+challengeID,
@@ -123,21 +120,6 @@ func (s *Store) flowCommandArgs(c *Connector, cmd contractCmd, f contractFill) (
 	return nil, fmt.Errorf("%w: unknown contract command %q", ErrValidation, cmd)
 }
 
-// flowModelArgs は宣言の models のフロー flow の分を、変数の名前の辞書順の `--model <変数>=<値>` にする（無ければ空）。
-func flowModelArgs(c *Connector, flow string) []string {
-	vars := c.Models[flow]
-	names := make([]string, 0, len(vars))
-	for name := range vars {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	var out []string
-	for _, name := range names {
-		out = append(out, "--model", name+"="+vars[name])
-	}
-	return out
-}
-
 // withDelegatedRun は command の `--delegated-run` の値の仮の印を runID へ差し替えた複製を返す（印が無ければ command のまま）。
 // 引数の値（添え書きなど）が印と同じ文字列でも差し替えないよう、フラグの直後の要素だけを見る。
 func withDelegatedRun(command []string, runID string) []string {
@@ -147,7 +129,7 @@ func withDelegatedRun(command []string, runID string) []string {
 			out[i+1] = runID
 			return out
 		}
-		if command[i] == "--note" || command[i] == "--input" || command[i] == "--approved-ref" || command[i] == "--model" {
+		if command[i] == "--note" || command[i] == "--input" || command[i] == "--approved-ref" {
 			i++ // 値は読まない
 		}
 	}
