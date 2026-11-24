@@ -19,6 +19,10 @@ description: すでにある PR か統合ブランチを、既定ブランチの
 inputs:
   artifact_ref: { type: string, required: true }   # PR の URL か、統合ブランチの名前（§5.6.3）
   challenge_id: { type: string }                   # 作る PR の本文に書くだけ（名前の鍵にしない）
+models:
+  main: opus
+efforts:
+  main: xhigh
 limits:
   budget_usd: 10
   open_pr: 1                                       # PR を作って adopt へ戻る回数
@@ -50,6 +54,8 @@ steps:
   describe:                                         # 作る PR の題名と概要だけを書く（読むだけ。中身を変えない。run を始めたディレクトリで動く）
     kind: llm
     prompt: prompts/reflect-describe.md
+    model: $models.main
+    effort: $efforts.main
     session: new
     with: { branch: $steps.adopt.branch, base: $steps.adopt.base }
     output: schemas/reflect-describe.json
@@ -91,6 +97,8 @@ steps:
   sync-resolve:
     kind: llm
     prompt: prompts/sync-resolve.md
+    model: $models.main
+    effort: $efforts.main
     session: new                                    # 引き継ぐ実装のセッションが無い
     with: { base: $steps.adopt.base }
     output: schemas/sync-resolve-result.json
@@ -162,6 +170,8 @@ steps:
   land-sync-resolve:
     kind: llm
     prompt: prompts/sync-resolve.md
+    model: $models.main
+    effort: $efforts.main
     session: new
     with: { base: $steps.adopt.base }
     output: schemas/sync-resolve-result.json

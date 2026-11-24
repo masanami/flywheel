@@ -47,6 +47,10 @@ inputs:
   task_id:          { type: string }  # T-<番号>。作業ツリーとブランチの名前の鍵（task-<番号>）になる
   uses_integration: { type: string }  # true | false。true なら宛先は統合ブランチ（integration/<challenge_id を小文字にしたもの>）に決まり、integration で確かめて作る（§5.6.3）
   challenge_id:     { type: string }  # uses_integration が true のとき、統合ブランチの名前の鍵（resolve だけが名前の規則を知る）。false・無しのときは受けるだけ
+models:
+  main: opus
+efforts:
+  main: xhigh
 limits:
   budget_usd: 40                    # この unit 全ラウンドの累計上限（仮の値。shadow run で較正する。§12）
   rework: 3                         # Phase 4→8 の差し戻し上限（W2・Q8）
@@ -94,6 +98,8 @@ steps:
   analyze:
     kind: llm
     prompt: prompts/ticket-analyze.md
+    model: $models.main
+    effort: $efforts.main
     add_dirs: [ $steps.resolve.task_dir ]           # 文面のファイルが作業ツリーの外にあっても Read できるように（無ければ空文字で渡さない。#391）
     with: { issue: $steps.resolve.issue, task_file: $steps.resolve.task_file, key: $steps.resolve.key }
     output: schemas/ticket-analysis.json
@@ -118,7 +124,7 @@ steps:
     prompt: prompts/ticket-implement.md
     session: new
     add_dirs: [ $steps.resolve.task_dir ]
-    with: { issue: $steps.resolve.issue, task_file: $steps.resolve.task_file, critical_design: $steps.analyze.critical_design }
+    with: { issue: $steps.resolve.issue, task_file: $steps.resolve.task_file, critical_design: $steps.analyze.critical_design, codex_review: "on" }
     output: schemas/implement-result.json
     budget_usd: 15
     timeout: 90m
@@ -154,6 +160,8 @@ steps:
   commit:
     kind: llm
     prompt: prompts/ticket-commit.md                # git で直接コミットする（品質ゲートは後段の quality が機械で回す。#326）
+    model: $models.main
+    effort: $efforts.main
     session: continue:implement
     output: schemas/commit-result.json
     budget_usd: 2
@@ -177,6 +185,8 @@ steps:
   sync-resolve:
     kind: llm
     prompt: prompts/sync-resolve.md
+    model: $models.main
+    effort: $efforts.main
     session: continue:implement
     with: { base: $steps.resolve.base }
     output: schemas/sync-resolve-result.json
@@ -192,6 +202,8 @@ steps:
   e2e:
     kind: llm
     prompt: prompts/ticket-e2e.md                   # /create-e2e まで。/explain-e2e は runtime の外（§3.7）
+    model: $models.main
+    effort: $efforts.main
     add_dirs: [ $steps.resolve.task_dir ]
     with: { task_file: $steps.resolve.task_file }   # 文面のファイルがあれば要件の正本（無ければ空文字。#391）
     session: continue:implement
@@ -299,6 +311,8 @@ steps:
   land-sync-resolve:                                # sync-resolve と同じ指示文。レビュー待ちは長いので session は new
     kind: llm
     prompt: prompts/sync-resolve.md
+    model: $models.main
+    effort: $efforts.main
     session: new
     with: { base: $steps.resolve.base }
     output: schemas/sync-resolve-result.json
@@ -319,6 +333,8 @@ steps:
   respond:
     kind: llm
     prompt: prompts/ticket-respond.md               # /pr-review-respond を呼ぶ
+    model: $models.main
+    effort: $efforts.main
     session: new
     with: { pr: $steps.publish.pr_number, note: $edge.note }   # note は review・review-human の resume の添え書き（#377。無ければ空文字）
     output: schemas/respond-result.json
@@ -347,6 +363,8 @@ steps:
   merge:
     kind: llm
     prompt: prompts/ticket-merge.md                 # /pr-merge（統合ブランチ宛のみ。本番非反映・可逆）
+    model: $models.main
+    effort: $efforts.main
     session: new
     with: { pr: $steps.publish.pr_number, base: $steps.resolve.base }
     output: schemas/merge-result.json

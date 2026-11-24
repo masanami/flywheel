@@ -108,21 +108,3 @@ func TestResolveModels(t *testing.T) {
 		t.Errorf("no models: %v", got)
 	}
 }
-
-// AC-138: 埋め込んだ ticket と reflect の定義には、models も、model を書いたステップも無い。
-func TestBundledFlowsHaveNoModels(t *testing.T) {
-	for _, id := range []string{"ticket", "reflect"} {
-		wf, err := LoadAndValidate(bundledPath(t, id), bundledOpts(t))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(wf.Models) != 0 {
-			t.Errorf("%s defines models: %+v", id, wf.Models)
-		}
-		for _, s := range wf.Steps {
-			if s.Model != "" {
-				t.Errorf("%s step %s writes model %q", id, s.ID, s.Model)
-			}
-		}
-	}
-}

@@ -10,7 +10,7 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 
 ## assets/
 
-`runtime/workflows/` の `ticket.yaml`・`reflect.yaml` と、その 2 つが使う `prompts/`・`schemas/`・`scripts/` のファイルを、中身を変えずに `assets/files/workflows/` へ写して `go:embed` したもの。`conflict-predict-issue.yaml`・`list-tests.yaml` とその 2 つだけが使うファイルは写していない。プラグインのスクリプト・エージェント定義も埋め込まない。文書の `prompts/README.md` も写していない。
+`runtime/workflows/` の `ticket.yaml`・`reflect.yaml` と、その 2 つが使う `prompts/`・`schemas/`・`scripts/` のファイルを `assets/files/workflows/` へ写して `go:embed` したもの。`conflict-predict-issue.yaml`・`list-tests.yaml` とその 2 つだけが使うファイルは写していない。プラグインのスクリプト・エージェント定義も埋め込まない。文書の `prompts/README.md` も写していない。写した後に変えた点は、下の「写した後に振る舞いを変えた点」にある。
 
 - `assets/SHA256SUMS`: 写した元のファイルごとの SHA-256（`assets/files/` からのパス）。試験が埋め込んだ資材と過不足なく突き合わせる。資材のファイルを足す・消す・直すときは、この一覧も更新する。
 - 展開先は `<ワークスペース>/.flywheel/flow/runtime/<版>/`（版は flywheel のバイナリのコミット。版を得られない・未コミットの変更つきのビルドでは、中身のハッシュの 12 文字を版に足す）。置き場は `--workspace` の値だけから決め、環境変数は読まない。中身の印（`.bundle-sha256`）で確かめ、違えば上書きしない。
@@ -64,7 +64,7 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 - 変数の値は定義の値だけで決まり、`flow start` の引数では差し替えない。
 - 解決した値（定義の値）は、実行の始まりの記録に持ち、`resume` の後も同じ値を使う。変数を指したステップは、その値を `--model <値>` に付けて claude を起動する。指さないステップは、いまと同じ（指定しない）。
 - 使ったモデルは、claude の結果の `modelUsage` の名前を、ステップが終わったときに記録する。
-- 写した 2 つのフロー（`ticket`・`reflect`）の定義には、変数もステップからの参照も書かない。
+- 写した 2 つのフロー（`ticket`・`reflect`）の定義は、`models` に `main: opus`、`efforts` に `main: xhigh` を持つ。`ticket` の実装（`implement`）と直し（`fix`）を除く `llm` のステップと、`reflect` のすべての `llm` のステップが `$models.main`・`$efforts.main` を指す（`implement`・`fix` は指さない）。`ticket` の `implement` の `with` に `codex_review: "on"` を足し、`schemas/implement-result.json` に必須の欄 `codex_review`（`off`・`complete`・`partial`・`failed`・`skipped`）を、`prompts/ticket-implement.md` に Codex のレビューを `/self-review` と並べて走らせる手順を足した。`ticket-fix.md`・`ticket-respond.md` は Codex を起動しない。
 
 ### effort の変数
 
