@@ -81,6 +81,9 @@ type Task struct {
 	SourceKey string
 	// ExpandAfter は、このタスクの後に続きのタスクを足すかを決めるタスクか（task.expand_after）。
 	ExpandAfter bool
+	// PlannedFlow は計画が選んだフロー（task.planned_flow）、FlowReason はその理由（task.flow_reason）。"" は NULL。
+	PlannedFlow string
+	FlowReason  string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	// BudgetImplUSD・BudgetReviewUSD・SpentUSD はタスクの実装の枠・レビュー対応の枠（増額を含む実効値）と、そのタスクの実行の費用の合計（USD）。
@@ -227,23 +230,25 @@ func createTasksWith(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cha
 	return out, nil
 }
 
-const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, expand_after, created_at, updated_at FROM task`
+const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, expand_after, planned_flow, flow_reason, created_at, updated_at FROM task`
 
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var (
 		id, challengeID, planVersion int64
 		key, nonGoals, sourceKey     sql.NullString
+		plannedFlow, flowReason      sql.NullString
 		status, createdAt, updatedAt string
 		expandAfter                  int64
 		t                            Task
 	)
 	if err := row.Scan(&id, &challengeID, &planVersion, &key, &t.Title, &t.Body, &t.DoneCriteria, &nonGoals, &t.Repo, &t.Operation,
-		&status, &sourceKey, &expandAfter, &createdAt, &updatedAt); err != nil {
+		&status, &sourceKey, &expandAfter, &plannedFlow, &flowReason, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	t.ID, t.ChallengeID, t.PlanVersion, t.Key, t.Status = formatTaskID(id), formatChallengeID(challengeID), planVersion, key.String, TaskStatus(status)
 	t.SourceKey = sourceKey.String
 	t.ExpandAfter = expandAfter != 0
+	t.PlannedFlow, t.FlowReason = plannedFlow.String, flowReason.String
 	if nonGoals.Valid {
 		if err := json.Unmarshal([]byte(nonGoals.String), &t.NonGoals); err != nil {
 			return nil, fmt.Errorf("task %s non_goals: %w", t.ID, err)
