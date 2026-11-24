@@ -52,13 +52,37 @@ const RunDirEnv = "HARNESS_RUN_DIR"
 // childEnv は子プロセスへ渡す環境。ワークフローに付属するスクリプトがプラグインのスクリプトを呼べるよう、
 // その置き場を HARNESS_SCRIPTS_DIR で渡し、run ディレクトリを HARNESS_RUN_DIR（絶対パス）で渡す。
 func (e *Engine) childEnv() []string {
-	env := append(os.Environ(), "HARNESS_SCRIPTS_DIR="+e.ScriptsDir)
+	env := append(envWithout(os.Environ(), DelegatedRunEnv), "HARNESS_SCRIPTS_DIR="+e.ScriptsDir)
 	if e.Run != nil && e.Run.Dir != "" {
 		dir := e.Run.Dir
 		if abs, err := filepath.Abs(dir); err == nil {
 			dir = abs
 		}
 		env = append(env, RunDirEnv+"="+dir)
+	}
+	return env
+}
+
+// DelegatedRunEnv は claude の子の環境にだけ足す、委譲の子の目印の環境変数の名前（internal/core.DelegatedRunEnvVar と同じ名前。
+// このパッケージは core を import しないので、同じ綴りを持つ。綴りが同じであることは internal/cli の TestFlow_EngineMarkerNameMatchesCore が検査する）。
+const DelegatedRunEnv = "FLYWHEEL_DELEGATED_RUN"
+
+// envWithout は env から name の行を除く。
+func envWithout(env []string, name string) []string {
+	var out []string
+	for _, kv := range env {
+		if k, _, _ := strings.Cut(kv, "="); k != name {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// claudeEnv は claude の子の環境: 親の環境の目印を外し、DelegatedRun があれば足す。
+func (e *Engine) claudeEnv() []string {
+	env := envWithout(os.Environ(), DelegatedRunEnv)
+	if e.DelegatedRun != "" {
+		env = append(env, DelegatedRunEnv+"="+e.DelegatedRun)
 	}
 	return env
 }

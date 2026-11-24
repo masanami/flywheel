@@ -186,7 +186,7 @@ func runCmdEnv(dir, scriptsDir string, argv ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	if scriptsDir != "" {
-		cmd.Env = append(os.Environ(), "HARNESS_SCRIPTS_DIR="+scriptsDir)
+		cmd.Env = append(envWithout(os.Environ(), DelegatedRunEnv), "HARNESS_SCRIPTS_DIR="+scriptsDir)
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb

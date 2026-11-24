@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/masanami/flywheel/internal/flow/engine"
 	"github.com/masanami/flywheel/internal/flow/runstate"
 )
 
@@ -34,11 +35,15 @@ const (
 	ScriptsDirEnv     = "HARNESS_SCRIPTS_DIR"
 	PluginVersionEnv  = "HARNESS_PLUGIN_VERSION"
 	PermissionModeEnv = "HARNESS_CLAUDE_PERMISSION_MODE"
+	// DelegatedRunPassEnv は、--delegated-run で受けた run の ID を切り離した runner へ渡す flywheel の内部の環境変数。
+	// runner の環境に FLYWHEEL_DELEGATED_RUN を置くと runner 自身が起動時に拒否されるので、別の名前で渡し、
+	// engine が claude を起動するときにだけ FLYWHEEL_DELEGATED_RUN へ写す。
+	DelegatedRunPassEnv = "FLYWHEEL_FLOW_DELEGATED_RUN"
 )
 
 // runnerPass は runner が読む環境変数のうち、env.Getenv の値で上書きして渡すもの（空なら足さない）。
 // HARNESS_CLAUDE_BIN・HARNESS_GIT_BIN・HARNESS_GH_BIN は試験の偽の実行ファイル専用。
-var runnerPass = []string{"HOME", "USER", "PATH", "HARNESS_CLAUDE_BIN", "HARNESS_GIT_BIN", "HARNESS_GH_BIN", PermissionModeEnv}
+var runnerPass = []string{"HOME", "USER", "PATH", "HARNESS_CLAUDE_BIN", "HARNESS_GIT_BIN", "HARNESS_GH_BIN", PermissionModeEnv, DelegatedRunPassEnv}
 
 // runnerEnv は runner の環境: このプロセスの環境に、runnerPass を env.Getenv の値で、extra を重ねたもの。
 func runnerEnv(env Env, extra map[string]string) []string {
@@ -56,6 +61,10 @@ func runnerEnv(env Env, extra map[string]string) []string {
 	var out []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
+		// 進める側の環境に委譲の子の目印を置かない（置くと runner が自分の起動で拒否される）。
+		if k == engine.DelegatedRunEnv {
+			continue
+		}
 		if _, ok := over[k]; !ok {
 			out = append(out, kv)
 		}

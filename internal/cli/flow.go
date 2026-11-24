@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
+	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/flow"
 )
 
@@ -55,12 +57,33 @@ func flowEnv(a Args) (flow.Env, *Error) {
 	}, nil
 }
 
+// flowLaunchFlags は start・resume が必須で受ける --permission-mode（default・acceptEdits・auto のみ）と --delegated-run を検査する。
+// 欠落・範囲外は使い方の誤り（実行の記録に触れる前に返す）。
+func flowLaunchFlags(a Args) (mode, delegated string, err *Error) {
+	mode, hasMode := a.Values["permission-mode"]
+	if !hasMode || mode == "" {
+		return "", "", NewError(CodeUsageError, "--permission-mode は必須です（default・acceptEdits・auto のいずれか）")
+	}
+	if !slices.Contains([]string{string(core.PermissionModeDefault), string(core.PermissionModeAcceptEdits), string(core.PermissionModeAuto)}, mode) {
+		return "", "", NewError(CodeUsageError, fmt.Sprintf("--permission-mode は default・acceptEdits・auto のいずれかを指定してください: %q", mode))
+	}
+	delegated = a.Values["delegated-run"]
+	if delegated == "" {
+		return "", "", NewError(CodeUsageError, "--delegated-run は必須です（委譲する run の ID）")
+	}
+	return mode, delegated, nil
+}
+
 func runFlowStart(a Args) (any, error) {
+	mode, delegated, uerr := flowLaunchFlags(a)
+	if uerr != nil {
+		return nil, uerr
+	}
 	env, cerr := flowEnv(a)
 	if cerr != nil {
 		return nil, cerr
 	}
-	return rawExit{flow.Start(env, flow.StartOptions{Name: a.Positional[0], Inputs: a.Multi["input"], PermissionMode: a.Values["permission-mode"]})}, nil
+	return rawExit{flow.Start(env, flow.StartOptions{Name: a.Positional[0], Inputs: a.Multi["input"], PermissionMode: mode, DelegatedRun: delegated})}, nil
 }
 
 func runFlowStatus(a Args) (any, error) {
@@ -75,11 +98,15 @@ func runFlowStatus(a Args) (any, error) {
 var flowResume = flow.Resume
 
 func runFlowResume(a Args) (any, error) {
+	mode, delegated, uerr := flowLaunchFlags(a)
+	if uerr != nil {
+		return nil, uerr
+	}
 	env, cerr := flowEnv(a)
 	if cerr != nil {
 		return nil, cerr
 	}
-	o := flow.ResumeOptions{ID: a.Positional[0], Unit: a.Values["unit"], ApprovedRef: a.Values["approved-ref"], PermissionMode: a.Values["permission-mode"]}
+	o := flow.ResumeOptions{ID: a.Positional[0], Unit: a.Values["unit"], ApprovedRef: a.Values["approved-ref"], PermissionMode: mode, DelegatedRun: delegated}
 	_, o.HasInput = a.Values["input"]
 	o.Input = a.Values["input"]
 	_, o.HasNote = a.Values["note"]
