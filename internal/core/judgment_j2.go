@@ -339,7 +339,7 @@ func checkOperationLaunchable(connector *Connector, op *ConnectorOperation, hasS
 	if connector == nil || op == nil {
 		return fmt.Errorf("%w: unknown connector or operation", ErrValidation)
 	}
-	if connector.Form == ConnectorFormCLI {
+	if connector.UsesContractCommands() {
 		if err := validateInvocationPlaceholders(op.Invocation); err != nil {
 			return fmt.Errorf("%w: operation %q: %s", ErrValidation, op.ID, err.Error())
 		}
@@ -382,6 +382,9 @@ var cliCommandPlaceholders = map[string]map[string]bool{
 // checkCLICommandPlaceholders は cli 形態の commands の引数が、コマンドごとの差し込みの閉集合の中の値だけを要するか検査する
 // （エラーの種類は呼び出し側が付ける。宣言の読み込みと、計画・起動の検査が同じ表を通る）。
 func checkCLICommandPlaceholders(c *Connector) error {
+	if c.Form == ConnectorFormFlow {
+		return nil // form: flow の commands は宣言に無い（起動の時に決まる）
+	}
 	if c.Commands == nil {
 		return fmt.Errorf("connector %q (form cli) has no commands", c.ID)
 	}
@@ -414,7 +417,7 @@ func validateCLICommandPlaceholders(c *Connector) error {
 // cliCommandsNeedSource は cli 形態の接続ツールの commands（start・status・resume・cancel）のどれかが、
 // 取り込み元の差し込みを要するか。4 つとも実際の起動に使うので、取り込み元の無い課題ではどれも要してはならない。
 func cliCommandsNeedSource(c *Connector) bool {
-	if c == nil || c.Form != ConnectorFormCLI || c.Commands == nil {
+	if !c.UsesContractCommands() || c.Commands == nil {
 		return false
 	}
 	for _, args := range [][]string{c.Commands.Start, c.Commands.Status, c.Commands.Resume, c.Commands.Cancel} {
