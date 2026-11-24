@@ -523,7 +523,7 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 		return nil, fmt.Errorf("%w: the challenge has no approved plan with a structured spec", ErrValidation)
 	}
 
-	validated, ok := validateJ2Output([]byte(dc.Plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: dc.Binding != nil})
+	validated, ok := validateJ2Output([]byte(dc.Plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: dc.Binding != nil, SkipFlowReason: true})
 	if !ok || validated.Verdict != J2VerdictPlan {
 		return nil, fmt.Errorf("%w: the approved plan does not match the current declarations", ErrValidation)
 	}

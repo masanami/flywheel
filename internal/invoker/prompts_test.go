@@ -202,7 +202,7 @@ func TestJ5Prompt_TaskVerification(t *testing.T) {
 func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 	limits := map[string]int{
 		"j1.md":   4096,
-		"j2.md":   16983,
+		"j2.md":   17713,
 		"j3.md":   8192,
 		"j5.md":   15048,
 		"j6.md":   6144,
@@ -1047,5 +1047,24 @@ func TestInstructions_J4HasNoEmbeddedInstructions(t *testing.T) {
 	}
 	if _, err := fs.ReadFile(os.DirFS("prompts"), "j4.md"); err == nil {
 		t.Errorf("prompts/j4.md exists; want it removed")
+	}
+}
+
+// j2.md は、簡略なフローを選んでよいタスクの 3 つの種類・簡略にしないもの・迷ったら標準のフローを選ぶことを書く。
+func TestJ2Prompt_SaysWhenToChooseTheLightFlow(t *testing.T) {
+	ins, err := Instructions(core.JudgmentJ2)
+	if err != nil {
+		t.Fatalf("Instructions(J2): %v", err)
+	}
+	for _, want := range []string{
+		"簡略なフロー", "ticket-light",
+		"文書だけの変更", "振る舞いを変えない小さな直し", "小さなコードの直し", // AC-64
+		"ストアの版・承認・権限・クリティカル設計に触れるものは簡略にしない", // AC-65
+		"迷ったら標準のフロー", // AC-66
+		"flow_reason",
+	} {
+		if !strings.Contains(ins, want) {
+			t.Errorf("j2.md does not contain %q", want)
+		}
 	}
 }

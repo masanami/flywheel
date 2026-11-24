@@ -576,7 +576,7 @@ func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration
 	if !planOK || conn == nil {
 		return "", false, nil
 	}
-	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: agent, Conn: conn, HasSource: binding != nil})
+	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: agent, Conn: conn, HasSource: binding != nil, SkipFlowReason: true})
 	if !vok {
 		return "", false, nil
 	}

@@ -7,6 +7,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strconv"
@@ -69,7 +70,11 @@ func multiPlan(integ bool, tasks ...multiTask) string {
 
 func (f *contractFixture) newMulti(t *testing.T, title, priority string, integ bool, tasks ...multiTask) string {
 	t.Helper()
-	id := f.newInProgress(t, title, priority, multiPlan(integ, tasks...))
+	plan := multiPlan(integ, tasks...)
+	if _, c := f.conn.findConnectorRepo("main-repo"); c != nil && c.Form == ConnectorFormFlow {
+		plan = withFlowReasons(t, plan) // flow の形の操作を選んだタスクは flow_reason が要る
+	}
+	id := f.newInProgress(t, title, priority, plan)
 	if cid, _ := parseChallengeID(id); !integ {
 		setUsesIntegrationForTest(t, f.s, cid, false) // 統合先を使わない課題（見直し前の記録）にする
 	}
@@ -890,4 +895,22 @@ func TestMultiTask_ConcurrentLaunchesAreNotRefusedByDoubleCounting(t *testing.T)
 			t.Fatalf("iteration %d: starts = %d, want %d (not_started = %+v)", i, len(f.client.starts), n, res.NotStarted)
 		}
 	}
+}
+
+// withFlowReasons は計画の構造化した出力 plan の全タスクへ flow_reason を足す。
+func withFlowReasons(t *testing.T, plan string) string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(plan), &m); err != nil {
+		t.Fatal(err)
+	}
+	ts, _ := m["tasks"].([]any)
+	for _, x := range ts {
+		x.(map[string]any)["flow_reason"] = "標準の実装で進める"
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

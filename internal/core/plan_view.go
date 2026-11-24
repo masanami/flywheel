@@ -54,6 +54,9 @@ type PlanTaskView struct {
 	// 承認の後は、`flywheel budget --task` の増額を含む実効値）。書かれていなければ nil。
 	BudgetImplUSD   *float64
 	BudgetReviewUSD *float64
+	// PlannedFlow は計画を検査したときの、選んだ操作の flow（spec の planned_flow。flow の形の操作でなければ空）。
+	// 宣言をその後に変えても変わらない。
+	PlannedFlow string
 }
 
 // Identifier はタスクを指す識別子（承認の後はタスクの ID、承認の前は key）。
@@ -214,11 +217,21 @@ func loadPlanView(ctx context.Context, tx *sql.Tx, cid int64, agent *AgentDeclar
 	for _, b := range allBudgets {
 		effective[formatTaskID(b.TaskID)] = b
 	}
-	for _, t := range raw.Tasks {
+	// planned_flow は検査のときに core が spec へ足した欄で、モデルの出力の型（j2RawTask）には無い。別に読む。
+	var planned struct {
+		Tasks []struct {
+			PlannedFlow string `json:"planned_flow"`
+		} `json:"tasks"`
+	}
+	_ = json.Unmarshal([]byte(spec.String), &planned)
+	for i, t := range raw.Tasks {
 		tv := PlanTaskView{Key: t.Key, Title: t.Title, Source: t.Source, DependsOn: append([]string{}, t.DependsOn...)}
 		if t.BudgetImplUSD != nil && t.BudgetReviewUSD != nil {
 			impl, review := *t.BudgetImplUSD, *t.BudgetReviewUSD
 			tv.BudgetImplUSD, tv.BudgetReviewUSD = &impl, &review
+		}
+		if i < len(planned.Tasks) {
+			tv.PlannedFlow = planned.Tasks[i].PlannedFlow
 		}
 		if row, ok := byKey[t.Key]; ok {
 			tv.ID, tv.Status = row.ID, row.Status
