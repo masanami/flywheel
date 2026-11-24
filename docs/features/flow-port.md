@@ -323,7 +323,6 @@ API: 課題の詳細の応答（`GET /api/v1/workspaces/{name}/challenges/{id}`�
   "form": "flow",
   "permission_mode": "auto",
   "challenge_id_prefix": "tom-",
-      "required_facts": {"self_review": ["complete"]},
   "models": { "ticket": { "main": "<モデルの名前>" } },
   "operations": [
     { "id": "impl", "flow": "ticket", "interactive": false, "child_may_decide": true, "artifacts": "pr" }
@@ -423,7 +422,8 @@ Tom の flywheel のリポジトリ（`repos[]` の `flywheel`。いまは `conn
       "challenge_id_prefix": "tom-",
       "operations": [
         {"id": "impl", "flow": "ticket", "interactive": false, "child_may_decide": true, "artifacts": "pr"}
-      ]
+      ],
+      "required_facts": {"self_review": ["complete"]}
     }
     ```
 
