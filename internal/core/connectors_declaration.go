@@ -30,14 +30,15 @@ func connectorsFilePath(base string) string {
 // ConnectorForm は接続ツールの形態の閉集合。
 type ConnectorForm string
 
-// ConnectorForm の3値。
+// ConnectorForm の4値。
 const (
 	ConnectorFormPlugin ConnectorForm = "plugin"
 	ConnectorFormBrief  ConnectorForm = "brief"
 	ConnectorFormCLI    ConnectorForm = "cli"
+	ConnectorFormFlow   ConnectorForm = "flow"
 )
 
-var connectorFormValues = []ConnectorForm{ConnectorFormPlugin, ConnectorFormBrief, ConnectorFormCLI}
+var connectorFormValues = []ConnectorForm{ConnectorFormPlugin, ConnectorFormBrief, ConnectorFormCLI, ConnectorFormFlow}
 
 func isKnownConnectorForm(s string) bool {
 	for _, v := range connectorFormValues {
@@ -145,6 +146,8 @@ type ConnectorOperation struct {
 	Counterpart    Counterpart
 	ChildMayDecide bool
 	Artifacts      string // "" は省略
+	// Flow は form: flow の委譲先の操作が動かすフローの名前（flow の形だけが持つ。"" は省略）。
+	Flow string
 }
 
 // Connector は接続ツールの1要素。
@@ -158,7 +161,24 @@ type Connector struct {
 	// RequiredFacts は form: cli の委譲先の任意のキー。レビュー待ちを受け入れる事実の名前から、
 	// 受け入れる値の配列への対応（nil は「無い」）。form: cli 以外では書けない。
 	RequiredFacts map[string][]string
+	// ChallengeIDPrefix は form: flow の委譲先の任意のキー（"" は省略）。flow の形以外では書けない。
+	ChallengeIDPrefix string
+	// Models は form: flow の委譲先の任意のキー。フローの名前から、変数の名前→モデルの値への対応（nil は「無い」）。
+	// flow の形以外では書けない。変数がフローに定義されているかは読み込みでは確かめない。
+	Models map[string]map[string]string
 }
+
+// UsesContractCommands は c が契約のコマンドを使って起動・確認・再開・取り消しをする委譲先（form: cli か form: flow）か。
+// 「契約の形か」で分かれる箇所はこの関数を通す。form: flow の commands は読み込んだ後も空で、実行ファイルのパスは起動の時に決まる。
+func (c *Connector) UsesContractCommands() bool {
+	return c != nil && (c.Form == ConnectorFormCLI || c.Form == ConnectorFormFlow)
+}
+
+// flowOperationNames は form: flow の操作の flow に書けるフロー名（S1 は ticket だけ）。
+var flowOperationNames = map[string]bool{"ticket": true}
+
+// flowModelsNames は form: flow の models のキーに書けるフロー名。
+var flowModelsNames = map[string]bool{"ticket": true, "reflect": true}
 
 // ConnectorRepoSlots は repos[].slots。Paths は provider が clone のとき、
 // Base・Count は worktree のときだけ使う（合わないキーは未知のキーとして拒否）。
@@ -234,10 +254,11 @@ var humanQuestionKindKeys = map[string]bool{"id": true, "label": true}
 var connectorKeys = map[string]bool{
 	"id": true, "form": true, "permission_mode": true, "operations": true,
 	"commands": true, "contract_version": true, "required_facts": true,
+	"challenge_id_prefix": true, "models": true,
 }
 var operationKeys = map[string]bool{
 	"id": true, "invocation": true, "interactive": true, "counterpart": true,
-	"child_may_decide": true, "artifacts": true,
+	"child_may_decide": true, "artifacts": true, "flow": true,
 }
 var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": true, "cancel": true, "reflect": true}
 var connectorRepoKeys = map[string]bool{
@@ -412,6 +433,24 @@ func parseConnectors(raw json.RawMessage) ([]Connector, bool, error) {
 			}
 			c.RequiredFacts = rf
 		}
+		if v, ok := rc["challenge_id_prefix"]; ok {
+			if isJSONNull(v) {
+				return nil, false, fmt.Errorf("[%d].challenge_id_prefix: must not be null", i)
+			}
+			if err := json.Unmarshal(v, &c.ChallengeIDPrefix); err != nil {
+				return nil, false, fmt.Errorf("[%d].challenge_id_prefix: %w", i, err)
+			}
+		}
+		if v, ok := rc["models"]; ok {
+			if isJSONNull(v) {
+				return nil, false, fmt.Errorf("[%d].models: must not be null", i)
+			}
+			var m map[string]map[string]string
+			if err := json.Unmarshal(v, &m); err != nil {
+				return nil, false, fmt.Errorf("[%d].models: %w", i, err)
+			}
+			c.Models = m
+		}
 		if v, ok := rc["contract_version"]; ok {
 			cv, err := decodeIntLiteral(v)
 			if err != nil {
@@ -491,6 +530,14 @@ func parseOperations(raw json.RawMessage) ([]ConnectorOperation, bool, error) {
 			}
 		} else {
 			defaultsUsed = true
+		}
+		if v, ok := ro["flow"]; ok {
+			if isJSONNull(v) {
+				return nil, false, fmt.Errorf("[%d].flow: must not be null", i)
+			}
+			if err := json.Unmarshal(v, &op.Flow); err != nil {
+				return nil, false, fmt.Errorf("[%d].flow: %w", i, err)
+			}
 		}
 		if v, ok := ro["artifacts"]; ok {
 			if isJSONNull(v) {
@@ -829,7 +876,61 @@ func validateConnector(c Connector, connectorIDs map[string]bool) error {
 			return err
 		}
 	}
+	if c.Form == ConnectorFormFlow {
+		if err := validateFlowConnector(c); err != nil {
+			return err
+		}
+	} else if err := validateNotFlowKeys(c); err != nil {
+		return err
+	}
 	return validateRequiredFacts(c)
+}
+
+// validateFlowConnector は form: flow の委譲先の固有の検査をする。commands・contract_version は書けず（実行ファイルは
+// 起動の時に決まる）、models は ticket・reflect のフロー名ごとに、空でない名前と空でない値だけを持つ。
+// 操作の flow は validateOperation が検査する。permission_mode の 3 値の検査は全ての形で済んでいる。
+func validateFlowConnector(c Connector) error {
+	if c.Commands != nil {
+		return fmt.Errorf("%w: connector %q (form flow) must not have commands", ErrConfigInvalid, c.ID)
+	}
+	if c.ContractVersion != nil {
+		return fmt.Errorf("%w: connector %q (form flow) must not have contract_version", ErrConfigInvalid, c.ID)
+	}
+	flows := make([]string, 0, len(c.Models))
+	for name := range c.Models {
+		flows = append(flows, name)
+	}
+	sort.Strings(flows)
+	for _, flow := range flows {
+		if !flowModelsNames[flow] {
+			return fmt.Errorf("%w: connector %q models has invalid flow name %q (want ticket or reflect)", ErrConfigInvalid, c.ID, flow)
+		}
+		vars := make([]string, 0, len(c.Models[flow]))
+		for name := range c.Models[flow] {
+			vars = append(vars, name)
+		}
+		sort.Strings(vars)
+		for _, name := range vars {
+			if name == "" {
+				return fmt.Errorf("%w: connector %q models[%q] has an empty variable name", ErrConfigInvalid, c.ID, flow)
+			}
+			if c.Models[flow][name] == "" {
+				return fmt.Errorf("%w: connector %q models[%q][%q] must not be empty", ErrConfigInvalid, c.ID, flow, name)
+			}
+		}
+	}
+	return nil
+}
+
+// validateNotFlowKeys は form: flow でない委譲先が、flow の形だけのキー（challenge_id_prefix・models）を書いていないか検査する。
+func validateNotFlowKeys(c Connector) error {
+	if c.ChallengeIDPrefix != "" {
+		return fmt.Errorf("%w: connector %q (form %s) must not have challenge_id_prefix (only form flow)", ErrConfigInvalid, c.ID, c.Form)
+	}
+	if c.Models != nil {
+		return fmt.Errorf("%w: connector %q (form %s) must not have models (only form flow)", ErrConfigInvalid, c.ID, c.Form)
+	}
+	return nil
 }
 
 // validateRequiredFacts は required_facts を検査する。form: cli の委譲先だけが持て、対応は空でなく、
@@ -838,8 +939,8 @@ func validateRequiredFacts(c Connector) error {
 	if c.RequiredFacts == nil {
 		return nil
 	}
-	if c.Form != ConnectorFormCLI {
-		return fmt.Errorf("%w: connector %q (form %s) must not have required_facts (only form cli)", ErrConfigInvalid, c.ID, c.Form)
+	if !c.UsesContractCommands() {
+		return fmt.Errorf("%w: connector %q (form %s) must not have required_facts (only form cli or flow)", ErrConfigInvalid, c.ID, c.Form)
 	}
 	if len(c.RequiredFacts) == 0 {
 		return fmt.Errorf("%w: connector %q required_facts must not be empty", ErrConfigInvalid, c.ID)
@@ -861,9 +962,13 @@ func validateRequiredFacts(c Connector) error {
 	return nil
 }
 
-// hasReflectCommand は c が反映の依頼を始められる（form: cli で commands.reflect を持つ）か。
+// hasReflectCommand は c が反映の依頼を始められる（form: flow か、form: cli で commands.reflect を持つ）か。
+// form: flow の委譲先は、宣言に書かなくても反映の依頼の口を持つ。
 func hasReflectCommand(c *Connector) bool {
-	return c != nil && c.Form == ConnectorFormCLI && c.Commands != nil && c.Commands.Reflect != nil
+	if !c.UsesContractCommands() {
+		return false
+	}
+	return c.Form == ConnectorFormFlow || (c.Commands != nil && c.Commands.Reflect != nil)
 }
 
 func (d *ConnectorsDeclaration) connectorByID(id string) *Connector {
@@ -885,8 +990,8 @@ func (d *ConnectorsDeclaration) validateReflectConnector(r ConnectorRepo) error 
 	switch {
 	case c == nil:
 		return fmt.Errorf("%w: repo %q reflect_connector refers to unknown connector %q", ErrConfigInvalid, r.Name, r.ReflectConnector)
-	case c.Form != ConnectorFormCLI:
-		return fmt.Errorf("%w: repo %q reflect_connector %q must be a form cli connector", ErrConfigInvalid, r.Name, r.ReflectConnector)
+	case !c.UsesContractCommands():
+		return fmt.Errorf("%w: repo %q reflect_connector %q must be a form cli or flow connector", ErrConfigInvalid, r.Name, r.ReflectConnector)
 	case !hasReflectCommand(c):
 		return fmt.Errorf("%w: repo %q reflect_connector %q has no commands.reflect", ErrConfigInvalid, r.Name, r.ReflectConnector)
 	}
@@ -923,6 +1028,17 @@ func validateOperation(c Connector, op ConnectorOperation, opIDs map[string]bool
 	}
 	if err := validateInvocationPlaceholders(op.Invocation); err != nil {
 		return err
+	}
+
+	if c.Form == ConnectorFormFlow {
+		if op.Flow == "" {
+			return fmt.Errorf("%w: connector %q (form flow) operation %q has no flow", ErrConfigInvalid, c.ID, op.ID)
+		}
+		if !flowOperationNames[op.Flow] {
+			return fmt.Errorf("%w: connector %q operation %q has invalid flow %q (want ticket)", ErrConfigInvalid, c.ID, op.ID, op.Flow)
+		}
+	} else if op.Flow != "" {
+		return fmt.Errorf("%w: connector %q (form %s) operation %q must not have flow (only form flow)", ErrConfigInvalid, c.ID, c.Form, op.ID)
 	}
 
 	switch c.Form {
