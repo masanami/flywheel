@@ -153,11 +153,12 @@ func loadFlowDecl(t *testing.T, connectors, repo string) (*ConnectorsDeclaration
 	return d, d.Repos[0]
 }
 
-// flow の形の起動は、引数の組み立てが入るまで nil の commands を読まずに、型付きの誤りで止まる。
-func TestFindCLIConnector_FlowIsNotLaunchableYet(t *testing.T) {
+// flow の形の委譲先は、commands が無くても契約のコマンドを使う委譲先として引ける（コマンドは起動の時に組み立てる）。
+func TestFindCLIConnector_FlowIsLaunchable(t *testing.T) {
 	t.Parallel()
 	d, _ := loadFlowDecl(t, flowConnectorJSON("f", "auto", flowOp, ""), repoJSON("f", ""))
-	if _, err := findCLIConnector(d, "f"); !errors.Is(err, ErrValidation) {
-		t.Fatalf("error = %v, want ErrValidation", err)
+	c, err := findCLIConnector(d, "f")
+	if err != nil || c == nil || c.Commands != nil {
+		t.Fatalf("connector = %+v error = %v, want the flow connector with empty commands", c, err)
 	}
 }

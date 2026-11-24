@@ -271,12 +271,12 @@ func (s *Store) releaseContractCommand(ctx context.Context, opts ReleaseExecOpti
 	if err != nil {
 		return nil, err.Error(), nil
 	}
-	args := connector.Commands.Status
+	cmd := contractCmdStatus
 	switch name {
 	case "resume":
-		args = connector.Commands.Resume
+		cmd = contractCmdResume
 	case "cancel":
-		args = connector.Commands.Cancel
+		cmd = contractCmdCancel
 	}
 	fill.ChallengeID = formatChallengeID(run.row.ChallengeID)
 	fill.Source = run.binding
@@ -285,7 +285,7 @@ func (s *Store) releaseContractCommand(ctx context.Context, opts ReleaseExecOpti
 		fill.Source, fill.EmptySource = nil, true // 反映の依頼の取り込み元の差し込みは空の文字列
 	}
 	fill.RunID = run.row.ExternalRunID
-	command, err := fillContractArgsWith(args, fill)
+	command, err := s.contractCommandArgs(connector, cmd, fill)
 	if err != nil {
 		return nil, err.Error(), nil
 	}

@@ -401,6 +401,8 @@ type contractFill struct {
 	UsesIntegration  bool
 	// ApprovedRef は resume の {approved_ref}。「入れてよい」を返す反映の段だけが通す中身を入れる（それ以外は空）。
 	ApprovedRef string
+	// Flow は form: flow の start の、フローの名前（操作の flow）。cli の形では使わない。
+	Flow string
 	// ArtifactRef は reflect の {artifact_ref}（反映の操作の参照）。反映の依頼を始める反映の段だけが入れる（それ以外は空）。
 	ArtifactRef string
 }
@@ -413,21 +415,24 @@ func fillContractArgs(args []string, challengeID string, sb *sourceBinding, exte
 
 // fillCommandArgs は接続ツール connector の宣言のコマンドの引数を埋める。commands.start に {task_file} を書いた宣言では、
 // 取り込み元の無いタスクの取り込み元の差し込みを空の文字列で埋める。
-func fillCommandArgs(connector *Connector, args []string, challengeID string, sb *sourceBinding, externalRunID string, answer contractAnswer) ([]string, error) {
-	return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, Source: sb, EmptySource: startTakesTaskFile(connector), RunID: externalRunID, Answer: answer})
+func (s *Store) fillCommandArgs(connector *Connector, cmd contractCmd, challengeID string, sb *sourceBinding, externalRunID string, answer contractAnswer) ([]string, error) {
+	return s.contractCommandArgs(connector, cmd, contractFill{ChallengeID: challengeID, Source: sb, EmptySource: startTakesTaskFile(connector), RunID: externalRunID, Answer: answer})
 }
 
 // fillRowCommandArgs は契約の実行 row のコマンドの引数を埋める。反映の依頼（上げる依頼を含む）は取り込み元を持たないので、
 // 取り込み元の差し込みを空の文字列で埋める。それ以外は fillCommandArgs と同じ。
-func fillRowCommandArgs(connector *Connector, row *contractRunRow, args []string, challengeID string, sb *sourceBinding, answer contractAnswer) ([]string, error) {
+func (s *Store) fillRowCommandArgs(connector *Connector, row *contractRunRow, cmd contractCmd, challengeID string, sb *sourceBinding, answer contractAnswer) ([]string, error) {
 	if row.Kind == contractRunKindReflect {
-		return fillContractArgsWith(args, contractFill{ChallengeID: challengeID, EmptySource: true, RunID: row.ExternalRunID, Answer: answer})
+		return s.contractCommandArgs(connector, cmd, contractFill{ChallengeID: challengeID, EmptySource: true, RunID: row.ExternalRunID, Answer: answer})
 	}
-	return fillCommandArgs(connector, args, challengeID, sb, row.ExternalRunID, answer)
+	return s.fillCommandArgs(connector, cmd, challengeID, sb, row.ExternalRunID, answer)
 }
 
 // startTakesTaskFile は、接続ツールの commands.start が {task_file} を書いているか（取り込み元の無いタスクも起動する宣言）。
 func startTakesTaskFile(c *Connector) bool {
+	if c != nil && c.Form == ConnectorFormFlow {
+		return true // flow の形の start は、いつも task_file を入力に渡す
+	}
 	if c == nil || c.Commands == nil {
 		return false
 	}
@@ -525,9 +530,6 @@ func findCLIConnector(d *ConnectorsDeclaration, id string) (*Connector, error) {
 		}
 		if !c.UsesContractCommands() {
 			return nil, fmt.Errorf("%w: connector %q is not a cli connector", ErrValidation, id)
-		}
-		if c.Commands == nil { // form: flow の起動は、commands の引数の組み立てが入るまで未対応
-			return nil, fmt.Errorf("%w: connector %q (form %s) cannot be launched yet", ErrValidation, id, c.Form)
 		}
 		return c, nil
 	}
@@ -694,9 +696,9 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	}
 	startFill := contractFill{
 		ChallengeID: in.ChallengeID, Source: taskSource, EmptySource: startTakesTaskFile(connector),
-		TaskFile: "", TaskID: task.ID, UsesIntegration: usesIntegration,
+		TaskFile: "", TaskID: task.ID, UsesIntegration: usesIntegration, Flow: operationFlow(connector, task.Operation),
 	}
-	if _, err := fillContractArgsWith(connector.Commands.Start, startFill); err != nil {
+	if _, err := s.contractCommandArgs(connector, contractCmdStart, startFill); err != nil {
 		return nil, err
 	}
 	workDir, ok, err := s.contractRepoWorkDir(ctx, in.AgentDecl, in.ConnDecl, cid, in.WorkDir, task.Repo)
@@ -730,7 +732,7 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 		taskFile, writeErr = writeTaskFile(runDir, taskText)
 	}
 	startFill.TaskFile = taskFile
-	command, err := fillContractArgsWith(connector.Commands.Start, startFill)
+	command, err := s.contractCommandArgs(connector, contractCmdStart, startFill)
 	if err != nil {
 		return nil, err
 	}
@@ -920,6 +922,8 @@ func (c contractCall) keepsOpenOn(st ContractState) bool {
 
 // finishContractCall はコマンドを起動し、結果を run と contract_run へ 1 つのトランザクションで記録する。
 func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*ContractRunReport, error) {
+	// form: flow のコマンドの --delegated-run は、run の行を作った後のここで、その run の ID にする。
+	c.Launch.Command = withDelegatedRun(c.Launch.Command, formatRunID(c.RunIDInt))
 	var out ContractLaunchOutput
 	_, invokeErr := s.invokeFnWithHeartbeat(ctx, c.RunIDInt, func(ctx context.Context) (JudgmentLaunchOutput, error) {
 		o, err := c.Invoke(ctx, c.Launch)
@@ -1759,4 +1763,14 @@ func (s *Store) recordContractStartRun(sec runRecordingSection, insert func() (i
 		sec.MarkInsertedLocked()
 	}
 	return id, err
+}
+
+// operationFlow は接続ツールの操作 operation の flow（form: flow の操作が実行するフローの名前）を返す。無ければ空。
+func operationFlow(c *Connector, operation string) string {
+	for i := range c.Operations {
+		if c.Operations[i].ID == operation {
+			return c.Operations[i].Flow
+		}
+	}
+	return ""
 }

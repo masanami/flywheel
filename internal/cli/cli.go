@@ -129,6 +129,10 @@ func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, co
 			return failErr(stderr, jsonMode, mapCoreErr(storeErr))
 		}
 		defer func() { _ = store.Close() }()
+		// form: flow の委譲先のコマンドの先頭に置く、自分の実行ファイルの絶対パス。取れなければ渡さない（flow の形の起動だけが失敗する）。
+		if exe, exeErr := os.Executable(); exeErr == nil {
+			store.SetFlowExecutable(exe)
+		}
 		parsed.Store = store
 		// 記録するコマンドには、印の検査をかける（印の会話が開いている・最後のオーナーの発言・返事が進行中）。
 		// 本人確認を通る操作は、core が操作の中でも同じ検査を行う。

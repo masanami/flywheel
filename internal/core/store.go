@@ -25,6 +25,8 @@ import (
 type Store struct {
 	db        *store.DB
 	workspace string
+	// flowExecutable は form: flow の委譲先のコマンドの先頭に置く、自分の実行ファイルの絶対パス（SetFlowExecutable が渡す）。
+	flowExecutable string
 	// file は OpenWorkspace が開いたときのストアのファイル（IsCurrent が差し替えを
 	// 検出する）。nil なら IsCurrent は常に true。
 	file os.FileInfo

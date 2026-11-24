@@ -118,9 +118,20 @@ func integFlowPRURL(n int) string { return "https://github.com/o/r/pull/" + strc
 // （尽きたら最後のもの。課題の単位の確かめも同じ列から返す）。
 func runIntegrationCycle(t *testing.T, verdicts []string) (f *contractFixture, id string, c *integFlowClient, res *CycleRunResult, j5Calls int) {
 	t.Helper()
+	return runIntegrationCycleWith(t, verdicts, nil)
+}
+
+// runIntegrationCycleWith は runIntegrationCycle を、flow が非 nil なら form: flow の委譲先で行う（契約のコマンドは flow のコマンドの形で届き、
+// flow.inner が cli の形のコマンドへ読み替えて台本の委譲先へ渡す）。
+func runIntegrationCycleWith(t *testing.T, verdicts []string, flow *flowShimClient) (f *contractFixture, id string, c *integFlowClient, res *CycleRunResult, j5Calls int) {
+	t.Helper()
 	f = newMultiFixture(t, 2)
-	conn, err := parseConnectorsDeclaration([]byte(strings.Replace(upConnectorsJSON(),
-		`"--answer", "{answer}"`, `"--choice", "{choice}", "--note", "{note}", "--approved", "{approved_ref}"`, 1)))
+	connectors := strings.Replace(upConnectorsJSON(),
+		`"--answer", "{answer}"`, `"--choice", "{choice}", "--note", "{note}", "--approved", "{approved_ref}"`, 1)
+	if flow != nil {
+		connectors = flowMultiConnectorsJSON()
+	}
+	conn, err := parseConnectorsDeclaration([]byte(connectors))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -157,6 +168,11 @@ func runIntegrationCycle(t *testing.T, verdicts []string) (f *contractFixture, i
 	up.Mergeable = &mergeable
 	checks.prs["o/r#7"] = up
 
+	var contract ContractClient = c
+	if flow != nil {
+		flow.inner = c
+		contract = flow
+	}
 	rf := &roundsFixture{reviewFlowFixture: &reviewFlowFixture{contractFixture: f}, wg: &fakeWorkspaceGit{}, verdicts: verdicts}
 	waits := 0
 	rf.onWait = func(ctx context.Context, _ int) error {
@@ -167,7 +183,7 @@ func runIntegrationCycle(t *testing.T, verdicts []string) (f *contractFixture, i
 	}
 	in := CycleRunInput{
 		Trigger: "manual", AgentDecl: f.agent, ConnDecl: f.conn, Invoker: rf.invoker(t), Upstream: f.upstream, Delegate: f.deleg, Git: f.git,
-		Reconcile: f.branches, Checks: checks, Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{}, Contract: c, Compare: newFakeCompare(),
+		Reconcile: f.branches, Checks: checks, Diffs: &fakeDiffs{}, HeadGit: &noHeadGit{}, Contract: contract, Compare: newFakeCompare(),
 		WorkspaceGit: rf.wg, Wait: rf.wait,
 	}
 	res, err = f.s.RunCycle(context.Background(), in)
