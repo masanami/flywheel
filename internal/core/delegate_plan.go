@@ -80,7 +80,7 @@ func (s *Store) loadPlanCandidates(ctx context.Context, in DelegateInput, cid in
 	if ch == nil || !planOK {
 		return nil, false, "承認済みの計画を引けない", nil
 	}
-	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: binding != nil})
+	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: binding != nil, SkipFlowReason: true})
 	if !vok {
 		return nil, false, "承認済みの計画の構造化した出力が今の宣言と合わない", nil
 	}

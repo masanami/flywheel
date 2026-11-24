@@ -140,7 +140,10 @@ func evaluateTaskAddition(ctx context.Context, tx *sql.Tx, cid, additionID int64
 	if err := st.useAdditionOrigin(ctx, tx, additionID); err != nil {
 		return taskAdditionEval{}, err
 	}
-	v, ok := validateJ2ExpandOutput([]byte(`{"verdict":"add","tasks":`+*add.Spec+`}`), st.j2ExpandValidationContext)
+	// 保存済みの spec の検査し直しでは flow_reason を求めない（検査したときの宣言と、いまの宣言が違いうる）。
+	recheck := st.j2ExpandValidationContext
+	recheck.SkipFlowReason = true
+	v, ok := validateJ2ExpandOutput([]byte(`{"verdict":"add","tasks":`+*add.Spec+`}`), recheck)
 	if !ok {
 		return taskAdditionEval{}, fmt.Errorf("%w: the saved output no longer passes validation; choose skip or replan", ErrValidation)
 	}
