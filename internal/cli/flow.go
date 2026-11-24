@@ -1,0 +1,131 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/masanami/flywheel/internal/flow"
+)
+
+// このファイルは `flywheel flow`（start・status・resume・cancel と、切り離して進める内部の入口 __run-detached）の
+// 配線を持つ。進め方・契約の JSON の組み立てはすべて internal/flow にあり、ここは引数を渡して終了コードを返すだけ。
+// 組み込みのフローは内部向けのコマンドで、flywheel help には「内部向け」の印つきで出す（__run-detached は出さない）。
+
+// rawExit は、コマンドが標準出力・標準エラーへ自分で書き終えたことと、終了コードを表す Run の戻り値。
+// 契約の JSON は 1 つの文書をそのまま標準出力へ出すので、共通の `{ok...}` の包みや `--json` の切り替えを通さない。
+type rawExit struct{ code int }
+
+// flowWorkspace は --workspace の値から直接ワークスペースの絶対パスを決める（無ければ FLYWHEEL_WORKSPACE、
+// それも無ければカレントディレクトリ。親へは遡らない）。
+func flowWorkspace(a Args) (string, error) {
+	ws := a.Values["workspace"]
+	if ws == "" {
+		ws = os.Getenv("FLYWHEEL_WORKSPACE")
+	}
+	if ws == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		ws = wd
+	}
+	return filepath.Abs(ws)
+}
+
+// flowWorkspaceCheck はワークスペースが在る（<ws>/.flywheel が在る）ことを確かめる。無い場所に実行の置き場を作らない。
+func flowWorkspaceCheck(ws string) *Error {
+	if fi, err := os.Stat(filepath.Join(ws, ".flywheel")); err != nil || !fi.IsDir() {
+		return NewError(CodeStoreNotFound, fmt.Sprintf("%s はワークスペースではない（.flywheel が無い）。--workspace で指定するか、flywheel init を先に実行する", ws))
+	}
+	return nil
+}
+
+func flowEnv(a Args) (flow.Env, *Error) {
+	ws, err := flowWorkspace(a)
+	if err != nil {
+		return flow.Env{}, NewError(CodeInternalError, fmt.Sprintf("ワークスペースを決められない: %v", err))
+	}
+	if cerr := flowWorkspaceCheck(ws); cerr != nil {
+		return flow.Env{}, cerr
+	}
+	return flow.Env{
+		Workspace: ws, Stdout: a.Stdout, Stderr: a.Stderr, Getenv: os.Getenv, Getwd: os.Getwd,
+		LookPath: a.LookPath, Version: binaryCommit(a),
+	}, nil
+}
+
+func runFlowStart(a Args) (any, error) {
+	env, cerr := flowEnv(a)
+	if cerr != nil {
+		return nil, cerr
+	}
+	return rawExit{flow.Start(env, flow.StartOptions{Name: a.Positional[0], Inputs: a.Multi["input"], PermissionMode: a.Values["permission-mode"]})}, nil
+}
+
+func runFlowStatus(a Args) (any, error) {
+	env, cerr := flowEnv(a)
+	if cerr != nil {
+		return nil, cerr
+	}
+	return rawExit{flow.Status(env, a.Positional[0])}, nil
+}
+
+// flowResume は flow.Resume（試験が引数の写しを確かめるために差し替える）。
+var flowResume = flow.Resume
+
+func runFlowResume(a Args) (any, error) {
+	env, cerr := flowEnv(a)
+	if cerr != nil {
+		return nil, cerr
+	}
+	o := flow.ResumeOptions{ID: a.Positional[0], Unit: a.Values["unit"], ApprovedRef: a.Values["approved-ref"], PermissionMode: a.Values["permission-mode"]}
+	_, o.HasInput = a.Values["input"]
+	o.Input = a.Values["input"]
+	_, o.HasNote = a.Values["note"]
+	o.Note = a.Values["note"]
+	return rawExit{flowResume(env, o)}, nil
+}
+
+func runFlowCancel(a Args) (any, error) {
+	env, cerr := flowEnv(a)
+	if cerr != nil {
+		return nil, cerr
+	}
+	return rawExit{flow.Cancel(env, a.Positional[0])}, nil
+}
+
+func runFlowRunDetached(a Args) (any, error) {
+	env, cerr := flowEnv(a)
+	if cerr != nil {
+		return nil, cerr
+	}
+	return rawExit{flow.RunDetached(env, a.Positional[0])}, nil
+}
+
+// flowCommands は flow のコマンドの登録。いずれもストアを開かない（置き場は --workspace から直接決める）。
+func flowCommands() []Command {
+	return []Command{
+		{
+			Path: []string{"flow", "start"}, MinPositional: 1, MaxPositional: 1,
+			Flags: []flagDef{
+				{Name: "input", HasValue: true, Repeatable: true},
+				// 権限モードと、委譲の子の目印に使う run の ID。必須化と使い道は後続のタスクが足す（いまは受けるだけ）。
+				{Name: "permission-mode", HasValue: true},
+				{Name: "delegated-run", HasValue: true},
+			},
+			Run: runFlowStart,
+		},
+		{Path: []string{"flow", "status"}, MinPositional: 1, MaxPositional: 1, Run: runFlowStatus},
+		{
+			Path: []string{"flow", "resume"}, MinPositional: 1, MaxPositional: 1,
+			Flags: []flagDef{
+				{Name: "unit", HasValue: true}, {Name: "input", HasValue: true}, {Name: "note", HasValue: true},
+				{Name: "approved-ref", HasValue: true}, {Name: "permission-mode", HasValue: true}, {Name: "delegated-run", HasValue: true},
+			},
+			Run: runFlowResume,
+		},
+		{Path: []string{"flow", "cancel"}, MinPositional: 1, MaxPositional: 1, Run: runFlowCancel},
+		{Path: []string{"flow", flow.DetachedRunnerCmd}, MinPositional: 1, MaxPositional: 1, Run: runFlowRunDetached},
+	}
+}
