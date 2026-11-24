@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,7 +74,7 @@ type kindSpec struct {
 // 種類を足すときは、ここと engine の実行器の両方に足す。
 var kinds = map[string]kindSpec{
 	"command": {keys: []string{"kind", "description", "run", "with", "output", "outcome_field", "exit", "timeout", "on"}},
-	"llm":     {keys: []string{"kind", "description", "prompt", "agent", "model", "session", "add_dirs", "with", "output", "budget_usd", "timeout", "on"}},
+	"llm":     {keys: []string{"kind", "description", "prompt", "agent", "model", "effort", "session", "add_dirs", "with", "output", "budget_usd", "timeout", "on"}},
 	"gate":    {keys: []string{"kind", "description", "type", "decider", "requested_action", "inputs", "observe", "contract_kind", "refresh", "with", "on"}},
 	// select は参照 1 つの enum 値をそのまま outcome にする（副作用なし）。with・output は持たない。
 	"select": {keys: []string{"kind", "description", "value", "on"}},
@@ -263,7 +264,7 @@ func Parse(path string, data []byte) (*Workflow, error) {
 	if !ok {
 		return nil, p.problems
 	}
-	p.allowKeys(top, "workflow", "schema", "id", "description", "inputs", "limits", "models", "facts", "release_on", "overridable", "steps")
+	p.allowKeys(top, "workflow", "schema", "id", "description", "inputs", "limits", "models", "efforts", "facts", "release_on", "overridable", "steps")
 	var stepsNode *yaml.Node
 	for _, pr := range top {
 		switch pr.key {
@@ -279,6 +280,8 @@ func Parse(path string, data []byte) (*Workflow, error) {
 			wf.Limits = p.limits(pr.val)
 		case "models":
 			wf.Models = p.models(pr.val)
+		case "efforts":
+			wf.Efforts = p.efforts(pr.val)
 		case "facts":
 			wf.Facts = p.facts(pr.val)
 		case "release_on":
@@ -448,6 +451,46 @@ func (p *parser) models(n *yaml.Node) []*ModelVar {
 	return out
 }
 
+// efforts は最上位の efforts（変数の名前 → effort）を読む。値は EffortValues の 5 つのどれかの文字列だけ。
+func (p *parser) efforts(n *yaml.Node) []*EffortVar {
+	pairs, ok := p.mapping(n, "efforts")
+	if !ok {
+		return nil
+	}
+	var out []*EffortVar
+	for _, pr := range pairs {
+		what := "efforts." + pr.key
+		if !reIdent.MatchString(pr.key) {
+			p.errf(pr.knode, "effort variable name %q must match %s", pr.key, reIdent.String())
+			continue
+		}
+		v, ok := p.str(pr.val, what)
+		if !ok {
+			continue
+		}
+		if !slices.Contains(EffortValues, v) {
+			p.errf(pr.val, "%s must be one of %s (got %q)", what, strings.Join(EffortValues, ", "), v)
+			continue
+		}
+		out = append(out, &EffortVar{Name: pr.key, Value: v, Line: pr.knode.Line})
+	}
+	return out
+}
+
+// effortRef は llm ステップの effort（$efforts.<名前>）を読み、変数の名前を返す。effort の値の直書きは拒否する。
+func (p *parser) effortRef(n *yaml.Node, what string) (string, bool) {
+	s, ok := p.str(n, what)
+	if !ok {
+		return "", false
+	}
+	name, found := strings.CutPrefix(s, EffortRefPrefix)
+	if !found || !reIdent.MatchString(name) {
+		p.errf(n, "%s must be an effort variable reference ($efforts.<name>); an effort value is not written on a step (got %q)", what, s)
+		return "", false
+	}
+	return name, true
+}
+
 // modelRef は llm ステップの model（$models.<名前>）を読み、変数の名前を返す。モデルの名前の直書きは拒否する。
 func (p *parser) modelRef(n *yaml.Node, what string) (string, bool) {
 	s, ok := p.str(n, what)
@@ -584,11 +627,11 @@ func (p *parser) step(id string, knode, n *yaml.Node) *Step {
 		return nil
 	}
 	for _, f := range fields {
-		if f.key == "model" && s.Kind != "llm" {
-			p.errf(f.knode, "%s: model is only allowed on an llm step (kind is %s)", what, s.Kind)
+		if (f.key == "model" || f.key == "effort") && s.Kind != "llm" {
+			p.errf(f.knode, "%s: %s is only allowed on an llm step (kind is %s)", what, f.key, s.Kind)
 		}
 	}
-	p.allowKeys(withoutKey(fields, "model", s.Kind != "llm"), what, spec.keys...)
+	p.allowKeys(withoutKey(withoutKey(fields, "model", s.Kind != "llm"), "effort", s.Kind != "llm"), what, spec.keys...)
 	var onNode *yaml.Node
 	for _, f := range fields {
 		fw := what + "." + f.key
@@ -621,6 +664,10 @@ func (p *parser) step(id string, knode, n *yaml.Node) *Step {
 		case "model":
 			if s.Kind == "llm" {
 				s.Model, _ = p.modelRef(f.val, fw)
+			}
+		case "effort":
+			if s.Kind == "llm" {
+				s.Effort, _ = p.effortRef(f.val, fw)
 			}
 		case "add_dirs":
 			s.AddDirs = p.valueList(f.val, fw)

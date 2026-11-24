@@ -1,4 +1,4 @@
-# モデルの変数を確かめる: plan（変数を指さない）→ implement（$models.light）→ review（ゲート）→ fix（$models.main。ゲートの後）
+# モデルと effort の変数を確かめる: plan（変数を指さない）→ implement（$models.light）→ review（ゲート）→ fix（$models.main。ゲートの後）
 schema: harness.workflow/v1
 id: llm-models
 inputs:
@@ -8,6 +8,9 @@ limits:
 models:
   main: model-main-default
   light: model-light-default
+efforts:
+  main: high
+  light: low
 steps:
   plan:
     kind: llm
@@ -22,6 +25,7 @@ steps:
     kind: llm
     prompt: prompts/implement.md
     model: $models.light
+    effort: $efforts.light
     with: { issue: $inputs.issue }
     output: schemas/impl.json
     budget_usd: 1
@@ -41,6 +45,7 @@ steps:
     kind: llm
     prompt: prompts/fix.md
     model: $models.main
+    effort: $efforts.main
     session: continue:implement
     with: { summary: $steps.implement.summary }
     output: schemas/impl.json

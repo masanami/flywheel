@@ -86,6 +86,13 @@ func (e *Engine) executeLLM(ctx context.Context, st *runstate.State, u *runstate
 		}
 		started.Model = value
 	}
+	if step.Effort != "" {
+		value, ok := e.Efforts[step.Effort]
+		if !ok || value == "" {
+			return notLaunched("step_error", fmt.Sprintf("effort variable %q has no resolved value in the run record; the step is not launched", step.Effort))
+		}
+		started.Effort = value
+	}
 	if u.Budget == nil {
 		return notLaunched("step_error", "the unit has no budget (limits.budget_usd); an llm step is not launched without one")
 	}
@@ -118,6 +125,9 @@ func (e *Engine) executeLLM(ctx context.Context, st *runstate.State, u *runstate
 	}
 	if started.Model != "" {
 		args = append(args, "--model", started.Model)
+	}
+	if started.Effort != "" {
+		args = append(args, "--effort", started.Effort)
 	}
 	if e.PermissionMode != "" {
 		args = append(args, "--permission-mode", e.PermissionMode)
