@@ -638,3 +638,23 @@ func TestLastSessionIsTheLatestLaunchedExecution(t *testing.T) {
 		t.Fatalf("start failed: %q", got)
 	}
 }
+
+// 畳み込みは、ステップの実行ごとに、step_started の記録の通し番号を持つ。
+func TestFoldKeepsTheSeqOfEachStepStarted(t *testing.T) {
+	evs := []Event{
+		{Seq: 1, TS: "t1", Type: EvRunStarted, RunStarted: &RunStarted{RunID: "r", Units: []string{"main"}, EntryStep: "a"}},
+		{Seq: 2, TS: "t2", Type: EvRoundStarted, RoundStarted: &RoundStarted{Unit: "main", Round: 1, Trigger: Trigger{Kind: "start"}}},
+		{Seq: 3, TS: "t3", Type: EvStepStarted, StepStarted: &StepStarted{Unit: "main", Step: "a", Attempt: 1}},
+		{Seq: 4, TS: "t4", Type: EvStepFinished, StepFinished: &StepFinished{Unit: "main", Step: "a", Attempt: 1, Outcome: "ok"}},
+		{Seq: 5, TS: "t5", Type: EvTransition, Transition: &Transition{Unit: "main", From: "a", Outcome: "ok", Action: "step", To: "a"}},
+		{Seq: 6, TS: "t6", Type: EvStepStarted, StepStarted: &StepStarted{Unit: "main", Step: "a", Attempt: 2}},
+	}
+	st, err := Fold(evs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xs := st.Units[0].Rounds[0].Steps
+	if len(xs) != 2 || xs[0].Seq != 3 || xs[1].Seq != 6 {
+		t.Errorf("seq = %+v", xs)
+	}
+}

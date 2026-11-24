@@ -2,7 +2,7 @@ package flow
 
 // 接続契約（版 1）の JSON。start・status・resume・cancel は、run の状態（畳み込んだ状態）を契約の形へ写して、
 // 標準出力に 1 つ出す。契約の終了コードは「JSON を出力できたか」だけで、待ち・成功・失敗は state に出る。
-// steps・flow の欄は後続のタスクが足す。
+// flow・steps は任意の欄（版は 1 のまま）。
 
 import (
 	"encoding/json"
@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/masanami/flywheel/internal/flow/engine"
 	"github.com/masanami/flywheel/internal/flow/runstate"
 	"github.com/masanami/flywheel/internal/flow/workflow"
 )
@@ -49,7 +50,31 @@ type contractDoc struct {
 	CostUSD         *float64         `json:"cost_usd"`
 	// Facts は任意のキー（名前 → 値。どちらも文字列）。定義が facts を宣言し、値が 1 つでもあるときだけ出す。
 	Facts map[string]string `json:"facts,omitempty"`
+	// Flow は始めたフローの名前、Steps は単位 main のステップの実行（始まった順）。run を読めたときだけ出し、
+	// ステップがまだ無くても Steps は [] を出す。
+	Flow  *string         `json:"flow,omitempty"`
+	Steps *[]contractStep `json:"steps,omitempty"`
 }
+
+// contractStep は steps の要素（ステップ 1 回ぶん。キーは辞書順）。Seq は step_started の記録の通し番号。
+// Model・ModelsUsed の値は後続のタスクが記録する（それまでは null と []）。
+type contractStep struct {
+	Attempt     int      `json:"attempt"`
+	CostUnknown bool     `json:"cost_unknown"`
+	CostUSD     *float64 `json:"cost_usd"`
+	EndedAt     *string  `json:"ended_at"`
+	Kind        string   `json:"kind"`
+	Model       *string  `json:"model"`
+	ModelsUsed  []string `json:"models_used"`
+	Outcome     *string  `json:"outcome"`
+	Seq         int      `json:"seq"`
+	StartedAt   string   `json:"started_at"`
+	State       string   `json:"state"`
+	Step        string   `json:"step"`
+}
+
+// mainUnit は steps の対象の単位の名前。
+const mainUnit = engine.MainUnit
 
 // requestedAction は契約の requested_action。ResolvableBy は resume では解けない端末が要るゲートにだけ terminal を出す
 // （無ければ answer として扱う）。Options はゲートが受け付ける選択肢を定義の順に出す（選択肢の無い待ちでは出さない）。
@@ -91,10 +116,12 @@ type runView struct {
 	// RunnerAlive は running の run についてだけ入る（runner が居なければ、誰も進めていない）。
 	RunnerAlive *bool
 	Waiting     []waitingView
+	// Kinds は定義のステップ id → 種類（定義を読めなければ空。steps の kind は空になる）。
+	Kinds map[string]string
 }
 
 func newView(st *runstate.State) *runView {
-	v := &runView{State: st}
+	v := &runView{State: st, Kinds: stepKinds(st.Workflow.Path, st.Workflow.Hash)}
 	if st.Status == runstate.StatusRunning {
 		alive := runstate.RunnerAlive(st)
 		v.RunnerAlive = &alive
@@ -153,7 +180,55 @@ func contractFromView(v *runView, note string) contractDoc {
 		d.RequestedAction = pickAction(st.RunID, v.Waiting)
 	}
 	d.Summary = summarize(v, unknown, note)
+	flow := st.Workflow.ID
+	d.Flow = &flow
+	steps := contractSteps(v)
+	d.Steps = &steps
 	return d
+}
+
+// stepKinds は定義（記録したパスの YAML。構文だけ読み、開始時のハッシュと照合する）のステップ id → 種類。読めなければ nil。
+func stepKinds(path, hash string) map[string]string {
+	if path == "" {
+		return nil
+	}
+	wf, err := workflow.Load(path)
+	if err != nil || wf.Hash != hash {
+		// 読めない・開始時と違う定義（ハッシュが合わない）からは種類を引かない。
+		return nil
+	}
+	kinds := make(map[string]string, len(wf.Steps))
+	for _, s := range wf.Steps {
+		kinds[s.ID] = s.Kind
+	}
+	return kinds
+}
+
+// contractSteps は単位 main の全ラウンドのステップの実行を、始まった記録の通し番号の順に写す。
+// cost_usd は、そのステップが終わった記録の「実行の累計へ加えた額」（終わっていない・費用を持たない実行は null）。
+func contractSteps(v *runView) []contractStep {
+	out := []contractStep{}
+	u := v.State.Unit(mainUnit)
+	if u == nil {
+		return out
+	}
+	for _, r := range u.Rounds {
+		for _, x := range r.Steps {
+			cs := contractStep{Attempt: x.Attempt, CostUnknown: x.CostUnknown, CostUSD: x.CostUSD, Kind: v.Kinds[x.Step],
+				ModelsUsed: []string{}, Seq: x.Seq, StartedAt: x.StartedAt, State: x.Status, Step: x.Step}
+			if x.FinishedAt != "" {
+				t := x.FinishedAt
+				cs.EndedAt = &t
+			}
+			if x.Outcome != "" {
+				o := x.Outcome
+				cs.Outcome = &o
+			}
+			out = append(out, cs)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out
 }
 
 // summarize は人が読む 1 行の要約。
