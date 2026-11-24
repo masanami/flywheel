@@ -30,6 +30,11 @@ const (
 )
 
 func TestMain(m *testing.M) {
+	if len(os.Args) >= 3 && os.Args[1] == "flow" {
+		// flow のコマンドを、この試験のバイナリ自身を子プロセスとして起動して試す（目印の扱いは子の環境が決める。下の Unsetenv より前に受ける）（flow_test.go）。切り離した runner は
+		// 親が自分の実行ファイルを `flow __run-detached ...` で起動し直すので、その起動もここで受ける。
+		os.Exit(Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	// 委譲の子（flywheel 自身のリポジトリで make check を回す子）の環境に目印があっても、
 	// テストが落ちないよう、最初に外す（confirmChildEnv が CLAUDECODE を外すのと同じ前例）。
 	// 目印の拒否そのものを検査するテストは、t.Setenv で自分の範囲だけに設定する。

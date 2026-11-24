@@ -274,7 +274,7 @@ func TestServerImportDirection(t *testing.T) {
 // TestProductionDependenciesStayWithinAllowedSet は本番の依存のうち、標準ライブラリ・この module 自身以外が
 // modernc.org/sqlite・golang.org/x/term・gopkg.in/yaml.v3・github.com/santhosh-tekuri/jsonschema/v6 と、それらの
 // 推移的依存だけであることを、go list -deps -f の Module から検査する（AC-8）。対象は cmd/flywheel と
-// internal/flow/...（フローのパッケージは cmd/flywheel からまだ import されないので、別に数える）。
+// internal/flow/...（フローのパッケージは internal/cli が import するので cmd/flywheel の依存にも入る。別に数えるのは、フローのパッケージ自身の依存だけを見るため）。
 func TestProductionDependenciesStayWithinAllowedSet(t *testing.T) {
 	t.Parallel()
 	const format = "{{if .Module}}{{.Module.Path}}{{end}}"

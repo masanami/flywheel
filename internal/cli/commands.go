@@ -70,7 +70,7 @@ type Args struct {
 	Store *core.Store
 	// Chat は対話の欄の印（環境変数）。印が無ければ nil。経路と方式は channelFor・verifierFor がここから決める。
 	Chat *chatMark
-	// LookPath は gh・claude の実行ファイルの探し方。nil なら exec.LookPath（PATH 上を探す）。
+	// LookPath は gh・claude・claude-harness-run（flow のプラグインの場所の解決）の実行ファイルの探し方。nil なら exec.LookPath（PATH 上を探す）。
 	// テストが、プロセス全体の PATH を書き換えずに偽の gh・claude の場所をテストごとに渡すために使う。
 	LookPath func(file string) (string, error)
 	// CycleStart は操作が成立した後にサイクルを切り離して始める処理（nil なら始められない扱い〔unavailable〕。
