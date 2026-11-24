@@ -4,7 +4,7 @@
 
 claude-harness が持っている「フロー（YAML）と、それを進める仕組み」を flywheel のリポジトリへ移し、flywheel が自分でフローを進められるようにする。最初の区切り（S1）では、いまの標準の実装フローと、統合ブランチを上げるフローを、中身を変えずに移し、フローの中のステップの進み・費用・使ったモデルを flywheel の記録と画面に出す（実装済み）。
 
-2 つ目の区切り（S2。いまの実装対象）では、分析と懐疑のレビューを省いた簡略なフローを足し、計画を作る判断点がタスクごとにフローを選んで理由を計画に書くようにする。あわせて、Codex のレビューを委譲先の宣言で使えるようにし（セルフレビューと並べて走らせる）、claude の effort を、モデルと同じくフローの変数にする。
+2 つ目の区切り（S2。いまの実装対象）では、分析と懐疑のレビューを省いた簡略なフローを足し、計画を作る判断点がタスクごとにフローを選んで理由を計画に書くようにする。あわせて、モデル・effort・Codex のレビューを使うかを、フローの定義に書いて固定する（宣言では差し替えない。変えたいときはフローを使い分ける）。標準のフローでは、Codex のレビューをセルフレビューと並べて走らせる。
 
 方針と決定の正本は flywheel#981 の本文（「移植の仕様で決めたこと」）。この文書は、その決定を実装できる形に書き下ろしたもの。
 
@@ -26,11 +26,13 @@ flywheel の開発者として、フローの定義と進める仕組みを flyw
 
 オーナーとして、文書だけの直しや小さな直しは、分析と懐疑のレビューを省いた簡略なフローで速く安く済ませ、どのタスクをどのフローで進めるかを、計画の承認のときに理由つきで見て認めたい（S2）。
 
-オーナーとして、Codex のレビューを使うかと、claude の effort を、委譲先の宣言で決めたい（S2）。
+オーナーとして、フローごとに、モデル・effort・Codex のレビューを使うかを決めておき、フローの単位で時間・費用・結果を比べて、フローを足したり直したりしたい（S2）。
 
 ## 機能要件
 
 実装対象の S2 の要件。S1 の要件は、下の「機能要件（S1・実装済み）」に残す。
+
+方針: モデル・effort・Codex のレビューを使うかは、フローの定義に最初から書いておき、委譲先の宣言では差し替えない。状況に応じて変えたいときは、値を差し替えずにフローを使い分ける（フローの単位で評価できるようにするため）【決定 2026-11-24 オーナー】。最初は標準（`ticket`）と簡略（`ticket-light`）の 2 つを用意し、必要に応じてフローを足す・直す。
 
 語: 「簡略なフロー」は、この区切りで足す簡略な実装フロー（識別子 `ticket-light`）のこと。「軽いセルフレビュー」は、プラグインのレビュアー 2 体を並べて呼び、直した箇所を 1 回だけ確かめ直す、懐疑者を呼ばないセルフレビューのこと（下の「簡略なフロー」で定める）。
 
@@ -56,7 +58,7 @@ flywheel の開発者として、フローの定義と進める仕組みを flyw
 - [ ] `flow` の形の委譲先の操作を選んだタスクでは、`flow_reason` は必須（無い・`null`・空白だけは不正。2000 文字以内）
 - [ ] `flow` の形でない委譲先の操作を選んだタスクでは、`flow_reason` を書かない（無い・`null`・空の文字列のどれか。それ以外は不正）
 - [ ] 計画を作る判断点の指示文（`internal/invoker/prompts/j2.md`）に、簡略なフローを選んでよいタスクの基準（文書だけの変更・振る舞いを変えない小さな直し〔文言・設定の値・試験だけの直しなど〕・小さなコードの直し〔1〜2 ファイルの不具合の直しなど〕）と、除くもの（ストアの版・承認・権限・クリティカル設計に触れるもの）と、迷ったら標準を選ぶことを書く
-- [ ] 計画を作る判断点は、モデル・effort・切り替え（Codex を使うか）を変えられない（出力の型に欄を足さない）
+- [ ] 計画を作る判断点は、モデル・effort・Codex を使うかを変えられない（出力の型に欄を足さない。選べるのはフローだけ）
 - [ ] 計画の本文のタスクの項に、`flow` の形の委譲先のタスクでは、フローの名前と理由の行を出す
 - [ ] 計画の出力を検査するとき、`flow` の形の委譲先の操作を選んだタスクには、そのときの宣言の操作の `flow` の値（計画が選んだフロー）を、計画の版の中身（`task_plan.spec` の `tasks[]` の要素）に、core が欄 `planned_flow` として足す（`flow` の形でない委譲先のタスクでは欄ごと無し）。続きのタスクを足す経路も同じ。モデルの出力の型には足さない（`additionalProperties: false` のまま。モデルは `planned_flow` を書けない）。`flow_reason` は、モデルが書いたままを `spec` に残し、タスクの記録へ写すときに前後の空白を除く。「構造化出力と `spec` が等しい」ことを確かめている既存の試験は、この欄の分だけ直す
 - [ ] 委譲を始めるとき、core は、タスクの記録の、計画が選んだフローを始める（計画の承認の後に宣言の操作の `flow` を変えても、承認したフローで走る）。計画が選んだフローが無いタスク（S2 より前に承認したもの）は、そのときの宣言の操作の `flow` を始める
@@ -66,26 +68,26 @@ flywheel の開発者として、フローの定義と進める仕組みを flyw
 
 ### Codex のレビュー
 
-- [ ] `ticket` と `ticket-light` の定義に、切り替え `codex_review`（既定は偽）を定義する
-- [ ] 切り替え `codex_review` が真の実行では、実装のステップの claude が、セルフレビュー（`ticket` では `/self-review`、`ticket-light` では軽いセルフレビュー）を始める前に、Codex のレビュー（`claude-harness-run codex-review-runner`）を裏で起動し、セルフレビューと並べて走らせる
+- [ ] 標準のフロー（`ticket`）の実装のステップは、Codex のレビュー（`claude-harness-run codex-review-runner`）を使う。定義の実装のステップの `with` に、`codex_review: "on"`（文字列の値）を書く
+- [ ] 簡略なフロー（`ticket-light`）は、Codex のレビューを使わない（実装のステップの `with` に `codex_review` を書かない。指示文にも Codex の手順を書かない）
+- [ ] 添付データの `codex_review` が `on` の実装のステップでは、claude が、`/self-review` を始める前に、Codex のレビューを裏で起動し、`/self-review` と並べて走らせる
 - [ ] 実装のステップは、Codex のレビューが終わるまで値を返さない
 - [ ] Codex の指摘のうち、重さが中以上で、Codex の中の確かめで棄却されていない（`refuted` でない）ものを、セルフレビューの指摘と同じに直す。直した後は `/quality-check` を通す
 - [ ] 直さなかった Codex の指摘は、残指摘（`residual_findings`）に、`claim` の先頭に `[Codex] ` を付けて載せる
 - [ ] Codex のレビューが完了しなかった（`result` が `partial`・`failed`、Codex が入っていない、ほかの起動の失敗）ときは、実装を止めずに進め、未検証の事項（`unverified`）に、完了しなかったことと理由（`errors[].message` があればそれ）を書く
-- [ ] 実装の出力に、欄 `codex_review`（`off`・`complete`・`partial`・`failed`・`skipped`）を足す。切り替えが偽なら `off`。Codex を起動できなかったときは `failed`。戻された 2 回目は `skipped`
+- [ ] 実装の出力に、欄 `codex_review`（`off`・`complete`・`partial`・`failed`・`skipped`）を足す。添付データの `codex_review` が `on` でない（簡略なフロー）なら `off`。Codex を起動できなかったときは `failed`。戻された 2 回目は `skipped`
 - [ ] 直しのステップとレビュー対応のステップでは、Codex のレビューを走らせない
 - [ ] セルフレビューを実行しなかったために実装のステップへ戻された 2 回目（添付データの `harness.attempt` が 2 以上で、作業ツリーにこの要件の変更が既にある。いまの `ticket-implement.md` の「戻されたとき」と同じ条件）では、Codex のレビューを走らせず、`codex_review` を `skipped` にする（1 回目の結果は、実行の記録の 1 回目のステップの出力に残る）。作業ツリーに変更が無い 2 回目（落ちた実行を `rerun` でやり直した場合）は、1 回目と同じに扱う（Codex を走らせる）
 - [ ] Codex のレビューが作った一時ファイルは、結果の成否に関わらず、`claude-harness-run cleanup-review-diff` で消す
 
-### effort と切り替え（フローの変数）
+### モデルと effort（フローの定義に書く）
 
-- [ ] フローの YAML の最上位に、`efforts`（変数の名前 → 既定の effort）を定義できる。値は claude の `--effort` が受ける 5 つ（`low`・`medium`・`high`・`xhigh`・`max`）だけ
-- [ ] 種類が `llm` のステップに、任意のキー `effort` を書け、値は変数の参照（`$efforts.<名前>`）だけ。指したステップは、解決した値を `--effort <値>` に付けて claude を起動する。指さないステップは、いまと同じ（指定しない）
-- [ ] フローの YAML の最上位に、`switches`（変数の名前 → 既定の真偽）を定義できる。`$switches.<名前>` は、種類が `llm` のステップの `with` の値としてだけ書け（ほかの位置は定義の検査の誤り）、解決した値は、添付データへ JSON の真偽値（`true`・`false`）で入る
-- [ ] effort と切り替えの値は、オーナーが、委譲先の宣言（`efforts`・`switches`）で差し替えられる。形と扱いは、S1 のモデル（`models`）と同じ（フローの名前 → 変数 → 値）
-- [ ] ステップの記録に、書いた effort（解決した値。指さないステップは無し）を持つ
-- [ ] `ticket` と `reflect` の定義は、`efforts` を定義しない（effort はいまと同じに指定しない）。`reflect` は `switches` も定義しない
-- [ ] `ticket-light` の定義は、`efforts` に `main`（既定 `medium`）と `quick`（既定 `low`）を定義し、実装・直しのステップが `main` を、コミット・コンフリクトの解消のステップが `quick` を指す（値は試しで測って見直す）
+- [ ] フローの YAML の最上位に、`efforts`（変数の名前 → effort）を定義できる。値は claude の `--effort` が受ける 5 つ（`low`・`medium`・`high`・`xhigh`・`max`）だけ
+- [ ] 種類が `llm` のステップに、任意のキー `effort` を書け、値は変数の参照（`$efforts.<名前>`）だけ。指したステップは、変数の値を `--effort <値>` に付けて claude を起動する。指さないステップは、いまと同じ（指定しない）
+- [ ] モデル（S1 の `models`）と effort の値は、フローの定義の値だけで決まる。委譲先の宣言で差し替える口を持たない
+- [ ] S1 で入れた、宣言の `models` と、`flywheel flow start` の `--model` と、core がそれを組み立てる処理を外す（宣言に `models` を書いたら設定の誤り。`--model` は使い方の誤り）
+- [ ] ステップの記録に、書いた effort（変数の値。指さないステップは無し）を持つ
+- [ ] 3 つのフローの定義に、下の「フローごとのモデルと effort」の表の値を書く（`ticket` と `reflect` は、いまの実際の動き〔実行する人の既定のモデル `opus` と effort `xhigh`〕を、定義に書き写す。値は試しで測って見直す）
 
 ### 画面
 
@@ -96,13 +98,15 @@ flywheel の開発者として、フローの定義と進める仕組みを flyw
 
 ### 文書と切り替え
 
-- [ ] 設計書 §10 と、契約の仕様（`docs/features/m3-invoker-delegation.md`）に、簡略なフロー・宣言の `efforts`・`switches`・操作の `flow` の値・契約のステップの欄 `effort` を書く
-- [ ] 用語集に、簡略なフロー・軽いセルフレビュー・effort・切り替え（フローの変数）を書く
-- [ ] リポジトリの決まり（`CLAUDE.md`）のパッケージの表の、`internal/flow`（`--effort`・`--switch` の解釈）と `internal/flow/workflow`（`efforts`・`switches` の検査）の行を直す
-- [ ] 写した先のディレクトリの文書（`internal/flow/README.md`）に、写した後に変えた点として、`ticket` の実装の指示文と出力の型の変更（Codex のレビュー）と、`efforts`・`switches` を書き足す
+- [ ] 設計書 §10 と、契約の仕様（`docs/features/m3-invoker-delegation.md`）に、簡略なフロー・操作の `flow` の値・宣言の `models` を外したこと・契約のステップの欄 `effort` を書く
+- [ ] 用語集に、簡略なフロー・軽いセルフレビュー・effort を書く
+- [ ] リポジトリの決まり（`CLAUDE.md`）のパッケージの表の、`internal/flow`（`--model` の解釈を外す）と `internal/flow/workflow`（`efforts` の検査）の行を直す
+- [ ] 写した先のディレクトリの文書（`internal/flow/README.md`）に、写した後に変えた点として、`ticket` の定義・実装の指示文・出力の型の変更（Codex のレビュー・モデルと effort の値）と、`efforts` を書き足す
 - [ ] Tom の flywheel のリポジトリの宣言に、簡略なフローの操作を足す手順を、この文書に書き足す
 
 ## 機能要件（S1・実装済み）
+
+> S2 で改めた点: 下の「モデル」の、宣言でモデルを差し替える口（宣言の `models`・`flywheel flow start --model`・core の組み立て）は、S2 で外す（上の「モデルと effort（フローの定義に書く）」）。
 
 語: フローの中の 1 つの処理を「ステップ」と呼ぶ（YAML の `steps` の 1 件）。「組み込みのフロー」は、flywheel が自分で進めるフローのこと。
 
@@ -168,7 +172,7 @@ flywheel の開発者として、フローの定義と進める仕組みを flyw
 - 動作環境: macOS と Linux。写した試験も、両方で通す（OS の差で飛ばす試験は、その事実と理由を PR の説明に書く）
 - 検査の時間: 写した試験を足した後も、`go test -race -timeout 20m ./...` の制限の中に収める。収まらないときは、制限を上げずに、仕様への指摘として止まる
 - 安全: 権限モードの閉集合（`default`・`acceptEdits`・`auto`）は広げない。`bypassPermissions` は、組み込みのフローでも渡せない
-- 費用（S2）: Codex のレビューの費用は Claude とは別の枠で、flywheel のステップの費用・課題の費用・サイクルの予算に数えない（数える口が無い）。Codex を使うかは、オーナーが宣言で決める
+- 費用（S2）: Codex のレビューの費用は Claude とは別の枠で、flywheel のステップの費用・課題の費用・サイクルの予算に数えない（数える口が無い）。Codex を使うかは、フローの定義で決まる（標準のフローで使う）
 - 簡略なフローの効き目（S2）: どれだけ速く・安くなるかは、実物で測って親の Issue に記録する（受入基準の「実物で確かめること」）。数値の目標は置かない
 
 ## 技術的な制約・方針
@@ -182,7 +186,7 @@ flywheel の開発者として、フローの定義と進める仕組みを flyw
   - core は、委譲先を「契約の状態の形」（`ContractStatus`）で読んでいる。組み込みのフローも同じ形で返すので、契約の状態を読む core の処理（完了の検証・反映・スーパーバイザー・画面）は変えない
   - 写したコードは、flywheel の lint（`golangci-lint`）と整形の決まりに合わせてよい。振る舞いを変える直しは、この仕様に書いたもの（置き場・引数の受け方・上書きを読まないこと・プラグインの場所の解決と版の確かめ・モデル・ステップの一覧の出力〔記録の畳み込みに、ステップの実行ごとの通し番号・書いたモデル・使ったモデルを持たせることを含む〕・子の目印）だけにする
   - 写した仕組みが読む環境変数の名前（`HARNESS_*`）は、S1 では変えない（つなぎのスクリプトとプラグインのスクリプトが読むため）。誰が設定するかは、下の「環境変数」の表のとおり
-- S2 の変更対象: `internal/flow/` の配下（`ticket-light` の定義と資材・`ticket` の実装の指示文と出力の型・`efforts`・`switches` の読み取りと検査・`--effort`・`--switch`・記録の `effort`）・`internal/core`（宣言の `operations[].flow`・`efforts`・`switches`・始めるコマンドの引数・計画の出力の `flow_reason` と検査・計画の本文と入力・タスクの記録・ステップの `effort`）・`internal/core/internal/store`（版 40）・`internal/invoker`（契約の `effort` の読み取り・`prompts/j2.md`）・`internal/view`・`web`（計画の承認・タスクの詳細・フローの名前）・文書（設計書 §10・契約の仕様・用語集・`internal/flow/README.md`・`CLAUDE.md` のパッケージの表）
+- S2 の変更対象: `internal/flow/` の配下（`ticket-light` の定義と資材・`ticket` と `reflect` の定義のモデルと effort・`ticket` の実装の指示文と出力の型・`efforts` の読み取りと検査・`--effort` の付与・`--model` を外す・記録の `effort`）・`internal/core`（宣言の `operations[].flow`・`models` を外す・始めるコマンドの引数から `--model` を外す・計画の出力の `flow_reason` と検査・計画の本文と入力・タスクの記録・ステップの `effort`）・`internal/core/internal/store`（版 40）・`internal/invoker`（契約の `effort` の読み取り・`prompts/j2.md`）・`internal/view`・`web`（計画の承認・タスクの詳細・フローの名前）・文書（設計書 §10・契約の仕様・用語集・`internal/flow/README.md`・`CLAUDE.md` のパッケージの表）
 - 試験の環境: `flywheel flow` と、写した仕組みの受入基準は、写した試験と同じ仕組み（偽の `claude`・`git`・`gh` を `HARNESS_CLAUDE_BIN`・`HARNESS_GIT_BIN`・`HARNESS_GH_BIN` で差し替える。`claude-harness-run` は、偽の実行ファイルを `PATH` の先頭に置く）で、`make check` の中で確かめる。実物の GitHub とプラグインを使う確かめは、「実物で確かめること」の節だけ
 
 ## 画面・API設計
@@ -316,22 +320,22 @@ S2 の分。S1 の分は、下の「クリティカル設計決定（S1・実装
 - **代替案**: claude-harness の `/self-review` に「懐疑なし」の引数を足す（手順の正本は 1 か所のままだが、claude-harness の直しと公開版の更新を先に済ませる必要がある）／懐疑も残す（簡略にする効き目が分析の分だけになる）
 - **影響範囲**: `internal/flow/assets` の資材（新しい指示文・つなぎのスクリプト・出力の型・`ticket-light.yaml`）と、ハッシュの一覧。セルフレビューの手順が 2 か所（プラグインの `/self-review` と、簡略なフローの指示文）になる
 
+### フローの定義が、モデル・effort・Codex を使うかを持つ
+
+- **採用案**: モデル・effort・Codex のレビューを使うかは、フローの定義（埋め込んだ YAML と指示文）に書き、委譲先の宣言では差し替えない。S1 で入れた宣言の `models` と `flow start --model` は外す。フローの中の変数（`models`・`efforts`。同じ値を複数のステップが指すためのもの）は残す。状況に応じて変えたいときは、フローを足して使い分ける【決定 2026-11-24 オーナー: フローの定義に最初から設定しておき、フローを状況に応じて使い分ける。フローの評価をうまく行うため。最初は 2 パターンを用意し、必要に応じて追加・編集する】
+- **理由**: 差し替えの口があると、同じフローの名前でも、中身のモデル・effort・確かめの手順が違う実行が混ざり、フローの単位で時間・費用・結果を比べられない。値をフローの定義に閉じれば、フローの名前（とバイナリの版）だけで、何で走ったかが決まる
+- **代替案**: 宣言で差し替える（初めの案。オーナーの言い直しで採らない）／モデルの差し替えだけ残す（モデルと effort で扱いが分かれる。オーナーが外すと決めた）
+- **影響範囲**: `internal/flow`（`--model` を外す）・`internal/flow/workflow`（`efforts` の読み取りと検査）・`internal/flow/engine`（`--effort` の付与）・`internal/flow/runstate`（記録）・core の宣言の検査（`models` を誤りにする）と始めるコマンドの組み立て（`--model` を外す）・埋め込んだ 3 つのフローの定義（値を書く）。Tom の宣言は `models` を使っていないので、影響は無い
+- **実装の最初に確かめること**: (1) `claude --effort <値>` が受け付けられ、実行に効くこと（入っている claude の版で）。受け付けられなければ、実装を止めて仕様への指摘にする (2) エージェントの定義（`--agent`）がモデルを決めているステップで、`--model` を渡すとどちらが効くか。標準のフローの実装と直しのステップ（`feature-implementer`）は、S2 では `model` を書かず、エージェントの定義のモデルで走らせる（いまと同じ）。どちらが効くかは「実物で確かめること」で記録する
+- **定義の検査で誤りにするもの**: `effort` に値を直に書いた・定義していない変数を指した・`llm` 以外の種類のステップに `effort` を書いた・`efforts` の値が 5 つの値の外か文字列でない
+
 ### 外部システム連携: Codex のレビューを、実装のステップの中で並べる
 
-- **採用案**: 切り替え `codex_review` が真の実行では、実装のステップの claude が、Codex のレビュー（プラグインの `claude-harness-run codex-review-runner`。中でコードと設計の 2 つの観点を読み、指摘の確かめまで済ませる）を、Bash の裏の実行で起動し、セルフレビューと並べて走らせる。差分は `claude-harness-run collect-review-diff`、要件の文脈はタスクの文面か Issue から作った一時ファイルで渡す（プラグインの `/codex-review` の手順 1〜4 と同じ）。フローを進める仕組みには、並列のステップを足さない【決定 2026-11-24 オーナー: Codex は宣言で使うかを決め、セルフレビューと並べて走らせる。作りは実装のステップの中で並べる】
-- **理由**: フローを進める仕組みは、ステップを 1 つずつ順に進める作りで、並列のステップを足すと進める仕組みの直しが大きい。実装のステップの中なら、指示文と出力の型の変更だけで済み、Codex の指摘も同じステップの中で直せる
-- **代替案**: フローに並列のステップを足す（Codex が独立したステップになり、画面でも分けて見えるが、別の区切りの大きさ）／実装の後に Codex のステップを続けて置く（素直だが、Codex の分だけ時間が延びる）
-- **影響範囲**: `ticket` の定義（`workflows/ticket.yaml`。最上位の `switches: { codex_review: false }` と、実装のステップの `with` の `codex_review: $switches.codex_review`）・実装の指示文（`prompts/ticket-implement.md`）・出力の型（`schemas/implement-result.json`）を変える（S1 の「中身を変えない」は S1 の範囲の決まりで、S2 で変える。写した元と変えた点の文書〔`internal/flow/README.md`〕と、ハッシュの一覧〔`internal/flow/assets/SHA256SUMS`〕を直す）。Codex の費用は Claude とは別の枠で、ステップの費用にも、課題の費用にも数えない。Codex が使えないときは止めない（上の機能要件）。Codex のレビューの 3 つのスクリプト（`codex-review-runner`・`collect-review-diff`・`cleanup-review-diff`）は、手元の版 5.0.0〜5.3.0 のプラグインには入っている。対応する範囲の下限（4.9.0）に入っているかは確かめていない。入っていない版では `failed` として進む（止めない）ので、版の範囲は変えない
-- **既知の点**: Codex のレビューの中にも、重く確信のない指摘を確かめる役がある（Codex の中の手順）。簡略なフローで懐疑を省く決定は、Claude の側の懐疑者についてのもので、Codex の中の手順は変えない
-
-### フローの変数: effort と切り替えを、モデルと同じ形で足す
-
-- **採用案**: S1 のモデルの変数（`models`・`$models.<名前>`・宣言の `models`・`flow start --model <変数>=<値>`）と同じ形で、effort（`efforts`・`$efforts.<名前>`・宣言の `efforts`・`--effort <変数>=<値>`）と、切り替え（`switches`・`$switches.<名前>`・宣言の `switches`・`--switch <変数>=<true か false>`）を足す。解決した値は、モデルと同じに、実行の始まりの記録に持ち、続けるコマンドの後も同じ値を使う（続けるコマンドは `--effort`・`--switch` を受けない）【決定 2026-11-24 オーナー: effort は、モデルと同じくフローの YAML の変数にし、オーナーが宣言で差し替える。計画の判断点は変えない】
-- **理由**: 差し替えの口（宣言）・始めるときの検査・記録・続けるときの扱いが、モデルで揃っている。同じ形にすれば、宣言を書く人が覚えることが増えない
-- **代替案**: Codex を使うかを、委譲先の宣言の 1 つの欄（フローに依らない）にする（フローごとに変えられず、フローの定義の側から使うかを読めない）
-- **影響範囲**: `internal/flow/workflow`（定義の読み取りと検査。参照の種類に `$switches` を足し、型は真偽）・`internal/flow/engine`（`--effort` の付与と、`with` の `$switches` の参照を、実行の始まりの記録の値で解決する）・`internal/flow`（`flow start` の引数）・`internal/flow/runstate`（記録）・契約のステップの欄・core の宣言と引数の組み立て
-- **実装の最初に確かめること**: `claude --effort <値>` が受け付けられ、実行に効くこと（入っている claude の版で）。受け付けられなければ、実装を止めて仕様への指摘にする。エージェントやスキルが effort を決めている場合にどちらが優先されるかは、「実物で確かめること」で記録する
-- **定義の検査で誤りにするもの**: `effort` に値を直に書いた・定義していない変数を指した・`llm` 以外の種類のステップに `effort` を書いた・`efforts` の値が 5 つの値の外か文字列でない・`switches` の値が真偽でない・`with` の `$switches.<名前>` が定義していない変数を指した・`$switches.<名前>` を `llm` のステップの `with` の外（`command` の `with`・遷移の `with`・`select` の `value`・`add_dirs`）に書いた
+- **採用案**: 標準のフローの実装のステップの claude が、Codex のレビュー（プラグインの `claude-harness-run codex-review-runner`。中でコードと設計の 2 つの観点を読み、指摘の確かめまで済ませる）を、Bash の裏の実行で起動し、`/self-review` と並べて走らせる。使うかは、定義の実装のステップの `with` の `codex_review: "on"`（文字列の値。いまの定義の文法で書ける）で決める。差分は `claude-harness-run collect-review-diff`、要件の文脈はタスクの文面か Issue から作った一時ファイルで渡す（プラグインの `/codex-review` の手順 1〜4 と同じ）。フローを進める仕組みには、並列のステップを足さない【決定 2026-11-24 オーナー: Codex はフローの定義で決め、標準のフローで使い、簡略なフローでは使わない。セルフレビューと並べて走らせ、作りは実装のステップの中で並べる】
+- **理由**: フローを進める仕組みは、ステップを 1 つずつ順に進める作りで、並列のステップを足すと進める仕組みの直しが大きい。実装のステップの中なら、指示文と出力の型の変更だけで済み、Codex の指摘も同じステップの中で直せる。`with` の文字列の値で書けば、定義の文法に新しい参照の種類を足さずに済む
+- **代替案**: フローに並列のステップを足す（Codex が独立したステップになり、画面でも分けて見えるが、別の区切りの大きさ）／実装の後に Codex のステップを続けて置く（素直だが、Codex の分だけ時間が延びる）／宣言の切り替えで使うかを決める（初めの案。同じフローで中身が変わるので採らない）
+- **影響範囲**: `ticket` の定義（`workflows/ticket.yaml`。実装のステップの `with` の `codex_review: "on"` と、モデルと effort の値）・実装の指示文（`prompts/ticket-implement.md`）・出力の型（`schemas/implement-result.json`）を変える（S1 の「中身を変えない」は S1 の範囲の決まりで、S2 で変える。写した元と変えた点の文書〔`internal/flow/README.md`〕と、ハッシュの一覧〔`internal/flow/assets/SHA256SUMS`〕を直す）。Codex の費用は Claude とは別の枠で、ステップの費用にも、課題の費用にも数えない。Codex が使えないときは止めない（上の機能要件）。Codex のレビューの 3 つのスクリプト（`codex-review-runner`・`collect-review-diff`・`cleanup-review-diff`）は、手元の版 5.0.0〜5.3.0 のプラグインには入っている。対応する範囲の下限（4.9.0）に入っているかは確かめていない。入っていない版では `failed` として進む（止めない）ので、版の範囲は変えない
+- **既知の点**: Codex のレビューの中にも、重く確信のない指摘を確かめる役がある（Codex の中の手順）。簡略なフローで懐疑を省く決定は、Claude の側の懐疑者についてのもので、Codex の中の手順は変えない（簡略なフローは Codex を使わない）
 
 ### 契約: ステップの欄に `effort` を足す（版は 1 のまま）
 
@@ -473,23 +477,33 @@ S2 の分。S1 の分は、下の「機能全体の設計（S1・実装済み）
 | `analyze` | 分析（claude） | 無い |
 | `branch` | 無い | 種類 `command`。つなぎのスクリプト `ticket-light-branch` が、`resolve` の `key` から `feature/<鍵>-light` を返す（出力の型 `schemas/ticket-light-branch.json`。結果は `ok` だけで、`ok` → `workspace`） |
 | `workspace` | `branch: $steps.analyze.branch` | `branch: $steps.branch.branch` |
-| `implement` | 実装エージェント・`prompts/ticket-implement.md`・`with` に `critical_design` | エージェント無し・`prompts/ticket-light-implement.md`・`effort: $efforts.main`・`with` に `critical_design` は無い |
-| `fix` | 実装エージェント・`prompts/ticket-fix.md` | エージェント無し・`prompts/ticket-light-fix.md`・`effort: $efforts.main` |
-| `commit` | （effort 無し） | `effort: $efforts.quick` |
+| `implement` | 実装エージェント・`prompts/ticket-implement.md`・`with` に `critical_design` と `codex_review: "on"`・`effort: $efforts.main`（`model` は書かない） | エージェント無し・`prompts/ticket-light-implement.md`・`model: $models.main`・`effort: $efforts.main`・`with` に `critical_design` と `codex_review` は無い |
+| `fix` | 実装エージェント・`prompts/ticket-fix.md`・`effort: $efforts.main`（`model` は書かない） | エージェント無し・`prompts/ticket-light-fix.md`・`model: $models.main`・`effort: $efforts.main` |
+| `commit` | `model: $models.main`・`effort: $efforts.main` | `model: $models.quick`・`effort: $efforts.quick` |
 | `sync` | `current`・`synced` → `e2e-route` | `current`・`synced` → `quality` |
-| `sync-resolve`・`land-sync-resolve` | （effort 無し） | `effort: $efforts.quick` |
+| `sync-resolve`・`land-sync-resolve` | `model: $models.main`・`effort: $efforts.main` | `model: $models.quick`・`effort: $efforts.quick` |
 | `e2e-route`・`e2e` | E2E の振り分けと E2E テスト | 無い |
 
-- 実装の出力の型は、`ticket` と同じ `schemas/implement-result.json`（下の `codex_review` の欄を足したもの）を使う
-- 実装のステップの `with` には、`ticket` と同じに `codex_review: $switches.codex_review` を渡す（直しのステップには渡さない）
+- 実装の出力の型は、`ticket` と同じ `schemas/implement-result.json`（下の `codex_review` の欄を足したもの）を使う。簡略なフローの実装のステップは `codex_review` を `off` で返す
+- 表の「`ticket`」の列の `model`・`effort` も、S2 で `ticket` の定義に足すもの。表に無い `ticket` の `llm` のステップ（`analyze`・`e2e`・`respond`・`merge`）にも `model: $models.main`・`effort: $efforts.main` を書く。`ticket-light` の `respond`・`merge` は `model: $models.main`・`effort: $efforts.main`
+
+### フローごとのモデルと effort
+
+| フロー | `models` | `efforts` | 備考 |
+|---|---|---|---|
+| `ticket` | `main: opus` | `main: xhigh` | いまの実際の動き（実行する人の既定のモデル・effort）を書き写す。実装と直し（`feature-implementer`）は `model` を書かず、エージェントの定義のモデル（いまは `sonnet`）で走る |
+| `ticket-light` | `main: sonnet`・`quick: sonnet` | `main: medium`・`quick: low` | 実装と直しはエージェント無しで `sonnet`（標準の実装エージェントと同じモデル）。コミットとコンフリクトの解消は `quick` |
+| `reflect` | `main: opus` | `main: xhigh` | いまの実際の動きを書き写す。`llm` のステップ（`describe` ほか）が `main` を指す |
+
+値は試しで測って見直す（見直すときは、フローの定義を直すか、別のフローを足す）。
 
 ### 実装の出力の型の変更
 
-`schemas/implement-result.json` に、必須の欄 `codex_review`（`off`・`complete`・`partial`・`failed`・`skipped`）を足す。`ticket` と `ticket-light` の実装のステップの指示文は、どちらもこの欄を返す。
+`schemas/implement-result.json` に、必須の欄 `codex_review`（`off`・`complete`・`partial`・`failed`・`skipped`）を足す。`ticket` と `ticket-light` の実装のステップの指示文は、どちらもこの欄を返す（`ticket-light` は常に `off`）。
 
 ### IF / API
 
-**委譲先の宣言（`flow` の形。S2 で足す欄）**:
+**委譲先の宣言（`flow` の形。S2 の形）**:
 
 ```json
 {
@@ -497,8 +511,6 @@ S2 の分。S1 の分は、下の「機能全体の設計（S1・実装済み）
   "form": "flow",
   "permission_mode": "auto",
   "challenge_id_prefix": "tom-",
-  "efforts": { "ticket-light": { "main": "medium" } },
-  "switches": { "ticket": { "codex_review": true }, "ticket-light": { "codex_review": true } },
   "operations": [
     { "id": "impl", "flow": "ticket", "interactive": false, "child_may_decide": true, "artifacts": "pr" },
     { "id": "impl-light", "flow": "ticket-light", "interactive": false, "child_may_decide": true, "artifacts": "pr" }
@@ -508,14 +520,11 @@ S2 の分。S1 の分は、下の「機能全体の設計（S1・実装済み）
 ```
 
 - `operations[].flow` に書けるのは `ticket` と `ticket-light`（ほかの値は設定の誤り）
-- `models`（S1）・`efforts`・`switches` のフローの名前に書けるのは `ticket`・`ticket-light`・`reflect`（ほかの値は設定の誤り）
-- `efforts` の値は 5 つの値（`low`・`medium`・`high`・`xhigh`・`max`）だけ。`switches` の値は真偽だけ（ほかは設定の誤り）
-- `efforts`・`switches` を書いてよいのは、`flow` の形の委譲先だけ（ほかの形に書いたら設定の誤り）
-- 変数がそのフローに定義されているかは、`models` と同じに、宣言を読むときには確かめず、`flywheel flow start` が確かめる
+- `models`（S1 で足した欄）は書けない（書いたら設定の誤り。理由は「フローの定義が、モデル・effort・Codex を使うかを持つ」）。`efforts`・`switches` のような値を差し替える欄は足さない
 
-**core が組み立てるコマンド（S2 で足すもの）**: 始める・反映の依頼のコマンドに、S1 の `--model` に続けて、宣言の `efforts` のそのフローの分を `--effort <変数>=<値>`、`switches` の分を `--switch <変数>=<true か false>` として、それぞれ変数の名前の辞書順に、`--input` の前に足す（無ければ足さない）。並びは `--model`・`--effort`・`--switch`・`--input` の順。
+**core が組み立てるコマンド（S2 で変えるもの）**: 始める・反映の依頼のコマンドから、S1 の `--model <変数>=<値>` を外す（いつも付けない）。
 
-**`flywheel flow start` の引数（S2 で足すもの）**: `--effort <変数>=<値>`（複数可）・`--switch <変数>=<true か false>`（複数可）。形が合わない（`=` が無い・変数の名前か値が空・同じ変数を 2 度）・フローが定義していない変数・effort の値が 5 つの外・切り替えの値が `true`・`false` の外のときは、実行のフォルダを作らずに、使い方の誤りで終わる。`flywheel flow resume` は、どちらも受けない。
+**`flywheel flow start` の引数（S2 で変えるもの）**: `--model` を外す（渡したら使い方の誤り）。`--effort` のような値を差し替える引数は足さない。
 
 **計画を作る判断点の出力（タスクの欄）**: `flow_reason`（文字列か `null`。型としては任意で、要否は上の機能要件の検査で決める）。計画の後から足すタスクの出力の型は、計画のタスクの型（`items`）を使っているので、同じ欄が入る。
 
@@ -527,10 +536,10 @@ S2 の分。S1 の分は、下の「機能全体の設計（S1・実装済み）
 
 ### 実装計画（チケット分解の見通し）
 
-1. **フローの変数**: `efforts`・`switches` の定義と検査（`$switches` を `llm` のステップの `with` の外に書いた誤りは、参照の種類で分ける検査〔`internal/flow/workflow` の `validate.go`〕で、位置ごとに見つける）・`flow start` の `--effort`・`--switch`・claude の `--effort`・`with` の `$switches` の解決・記録の `effort`・契約の欄（S1 のモデルの作りに沿って）
+1. **effort と差し替えの口を外す**: `efforts` の定義と検査・claude の `--effort`・記録の `effort`・契約の欄（S1 のモデルの変数の作りに沿って）。宣言の `models`・`flow start --model`・core の `--model` の組み立てを外す
 2. **簡略なフロー**: `ticket-light.yaml`・つなぎのスクリプト・出力の型・指示文 2 本（軽いセルフレビュー）・ハッシュの一覧・写した元と変えた点の文書（1 の後）
-3. **Codex のレビュー**: `ticket` と `ticket-light` の実装の指示文と、出力の型の `codex_review`（1・2 の後）
-4. **宣言と core**: `operations[].flow` の閉集合・宣言の `efforts`・`switches`・始めるコマンドの引数・契約の `effort` の読み取り・マイグレーション（版 40）・書き出しと作り直し（1 の後）
+3. **標準のフローの定義と Codex のレビュー**: `ticket` と `reflect` の定義にモデルと effort の値を書く・`ticket` の実装の指示文と `with` の `codex_review: "on"`・出力の型の `codex_review`（1・2 の後）
+4. **宣言と core**: `operations[].flow` の閉集合・契約の `effort` の読み取り・マイグレーション（版 40）・書き出しと作り直し（1 の後）
 5. **計画**: 出力の `flow_reason` と検査・判断点の入力の操作の行・計画の本文・タスクの記録・`j2.md` の基準（4 の後）
 6. **画面と API**: `planned_flow`・`flow_reason`・`effort`・計画の承認とタスクの詳細・フローの名前の表（4・5 の後）
 7. **文書と切り替え**: 設計書・契約の仕様・用語集・Tom の宣言に簡略なフローの操作を足す手順（2・4 の後）
@@ -631,13 +640,13 @@ S2 の分。S1 の分は、下の「機能全体の設計（S1・実装済み）
 | スライス | 内容 | 触るファイル数（概算） | 出荷条件 |
 |---|---|---|---|
 | S1（最小） | 写して動かす: 標準の実装フローと、統合ブランチを上げるフローを、中身を変えずに移す。`flow` の形の宣言。ステップの記録と、タスクの詳細の画面。モデルを YAML の変数で定義し、宣言で差し替えられる。Tom の切り替えの手順 | 160-240 | これだけで価値が出る（委譲の中が見える。外部コマンド `harness` が要らなくなる） |
-| S2 | 簡略なフローを足し、計画を作る判断点が、タスクごとにフローを選んで理由を計画に出す。Codex のレビューを宣言で使えるようにし、実装のステップの中でセルフレビューと並べて走らせる。effort と切り替えをフローの変数にする | 50-80 | S1 がマージされてから（S1 は main に入った） |
+| S2 | 簡略なフローを足し、計画を作る判断点が、タスクごとにフローを選んで理由を計画に出す。モデル・effort・Codex を使うかをフローの定義に書いて固定し（宣言の差し替えを外す）、標準のフローでは Codex のレビューを実装のステップの中でセルフレビューと並べて走らせる | 50-80 | S1 がマージされてから（S1 は main に入った） |
 | S3 | 完了の検証をフローのステップにし、レビューのステップと役割を分ける（レビューは実装の正しさ、完了の検証は達成条件との照合） | 40-70 | S2 がマージされてから |
 | S4 | 機械の部品（作業ツリーの作成と片付け・CI 待ち・CI の起動・品質の検査）を Go に書き直し、プラグインのスクリプトへの依存を外す | 30-50 | S1 がマージされてから（S2・S3 と並べて進められる） |
 
 実装対象: S2
 
-S1 の「触るファイル数」の大半（120 から 170）は、写すだけのファイル（コード・試験・資材）。S2 は、Codex のレビューと effort・切り替えを足した分（オーナーの決定 2026-11-24）だけ、初めの見込み（30-50）より大きい。
+S1 の「触るファイル数」の大半（120 から 170）は、写すだけのファイル（コード・試験・資材）。S2 は、Codex のレビューと、モデル・effort をフローの定義に書く分（オーナーの決定 2026-11-24）だけ、初めの見込み（30-50）より大きい。
 
 ## やらないこと
 
@@ -655,11 +664,11 @@ S1 の「触るファイル数」の大半（120 から 170）は、写すだけ
 - 走っている途中の委譲を、外部コマンドの形から組み込みのフローへ移す（理由: 切り替えは、走っている委譲が 0 件のときに行う手順にする）
 - （S2）フローを進める仕組みに、ステップを並べて走らせる作りを足す（理由: Codex は実装のステップの中で並べると決めた。並列のステップは、要るようになったら別の区切りで決める）
 - （S2）claude-harness の `/self-review` に懐疑なしの口を足す（理由: claude-harness のリポジトリは変えない。軽いセルフレビューは flywheel の指示文で行う）
-- （S2）計画を作る判断点が、モデル・effort・切り替え（Codex を使うか）を変える（理由: エージェントはフローを選ぶだけ。値はオーナーが宣言で決める）
-- （S2）Tom で Codex のレビューを使い始める（理由: 宣言の切り替えで、オーナーの了承を取って別に行う）
+- （S2）計画を作る判断点が、モデル・effort・Codex を使うかを変える（理由: エージェントはフローを選ぶだけ。値はフローの定義で決まる）
+- （S2）委譲先の宣言で、モデル・effort・Codex を使うかを差し替える（理由: 同じフローで中身が変わると、フローの単位で評価できない。変えたいときはフローを足す）
 - （S2）Codex の費用を、flywheel の費用と予算に数える（理由: 別の枠で、数える口が無い）
 - （S2）簡略なフローのレビュー対応（`respond`）を軽くする（理由: レビュー対応は PR への人の指摘が入口で、まれ。`ticket` と同じ指示文のまま）
-- （S2）標準のフローの effort を変える（理由: `ticket` は、いまと同じに effort を指定しない。変えるなら宣言の `efforts` を使えるよう、変数を足すのは後で決める）
+- （S2）標準のフローのモデルと effort を、いまの実際の動きから変える（理由: S2 では、いまの動き〔`opus`・`xhigh`。実装と直しはエージェントの定義のモデル〕を定義に書き写すだけ。変えるのは、測ってから）
 
 ## Tom の切り替えと戻し方【切り替えそのものは、オーナーの了承を取って別に行う】
 
@@ -707,13 +716,12 @@ Tom の flywheel のリポジトリ（`repos[]` の `flywheel`。いまは `conn
 ### 簡略なフローの操作を足す手順（S2。足すことそのものは、オーナーの了承を取って別に行う）
 
 1. **走っている委譲が 0 件であることを、切り替えの手順の 1 と同じに確かめる。** サイクルは止めておく。
-2. **ストアを書き出しておく（入れ替える前の、古いバイナリで）。** S2 を含むバイナリでストアを開くと版 40 へ上がる。S1 の手順の 2 と同じ理由で、戻すときのバックアップはこの時点でしか取れない。
+2. **ストアを書き出しておく（入れ替える前の、古いバイナリで）。** S2 を含むバイナリでストアを開くと版 40 へ上がる。S2 を含むバイナリに入れ替えた時点で、標準のフローは Codex のレビューを使い始める（フローの定義で決まるため。宣言では止められない）。S1 の手順の 2 と同じ理由で、戻すときのバックアップはこの時点でしか取れない。
 3. **バイナリを入れ替え、`flywheel version` の `schema_version` が 40 以上であることを確かめる。**
 4. **宣言に、簡略なフローの操作を足す。** `flow` の形の委譲先の `operations` に、`flow` が `ticket-light` の操作を、いまの `ticket` の操作と並べて足す（いまの操作は消さない。計画を作る判断点は、両方から選ぶ）。例: `{"id": "impl-light", "flow": "ticket-light", "interactive": false, "child_may_decide": true, "artifacts": "pr"}`。`required_facts` は委譲先ごとなので、そのまま両方の操作に効く。
-5. **（Codex を使うときだけ。別に了承を取る）** 委譲先に `switches`（例: `{"ticket": {"codex_review": true}, "ticket-light": {"codex_review": true}}`）を書く。
-6. **宣言を確かめる。** `flywheel status` が `config_invalid` にならないこと。次の計画で、計画の承認の画面のタスクにフローと理由が出ることを、オーナーが見る。
+5. **宣言を確かめる。** `flywheel status` が `config_invalid` にならないこと。次の計画で、計画の承認の画面のタスクにフローと理由が出ることを、オーナーが見る。
 
-戻すときは、足した操作（と `switches`）を宣言から消す。簡略なフローの操作を選んだタスクが計画に残っていれば、委譲を始めるときに操作が宣言に無い誤りになるので、そのタスクが済むか、計画を作り直してから消す。
+戻すときは、足した操作を宣言から消す。簡略なフローの操作を選んだタスクが計画に残っていれば、委譲を始めるときに操作が宣言に無い誤りになるので、そのタスクが済むか、計画を作り直してから消す。
 
 ## 受入基準
 
@@ -774,7 +782,7 @@ Tom の flywheel のリポジトリ（`repos[]` の `flywheel`。いまは `conn
 - [ ] `flow` の形でない委譲先の操作を選んだタスクの `flow_reason` が、無い・`null`・空の文字列の計画の出力は、`flow_reason` について不正にならない
 - [ ] 続きのタスクを足す判断の出力で、`flow` の形の委譲先の操作を選んだタスクに `flow_reason` が無いものは、不正になる
 - [ ] フォローアップをタスクとして上げる計画の出力で、`flow` の形の委譲先の操作を選んだタスクに `flow_reason` が無いものは、不正になる
-- [ ] 計画を作る判断点の出力の型の、タスクの欄の一覧は、変更の前の一覧に `flow_reason` を足したものと一致する（モデル・effort・切り替えの欄が無い）
+- [ ] 計画を作る判断点の出力の型の、タスクの欄の一覧は、変更の前の一覧に `flow_reason` を足したものと一致する（モデル・effort・Codex を使うかの欄が無い）
 - [ ] 計画の本文の、`flow` の形の委譲先のタスクの項に、「フロー: 簡略な実装（ticket-light）」の行がある（`ticket-light` の操作のとき）
 - [ ] 計画の本文の、`flow` の形の委譲先のタスクの項に、「フローを選んだ理由: <出力の flow_reason>」の行がある
 - [ ] 計画の本文の、`flow` の形でない委譲先のタスクの項に、「フロー:」と「フローを選んだ理由:」の行が無い
@@ -791,90 +799,64 @@ Tom の flywheel のリポジトリ（`repos[]` の `flywheel`。いまは `conn
 
 ### Codex のレビュー
 
-- [ ] 埋め込んだ `ticket` の定義は、`switches` に `codex_review`（既定は偽）を持つ
-- [ ] 埋め込んだ `ticket-light` の定義は、`switches` に `codex_review`（既定は偽）を持つ
-- [ ] `ticket` の実装のステップの `with` の `codex_review` は `$switches.codex_review`
-- [ ] `ticket-light` の実装のステップの `with` の `codex_review` は `$switches.codex_review`
-- [ ] `--switch codex_review=true` を渡さずに始めた `ticket` の実行では、実装のステップの添付データの `codex_review` が JSON の `false`
-- [ ] `--switch codex_review=true` を渡して始めた `ticket` の実行では、実装のステップの添付データの `codex_review` が JSON の `true`
-- [ ] `command` の種類のステップの `with` に `$switches.<名前>` を書いた定義は、定義の検査で誤りになる
-- [ ] 遷移の `with` に `$switches.<名前>` を書いた定義は、定義の検査で誤りになる
-- [ ] `select` の `value` に `$switches.<名前>` を書いた定義は、定義の検査で誤りになる
-- [ ] `add_dirs` に `$switches.<名前>` を書いた定義は、定義の検査で誤りになる
-- [ ] `command` の種類のステップに `effort` を書いた定義は、定義の検査で誤りになる
-- [ ] `--switch codex_review=true` を渡して始めた実行は、`flow resume` の後に起動する実装のステップにも、真の `codex_review` を渡す
+- [ ] 埋め込んだ `ticket` の定義の実装のステップの `with` の `codex_review` は、文字列の `on`
+- [ ] 埋め込んだ `ticket-light` の定義の実装のステップの `with` に、`codex_review` が無い
+- [ ] `ticket` で始めた実行では、実装のステップの添付データの `codex_review` が `on`
+- [ ] `ticket` で始めた実行は、`flow resume` の後に起動する実装のステップにも、`codex_review` の `on` を渡す
 - [ ] 実装の出力の型（`schemas/implement-result.json`）は、`codex_review` を必須の欄に持ち、値を `off`・`complete`・`partial`・`failed`・`skipped` の 5 つに限る
-- [ ] `prompts/ticket-implement.md` に、`codex_review` が真のとき `claude-harness-run codex-review-runner` をセルフレビューと並べて裏で起動する指示がある
+- [ ] `prompts/ticket-implement.md` に、添付データの `codex_review` が `on` のとき `claude-harness-run codex-review-runner` を `/self-review` と並べて裏で起動する指示がある
 - [ ] `prompts/ticket-implement.md` に、Codex のレビューを待つ指示（「終わるまで」と「返さない」を含む文）がある
 - [ ] `prompts/ticket-implement.md` に、重さが中以上で `refuted` でない Codex の指摘を直す指示（「中以上」と `refuted` を含む文）がある
 - [ ] `prompts/ticket-implement.md` に、Codex の指摘を直した後に `/quality-check` を通す指示がある
 - [ ] `prompts/ticket-implement.md` に、直さなかった Codex の指摘を、`claim` の先頭に `[Codex] ` を付けて残指摘に載せる指示がある
 - [ ] `prompts/ticket-implement.md` に、Codex のレビューが完了しなかったときの指示（「完了しなかった」と `unverified` を含む文）がある
 - [ ] `prompts/ticket-implement.md` に、`claude-harness-run cleanup-review-diff` で一時ファイルを、結果の成否に関わらず消す指示がある
-- [ ] `prompts/ticket-implement.md` に、`codex_review` を、切り替えが偽なら `off`、起動できなかったら `failed`、戻された 2 回目なら `skipped` にする指示がある
-- [ ] `prompts/ticket-light-implement.md` に、`codex_review` が真のとき `claude-harness-run codex-review-runner` をセルフレビューと並べて裏で起動する指示がある
-- [ ] `prompts/ticket-light-implement.md` に、Codex のレビューを待つ指示（「終わるまで」と「返さない」を含む文）がある
-- [ ] `prompts/ticket-light-implement.md` に、重さが中以上で `refuted` でない Codex の指摘を直す指示（「中以上」と `refuted` を含む文）がある
-- [ ] `prompts/ticket-light-implement.md` に、Codex の指摘を直した後に `/quality-check` を通す指示がある
-- [ ] `prompts/ticket-light-implement.md` に、直さなかった Codex の指摘を、`claim` の先頭に `[Codex] ` を付けて残指摘に載せる指示がある
-- [ ] `prompts/ticket-light-implement.md` に、Codex のレビューが完了しなかったときの指示（「完了しなかった」と `unverified` を含む文）がある
-- [ ] `prompts/ticket-light-implement.md` に、`claude-harness-run cleanup-review-diff` で一時ファイルを、結果の成否に関わらず消す指示がある
-- [ ] `prompts/ticket-light-implement.md` に、`codex_review` を、切り替えが偽なら `off`、起動できなかったら `failed`、戻された 2 回目なら `skipped` にする指示がある
+- [ ] `prompts/ticket-implement.md` に、`codex_review` を、添付データの `codex_review` が `on` でなければ `off`、起動できなかったら `failed`、戻された 2 回目なら `skipped` にする指示がある
+- [ ] `prompts/ticket-light-implement.md` に、`codex-review-runner` を起動する指示が無い
+- [ ] `prompts/ticket-light-implement.md` に、`codex_review` を `off` で返す指示がある
 - [ ] `prompts/ticket-fix.md` に、`codex-review-runner` を起動する指示が無い
 - [ ] `prompts/ticket-light-fix.md` に、`codex-review-runner` を起動する指示が無い
 - [ ] `prompts/ticket-respond.md` に、`codex-review-runner` を起動する指示が無い
 
-### effort と切り替え（フローの変数）
+### モデルと effort（フローの定義に書く）
 
 - [ ] `efforts` に変数を定義し、`llm` のステップの `effort` に `$efforts.<名前>` を書いた定義は、定義の検査を通る
 - [ ] `effort` に値を直に書いた（`$efforts.` で始まらない）定義は、定義の検査で誤りになる
 - [ ] `effort` が、`efforts` に定義していない変数を指す定義は、定義の検査で誤りになる
+- [ ] `command` の種類のステップに `effort` を書いた定義は、定義の検査で誤りになる
 - [ ] `efforts` の値が 5 つの値の外（例: `extreme`）の定義は、定義の検査で誤りになる
 - [ ] `efforts` の値が文字列でない定義は、定義の検査で誤りになる
-- [ ] `switches` の値が真偽でない（例: 文字列の `"yes"`）定義は、定義の検査で誤りになる
-- [ ] `with` の `$switches.<名前>` が、`switches` に定義していない変数を指す定義は、定義の検査で誤りになる
-- [ ] effort の変数を指したステップは、`--effort` を渡さずに始めた実行では、claude の起動の引数に `--effort <その変数の既定の値>` を含む
-- [ ] effort の変数を指したステップは、`--effort <変数>=<値>` を渡して始めた実行では、claude の起動の引数に `--effort <渡した値>` を含む
+- [ ] effort の変数を指したステップは、claude の起動の引数に `--effort <その変数の値>` を含む
 - [ ] effort の変数を指さない `llm` のステップは、claude の起動の引数に `--effort` を含まない
-- [ ] `--effort <変数>=<値>` を渡して始めた実行は、`flow resume` の後に起動する claude にも、同じ値の `--effort` を付ける
-- [ ] `flywheel flow start` に、フローが定義していない変数の `--effort` を渡すと、実行のフォルダを作らずに、使い方の誤りで終わる
-- [ ] `flywheel flow start` の `--effort` の値が 5 つの値の外のとき、実行のフォルダを作らずに、使い方の誤りで終わる
-- [ ] `flywheel flow start` の `--effort` の形が誤り（`=` が無い・変数の名前が空・値が空のそれぞれ）のとき、実行のフォルダを作らずに、使い方の誤りで終わる
-- [ ] `flywheel flow start` の `--switch` の形が誤り（`=` が無い・変数の名前が空・値が空のそれぞれ）のとき、実行のフォルダを作らずに、使い方の誤りで終わる
-- [ ] `flywheel flow start` に、同じ変数の `--effort` を 2 度渡すと、実行のフォルダを作らずに、使い方の誤りで終わる
-- [ ] `flywheel flow start` に、同じ変数の `--switch` を 2 度渡すと、実行のフォルダを作らずに、使い方の誤りで終わる
-- [ ] `flywheel flow start` に、フローが定義していない変数の `--switch` を渡すと、実行のフォルダを作らずに、使い方の誤りで終わる
-- [ ] `flywheel flow start` の `--switch` の値が `true`・`false` の外（例: `yes`）のとき、実行のフォルダを作らずに、使い方の誤りで終わる
-- [ ] `flywheel flow resume` は、`--effort` を受け付けない（使い方の誤りで終わる）
-- [ ] `flywheel flow resume` は、`--switch` を受け付けない（使い方の誤りで終わる）
-- [ ] effort の変数を指したステップの `steps` の要素は、`effort` に、解決した値を持つ
+- [ ] effort の変数を指したステップは、`flow resume` の後に起動しても、claude の起動の引数に同じ `--effort` を含む
+- [ ] `flywheel flow start` は、`--model` を受け付けない（実行のフォルダを作らずに、使い方の誤りで終わる）
+- [ ] `flywheel flow start` は、`--effort` を受け付けない（実行のフォルダを作らずに、使い方の誤りで終わる）
+- [ ] effort の変数を指したステップの `steps` の要素は、`effort` に、変数の値を持つ
 - [ ] effort の変数を指さないステップの `steps` の要素は、`effort` が `null`
-- [ ] 埋め込んだ `ticket` の定義に、`efforts` が無い
-- [ ] 埋め込んだ `ticket` の定義に、`effort` を書いたステップが無い
-- [ ] 埋め込んだ `reflect` の定義に、`efforts` が無い
-- [ ] 埋め込んだ `reflect` の定義に、`effort` を書いたステップが無い
-- [ ] 埋め込んだ `reflect` の定義に、`switches` が無い
+- [ ] 埋め込んだ `ticket` の定義の `models` は `main: opus`
+- [ ] 埋め込んだ `ticket` の定義の `efforts` は `main: xhigh`
+- [ ] 埋め込んだ `ticket` の定義で、実装と直しのステップは `model` を持たない
+- [ ] 埋め込んだ `ticket` の定義で、実装と直しのステップの `effort` は `$efforts.main`
+- [ ] 埋め込んだ `ticket` の定義で、実装と直しのほかの `llm` のステップ（`analyze`・`commit`・`sync-resolve`・`e2e`・`land-sync-resolve`・`respond`・`merge`）の `model` は `$models.main`
+- [ ] 埋め込んだ `ticket` の定義で、実装と直しのほかの `llm` のステップの `effort` は `$efforts.main`
+- [ ] 埋め込んだ `reflect` の定義の `models` は `main: opus`
+- [ ] 埋め込んだ `reflect` の定義の `efforts` は `main: xhigh`
+- [ ] 埋め込んだ `reflect` の定義で、すべての `llm` のステップの `model` は `$models.main`
+- [ ] 埋め込んだ `reflect` の定義で、すべての `llm` のステップの `effort` は `$efforts.main`
+- [ ] 埋め込んだ `ticket-light` の定義の `models` は、`main` が `sonnet`、`quick` が `sonnet`
 - [ ] 埋め込んだ `ticket-light` の定義の `efforts` は、`main` が `medium`、`quick` が `low`
+- [ ] 埋め込んだ `ticket-light` の定義で、実装と直しのステップの `model` は `$models.main`
 - [ ] 埋め込んだ `ticket-light` の定義で、実装と直しのステップの `effort` は `$efforts.main`
-- [ ] 埋め込んだ `ticket-light` の定義で、コミット・コンフリクトの解消（`sync-resolve`・`land-sync-resolve`）のステップの `effort` は `$efforts.quick`
+- [ ] 埋め込んだ `ticket-light` の定義で、コミット・コンフリクトの解消（`sync-resolve`・`land-sync-resolve`）のステップの `model` は `$models.quick`
+- [ ] 埋め込んだ `ticket-light` の定義で、コミット・コンフリクトの解消のステップの `effort` は `$efforts.quick`
+- [ ] 埋め込んだ `ticket-light` の定義で、レビュー対応とマージのステップの `model` は `$models.main`
 
 ### 宣言と core
 
-- [ ] 宣言の `efforts` に `ticket-light` の変数が 1 つあるとき、core が起動する始めるコマンドは、`--effort <変数>=<値>` を含む
-- [ ] 宣言の `efforts` に `ticket-light` の変数が 2 つあるとき、core が起動する始めるコマンドの `--effort` は、変数の名前の辞書順に並ぶ
-- [ ] core が起動する始めるコマンドの `--effort` は、`--model` の後・`--input` の前にある
-- [ ] 宣言の `switches` に `ticket` の変数が 1 つあるとき、core が起動する始めるコマンドは、`--switch <変数>=<true か false>` を含む
-- [ ] 宣言の `switches` に `ticket` の変数が 2 つあるとき、core が起動する始めるコマンドの `--switch` は、変数の名前の辞書順に並ぶ
-- [ ] core が起動する始めるコマンドの `--switch` は、`--effort` の後・`--input` の前にある
-- [ ] 宣言の `efforts`・`switches` に始めるフローの分が無いとき、core が起動する始めるコマンドは、`--effort`・`--switch` を含まない
-- [ ] 宣言の `switches` に `reflect` の変数があるとき、core が起動する反映の依頼のコマンドは、その `--switch <変数>=<値>` を含む（core は変数がフローに定義されているかを確かめず、宣言の値を引数へ写す。確かめるのは `flywheel flow start` で、S2 の `reflect` は切り替えを定義しないので、実運用では始めるときの誤りになる。この基準は引数の組み立ての試験）
-- [ ] `flow` の形の委譲先の `efforts` の値が 5 つの値の外の宣言は、設定の誤りになる
-- [ ] `flow` の形の委譲先の `switches` の値が真偽でない宣言は、設定の誤りになる
-- [ ] `flow` の形の委譲先の `efforts` のフローの名前が `ticket`・`ticket-light`・`reflect` 以外の宣言は、設定の誤りになる
-- [ ] `flow` の形の委譲先の `switches` のフローの名前が `ticket`・`ticket-light`・`reflect` 以外の宣言は、設定の誤りになる
-- [ ] `flow` の形の委譲先の `models` のフローの名前に `ticket-light` を書いた宣言を、読み込める
-- [ ] `flow` の形でない委譲先に `efforts` を書いた宣言は、設定の誤りになる
-- [ ] `flow` の形でない委譲先に `switches` を書いた宣言は、設定の誤りになる
+- [ ] `flow` の形の委譲先に `models` を書いた宣言は、設定の誤りになる
+- [ ] `flow` の形の委譲先の始めるコマンドを core が組み立てるとき、`--model` を含まない
+- [ ] `flow` の形の委譲先の反映の依頼のコマンドを core が組み立てるとき、`--model` を含まない
+- [ ] `flow` の形の委譲先に `efforts` を書いた宣言は、設定の誤りになる（足していない欄）
 - [ ] 契約の出力の `steps` の要素に `effort` があるとき、core が記録するステップの行の `effort` は、その値
 - [ ] 契約の出力の `steps` の要素に `effort` が無いとき、core が記録するステップの行の `effort` は NULL で、ほかの列は S1 と同じに記録する
 - [ ] 契約の出力の `steps` の要素の `effort` が文字列でも `null` でもないとき、core は、既にあるステップの行を変えない
@@ -918,26 +900,26 @@ Tom の flywheel のリポジトリ（`repos[]` の `flywheel`。いまは `conn
 ### 文書
 
 - [ ] 設計書 §10 に、操作の `flow` に書ける値（`ticket`・`ticket-light`）が、「S2 で実装済み」の注記つきで書かれている
-- [ ] 設計書 §10 に、宣言の `efforts`・`switches` が、「S2 で実装済み」の注記つきで書かれている
+- [ ] 設計書 §10 に、宣言の `models` を外したことと、モデル・effort・Codex を使うかはフローの定義で決まることが、「S2 で実装済み」の注記つきで書かれている
 - [ ] `docs/features/m3-invoker-delegation.md` の契約の節に、ステップの要素の任意の欄 `effort` が書かれている
 - [ ] 用語集に、簡略なフローの項がある
 - [ ] 用語集に、軽いセルフレビューの項がある
 - [ ] 用語集に、effortの項がある
-- [ ] 用語集に、切り替え（フローの変数）の項がある
 - [ ] `internal/flow/README.md` の、写した後に変えた点に、`ticket` の定義・実装の指示文・出力の型の変更（Codex のレビュー）が書かれている
-- [ ] `internal/flow/README.md` の、写した後に変えた点に、`efforts`・`switches` が書かれている
+- [ ] `internal/flow/README.md` の、写した後に変えた点に、`efforts` と、`--model` を外したことが書かれている
 - [ ] `docs/features/flow-port.md` に、Tom の宣言に簡略なフローの操作を足す手順が書かれている
-- [ ] `CLAUDE.md` のパッケージの表の `internal/flow` の行に、`--effort`・`--switch` の解釈が書かれている
-- [ ] `CLAUDE.md` のパッケージの表の `internal/flow/workflow` の行に、`efforts`・`switches` の検査が書かれている
+- [ ] `CLAUDE.md` のパッケージの表の `internal/flow` の行から、`--model` の解釈が外れている
+- [ ] `CLAUDE.md` のパッケージの表の `internal/flow/workflow` の行に、`efforts` の検査が書かれている
 
 ### 実物で確かめること（オーケストレーターが確かめ、親の Issue に記録する。自動の試験にしない）
 
 - [ ] 試験用のリポジトリ（masanami/flywheel-sandbox）で、簡略なフローの操作と標準のフローの操作を並べた宣言のワークスペースの課題で、計画を作る判断点が、文書だけのタスクに簡略なフローを、理由つきで選ぶ
 - [ ] 上の課題の、簡略なフローのタスクが、計画の承認からレビュー待ちまで進み、ステップの一覧に分析のステップが無い
 - [ ] 上のタスクの実装のステップで、懐疑者（`finding-verifier`・`design-deviation-verifier`）が呼ばれていない（実装のステップのログで確かめる）
-- [ ] `codex_review` を真にした実行で、Codex のレビューが走り、実装の出力の `codex_review` が `complete` になる
-- [ ] Codex が使えない状態（例: `codex` を `PATH` から外す）で `codex_review` を真にした実行が、止まらずにレビュー待ちまで進み、実装の出力の `unverified` に Codex のレビューが完了しなかったことが載る
+- [ ] 標準のフローの実行で、Codex のレビューが走り、実装の出力の `codex_review` が `complete` になる
+- [ ] Codex が使えない状態（例: `codex` を `PATH` から外す）での標準のフローの実行が、止まらずにレビュー待ちまで進み、実装の出力の `unverified` に Codex のレビューが完了しなかったことが載る
 - [ ] effort を指したステップで、claude が `--effort` の値で走る（ステップのログで確かめる）
+- [ ] 標準のフローの実装のステップ（エージェントの定義がモデルを決める）で使ったモデル（`models_used`）を、親の Issue に記録する
 - [ ] サブエージェント（レビュアー）にも同じ effort が効くかの結果（効く・効かない・判別できない）を、親の Issue に記録する（効かない・判別できないときは止めず、フォローアップの Issue にする）
 - [ ] 簡略なフローのタスク 1 件と、同じ程度の標準のフローのタスク 1 件の、時間と費用を親の Issue に記録する（effort の既定の値を見直す材料）
 
