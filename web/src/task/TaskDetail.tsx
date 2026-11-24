@@ -24,6 +24,8 @@ import {
   RUN_RUNNING_LABEL,
   STEP_LABELS,
   STEP_STATE_LABELS,
+  TASK_FLOW_LABEL,
+  TASK_FLOW_REASON_HEADING,
   TASK_SPENT_LABEL,
   UPSTREAM_STATE_LABELS,
   VERDICT_LABELS,
@@ -209,6 +211,12 @@ function TaskView({
             {label(PHASE_LABELS, node.phase)}
           </dd>
         </div>
+        {task.planned_flow !== null ? (
+          <div data-testid="task-planned-flow">
+            <dt>{TASK_FLOW_LABEL}</dt>
+            <dd>{label(FLOW_LABELS, task.planned_flow)}</dd>
+          </div>
+        ) : null}
         {task.depends_on.length > 0 ? (
           <div data-testid="task-prerequisites">
             <dt>前提</dt>
@@ -324,6 +332,16 @@ function TaskView({
       ) : null}
       {/* 区画の外に置く: 最後の開いている保留が読み直しで消えても、知らせは残る。 */}
       <HoldAnswerNotices state={answerState} />
+      {task.planned_flow !== null && task.flow_reason !== null ? (
+        <section
+          aria-label={TASK_FLOW_REASON_HEADING}
+          data-testid="task-flow-reason"
+        >
+          <h3>{TASK_FLOW_REASON_HEADING}</h3>
+          {/* 計画を作った判断点の文。Markdown として整えず、そのまま文字で出す。 */}
+          <p style={{ whiteSpace: "pre-wrap" }}>{task.flow_reason}</p>
+        </section>
+      ) : null}
       <section aria-label="やること" data-testid="task-body">
         <h3>やること</h3>
         <Markdown text={task.body} />
@@ -444,7 +462,8 @@ export function stepCost(s: Step): string {
 }
 
 export function stepModels(s: Step): string {
-  return s.models_used.length === 0 ? NO_VALUE : s.models_used.join("、");
+  const base = s.models_used.length === 0 ? NO_VALUE : s.models_used.join("、");
+  return s.effort !== null ? `${base}（effort: ${s.effort}）` : base;
 }
 
 function StepsTable({ steps }: { steps: Step[] }) {

@@ -62,13 +62,15 @@ type ApprovalPlan struct {
 }
 
 // ApprovalPlanTask は計画承認待ちの要約のタスク 1 件。承認の前はタスクの ID が無いので、計画の中の識別子（key）と、
-// 前提のタスクの key で出す。budget_impl_usd・budget_review_usd はタスクの枠（計画が書いたときだけ。書いていなければ null）。phase は表示の区分（承認の前なので next か blocked）。source は対応する取り込み元の子の external_key（対応しなければ null）。
+// 前提のタスクの key で出す。planned_flow・flow_reason は、承認の前は計画の出力の記録、承認の後はタスクの記録の値（無ければ null）。budget_impl_usd・budget_review_usd はタスクの枠（計画が書いたときだけ。書いていなければ null）。phase は表示の区分（承認の前なので next か blocked）。source は対応する取り込み元の子の external_key（対応しなければ null）。
 type ApprovalPlanTask struct {
 	BudgetImplUSD   *float64 `json:"budget_impl_usd"`
 	BudgetReviewUSD *float64 `json:"budget_review_usd"`
 	DependsOn       []string `json:"depends_on"`
+	FlowReason      *string  `json:"flow_reason"`
 	Key             string   `json:"key"`
 	Phase           string   `json:"phase"`
+	PlannedFlow     *string  `json:"planned_flow"`
 	Source          *string  `json:"source"`
 	Title           string   `json:"title"`
 }
@@ -203,7 +205,7 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 			if i < len(p.PlanTaskPhases) {
 				phase = string(p.PlanTaskPhases[i])
 			}
-			tasks = append(tasks, ApprovalPlanTask{BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD, DependsOn: append([]string{}, t.DependsOn...), Key: t.Key, Phase: phase, Source: strOrNil(t.Source), Title: t.Title})
+			tasks = append(tasks, ApprovalPlanTask{BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD, DependsOn: append([]string{}, t.DependsOn...), FlowReason: strOrNil(t.FlowReason), Key: t.Key, Phase: phase, PlannedFlow: strOrNil(t.PlannedFlow), Source: strOrNil(t.Source), Title: t.Title})
 		}
 		s.Plan = &ApprovalPlan{Body: p.PlanBody, BudgetLimitReason: p.PlanBudgetLimitReason, BudgetLimitUSD: p.PlanBudgetLimitUSD, BudgetUSD: p.PlanBudgetUSD, Summary: p.PlanSummary, Tasks: tasks, Topics: FromPlanTopics(p.PlanTopics), UsesIntegration: p.PlanUsesIntegration, Version: p.PlanVersion}
 	case core.ApprovalKindCompletion:

@@ -531,11 +531,13 @@ export interface Task {
   depends_on: string[];
   done_criteria: string;
   facts: Record<string, string>;
+  flow_reason: string | null;
   id: string;
   landing: string | null;
   non_goals: string[];
   operation: string;
   plan_version: number;
+  planned_flow: string | null;
   repo: string;
   source_key: string | null;
   spent_usd: number;
@@ -571,6 +573,7 @@ export interface TaskDelegateStep {
   attempt: number;
   cost_unknown: boolean;
   cost_usd: number | null;
+  effort: string | null;
   ended_at: string | null;
   kind: string;
   model: string | null;
@@ -855,8 +858,10 @@ export interface ApprovalPlanTask {
   budget_impl_usd: number | null;
   budget_review_usd: number | null;
   depends_on: string[];
+  flow_reason: string | null;
   key: string;
   phase: string;
+  planned_flow: string | null;
   source: string | null;
   title: string;
 }

@@ -93,7 +93,7 @@ func TestTaskDelegate_StepsShape_1229(t *testing.T) {
 		Attempt: 1, CostUnknown: true, CostUSD: &cost, Kind: "llm", ModelsUsed: []string{"a", "b"}, Outcome: &outcome,
 		StartedAt: "2026-11-01T00:00:00Z", State: "finished", Step: "implement",
 	}}})
-	want := `{"flow":null,"requested_kind":null,"run_id":"","state":"","steps":[{"attempt":1,"cost_unknown":true,"cost_usd":1.9429,"ended_at":null,"kind":"llm","model":null,"models_used":["a","b"],"outcome":"pass","started_at":"2026-11-01T00:00:00Z","state":"finished","step":"implement"}],"summary":""}`
+	want := `{"flow":null,"requested_kind":null,"run_id":"","state":"","steps":[{"attempt":1,"cost_unknown":true,"cost_usd":1.9429,"effort":null,"ended_at":null,"kind":"llm","model":null,"models_used":["a","b"],"outcome":"pass","started_at":"2026-11-01T00:00:00Z","state":"finished","step":"implement"}],"summary":""}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
