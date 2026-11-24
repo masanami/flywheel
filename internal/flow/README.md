@@ -27,7 +27,7 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 
 ## 写した後に振る舞いを変えた点
 
-写した元（`b4d6154`）から flywheel の側で振る舞いを変えた点を、次の 7 つの見出しで列挙する。ここに無い直しは、lint と整形に合わせたものだけで、振る舞いは写した元のまま。写した後は、flywheel の側の写しが正本で、claude-harness の側の直しは、要るものを選んで手で取り込む（自動では追わない）。
+写した元（`b4d6154`）から flywheel の側で振る舞いを変えた点を、次の見出しで列挙する。ここに無い直しは、lint と整形に合わせたものだけで、振る舞いは写した元のまま。写した後は、flywheel の側の写しが正本で、claude-harness の側の直しは、要るものを選んで手で取り込む（自動では追わない）。
 
 ### 置き場
 
@@ -64,7 +64,7 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 - 変数の値は定義の値だけで決まり、`flow start` の引数では差し替えない。
 - 解決した値（定義の値）は、実行の始まりの記録に持ち、`resume` の後も同じ値を使う。変数を指したステップは、その値を `--model <値>` に付けて claude を起動する。指さないステップは、いまと同じ（指定しない）。
 - 使ったモデルは、claude の結果の `modelUsage` の名前を、ステップが終わったときに記録する。
-- 写した 2 つのフロー（`ticket`・`reflect`）の定義は、`models` に `main: opus`、`efforts` に `main: xhigh` を持つ。`ticket` の実装（`implement`）と直し（`fix`）を除く `llm` のステップと、`reflect` のすべての `llm` のステップが `$models.main`・`$efforts.main` を指す（`implement`・`fix` は指さない）。`ticket` の `implement` の `with` に `codex_review: "on"` を足し、`schemas/implement-result.json` に必須の欄 `codex_review`（`off`・`complete`・`partial`・`failed`・`skipped`）を、`prompts/ticket-implement.md` に Codex のレビューを `/self-review` と並べて走らせる手順を足した。`ticket-fix.md`・`ticket-respond.md` は Codex を起動しない。
+- 写した 2 つのフロー（`ticket`・`reflect`）の定義は、`models` に `main: opus`、`efforts` に `main: xhigh` を持つ。`ticket` の実装（`implement`）と直し（`fix`）を除く `llm` のステップと、`reflect` のすべての `llm` のステップが `$models.main`・`$efforts.main` を指す（`implement`・`fix` は指さない）。Codex のレビューは下の「標準のフロー ticket の値と Codex のレビュー・efforts・`--model`（S2）」。`ticket-fix.md`・`ticket-respond.md` は Codex を起動しない。
 
 ### effort の変数
 
@@ -78,6 +78,13 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 - `steps` の要素は、`seq`（ステップが始まった記録の通し番号。1 以上）・`step`・`kind`・`attempt`・`state`（`running`・`finished`・`cancelled`・`interrupted`）・`outcome`・始まりと終わりの時刻・`cost_usd`・`cost_unknown`・`model`（変数を指したステップの解決値）・`models_used` など。対象は、実行のただ 1 つの単位（`main`）の、全部の回りのステップ。
 - `cost_usd` は、ステップが終わった記録の「実行の累計へ加えた額」（終わっていない・claude を呼ばないステップは `null`）。合計は、契約の `cost_usd` と一致する。`cost_unknown` は、費用を得られず、渡した上限額を使ったものとして数えたとき。
 - 読む側（core）は、`steps` が無い・配列でない・要素のどれか 1 つでも形が合わないときは、`steps` の全体を「無い」として扱い、出力の全体は不正にしない。
+
+### 標準のフロー ticket の値と Codex のレビュー・efforts・`--model`（S2）
+
+- `ticket` の定義の実装のステップ（`implement`）の `with` に `codex_review: "on"` を書く。実装の指示文（`prompts/ticket-implement.md`）は、`on` のとき、実装が済んだら `claude-harness-run codex-review-runner` を `/self-review` と並べて裏で起動し、終わるまで出力を返さない。直さなかった Codex の指摘は `claim` の先頭に `[Codex] ` を付けて `residual_findings` へ載せ、完了しなかったときは `unverified` に書く（これだけでは `failure` にしない。Codex が使えなくても止めない）。出力の型（`schemas/implement-result.json`）に `codex_review`（`off`・`complete`・`partial`・`failed`・`skipped`）を足した。フローを進める仕組みに並列のステップは足していない。Codex の費用は、ステップの費用・予算に数えない。
+- モデルと effort の値は、フローの定義に書いて固定する（`ticket`・`reflect`・`ticket-light`）。`feature-implementer` のステップには `model`・`effort` を書かない。
+- `efforts` の変数（上の「effort の変数」）を足した。
+- `flow start` の `--model` と、宣言の `models` を外した（上の「引数の受け方」）。フローの定義の中の変数 `models`・`efforts` は残す。
 
 ### 子の目印
 

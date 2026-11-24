@@ -481,7 +481,11 @@ UI サーバが落ちていても、端末の CLI で承認できる（P6 を保
 
 ## 10. 接続ツールとの契約（D7・D8）
 
-> **フローの移植の区切り S1 で実装済み（2026-11-24 の決定。D7 の改訂・D35）**: 宣言に、4 つ目の形「組み込みのフロー」（`form: flow`）を足した。flywheel が、フローの定義と進める仕組み（claude-harness の runtime から写したもの。`internal/flow/`）を自分で持ち、core が自分の実行ファイルの `flywheel flow start|status|resume|cancel` を契約のコマンドとして組み立て、`cli` の形と同じ起動の口で呼ぶ。`flow` の形の `commands` は書けず、反映の依頼の口は宣言に書かなくても持つ。操作ごとに進めるフローの名前（S1 は `ticket`）を `flow` に書き、`permission_mode` を `--permission-mode` で、`models`（フロー名 → 変数 → 値）を `--model <変数>=<値>` で進める側へ渡す。契約（版 1 のまま）に、任意の欄 `flow`（フローの名前）と `steps`（ステップの一覧。形が合わなければ全体を「無い」として扱う）を足した。既存の 3 つの形（`plugin`・`cli`・`brief`）と、これらの欄を返さない外部の委譲先は、変えない。詳細: [features/flow-port.md](features/flow-port.md)・契約の欄は [M3 の機能仕様](features/m3-invoker-delegation.md)の契約の節。
+> **フローの移植の区切り S1 で実装済み（2026-11-24 の決定。D7 の改訂・D35）**: 宣言に、4 つ目の形「組み込みのフロー」（`form: flow`）を足した。flywheel が、フローの定義と進める仕組み（claude-harness の runtime から写したもの。`internal/flow/`）を自分で持ち、core が自分の実行ファイルの `flywheel flow start|status|resume|cancel` を契約のコマンドとして組み立て、`cli` の形と同じ起動の口で呼ぶ。`flow` の形の `commands` は書けず、反映の依頼の口は宣言に書かなくても持つ。操作ごとに進めるフローの名前（S1 は `ticket`）を `flow` に書き、`permission_mode` を `--permission-mode` で進める側へ渡す（S1 は、`models`〔フロー名 → 変数 → 値〕も `--model <変数>=<値>` で渡したが、S2 で外した。下の注記）。契約（版 1 のまま）に、任意の欄 `flow`（フローの名前）と `steps`（ステップの一覧。形が合わなければ全体を「無い」として扱う）を足した。既存の 3 つの形（`plugin`・`cli`・`brief`）と、これらの欄を返さない外部の委譲先は、変えない。詳細: [features/flow-port.md](features/flow-port.md)・契約の欄は [M3 の機能仕様](features/m3-invoker-delegation.md)の契約の節。
+
+> **フローの移植の区切り S2 で実装済み（2026-11-24 の決定）— 操作の `flow` に書ける値**: `flow` の形の委譲先の操作の `flow` に書ける値は、`ticket`（標準の実装フロー）と `ticket-light`（簡略なフロー）。計画を作る判断点（J2）がタスクごとに操作を選び、理由をタスクの `flow_reason` に書く。計画の承認で認めた操作のフロー（`planned_flow`）を記録し、承認したフローで委譲を始める部分は、S2 の別のタスク（flywheel#1262）で入れる（この文書の時点では、委譲を始めるときのフローは宣言の操作の `flow` から引く）。1 つの委譲先に、フローの違う操作を並べて書ける。
+
+> **フローの移植の区切り S2 で実装済み（2026-11-24 の決定）— `models` を外した**: モデル・effort・Codex のレビューを使うかは、フローの定義（埋め込んだ YAML と指示文）に書いて固定し、委譲先の宣言では差し替えない。S1 で入れた宣言の `models` と `flywheel flow start` の `--model` は外した（どちらも誤りになる。宣言は設定の誤り、`--model` は使い方の誤り）。フローの定義の中の変数 `models`・`efforts` は残す（最上位の `efforts` の値は `low`・`medium`・`high`・`xhigh`・`max` の 5 つで、ステップは `$efforts.<名前>` で指し、指せるのは `llm` のステップだけ）。標準のフロー `ticket` の実装のステップは、Codex のレビューを `/self-review` と並べて走らせる（Codex の費用は flywheel の費用・予算に数えない。Codex が使えなくても止めない）。変えたいときは、値を差し替えずにフローを使い分ける。契約（版 1 のまま）の `steps` の要素には、任意の欄 `effort` を足した。
 
 > **2026-11-17 の設計の見直しで改める（未実装）**: 委譲先に頼むことを「タスクの実行」と「課題を反映先へ上げる」の 2 種類にし、どちらも頼んだら終わりまで委譲先が進める（D24）。渡すのは背景と指定のタスク（D25）。宣言に、作業ツリーの持ち主を足す案は、S3a では足さなかった（§21.3）。
 
