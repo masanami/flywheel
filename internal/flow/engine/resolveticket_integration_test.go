@@ -10,7 +10,6 @@ import (
 // uses_integration の入力の表と統合ブランチの名前の規則（docs/harness-runtime-design.md §5.6.3「入力」「統合ブランチの名前」）。
 
 func TestResolveTicketIntegrationInputTable(t *testing.T) {
-	needBundledMaterials(t)
 	dir := t.TempDir()
 	taskFile := filepath.Join(dir, "task.md")
 	if err := os.WriteFile(taskFile, []byte("# タスク\n"), 0o644); err != nil {
@@ -81,7 +80,6 @@ func TestResolveTicketIntegrationInputTable(t *testing.T) {
 
 // links_invalid で止まる実行は、統合ブランチを作る段へ進まない（integration は none）。
 func TestResolveTicketIntegrationLinksInvalidIsNotCreate(t *testing.T) {
-	needBundledMaterials(t)
 	r, code, stderr := resolveWith(t, newTools(t), "Refs: 12abc\n", "--issue", "42", "--uses_integration", "true", "--challenge_id", "C-5")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
@@ -93,7 +91,6 @@ func TestResolveTicketIntegrationLinksInvalidIsNotCreate(t *testing.T) {
 
 // uses_integration が true のときは Issue 本文の Base: 行を読まない（issue だけのときも）。Refs:・Closes: 行は、いままでどおり読む。
 func TestResolveTicketIntegrationIgnoresTheBaseLine(t *testing.T) {
-	needBundledMaterials(t)
 	tl := newTools(t)
 	r, code, stderr := resolveWith(t, tl, "Base: feat/issue-40\nRefs: #159\n", "--issue", "42", "--uses_integration", "true", "--challenge_id", "C-5")
 	if code != 0 {
@@ -112,7 +109,6 @@ func TestResolveTicketIntegrationIgnoresTheBaseLine(t *testing.T) {
 // uses_integration が true でない実行は、いままでと同じ（challenge_id は受けるだけ。integration は none）。人が作った統合ブランチ（Base: 行・base）は、
 // 無ければいままでどおり base_missing（作らない）。
 func TestResolveTicketWithoutUsesIntegrationIsUnchanged(t *testing.T) {
-	needBundledMaterials(t)
 	for _, c := range []struct {
 		name    string
 		body    string

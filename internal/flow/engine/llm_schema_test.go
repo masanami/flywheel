@@ -54,8 +54,7 @@ func TestLLMJSONSchemaDialectStillValidates(t *testing.T) {
 // 同梱のスキーマ（runtime/workflows/schemas）はどれも、--json-schema へ渡る文字列に $schema を含まず、
 // それ以外のキーは元のファイルと同じ値を保つ。
 func TestClaudeSchemaArgBundledSchemas(t *testing.T) {
-	needBundledMaterials(t)
-	paths, err := filepath.Glob(filepath.Join("..", "..", "workflows", "schemas", "*.json"))
+	paths, err := filepath.Glob(filepath.Join(bundledWorkflowDir(t), "schemas", "*.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
