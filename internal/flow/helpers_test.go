@@ -158,7 +158,7 @@ printf '{"worktree_path":"%s","removed":true,"skipped":false,"dirty":false,"reas
 
 	// analyze → implement → commit。CI は偽のプラグインの ci-wait.sh が green を返す。
 	f.respond(1, claudeStructured(map[string]any{"outcome": "ok", "e2e_target": "no", "e2e_reason": "internal only", "branch": f.branch, "critical_design": ""}, 0.3))
-	f.respond(2, claudeStructured(map[string]any{"outcome": "pass", "self_review": "complete", "pr_title": "feat: add the widget", "summary": "Adds the widget.",
+	f.respond(2, claudeStructured(map[string]any{"outcome": "pass", "self_review": "complete", "codex_review": "off", "pr_title": "feat: add the widget", "summary": "Adds the widget.",
 		"behaviors": []map[string]string{}, "residual_findings": []map[string]string{}, "unverified": []string{}, "cross_repo_attestation": "", "deviation_report": ""}, 4.0))
 	f.respond(3, claudeStructured(map[string]any{"outcome": "committed", "commit_sha": "abc", "summary": "committed"}, 4.5))
 	return f
