@@ -877,6 +877,15 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 		return nil, nil, ErrBudgetExceeded
 	}
 
+	// 承認したフロー（planned_flow）があるのに委譲先が flow の形でないときは、形によらず（plugin・brief を含む）起動せず保留にする。
+	if dc.Task.PlannedFlow != "" && dc.Connector.Form != ConnectorFormFlow {
+		err := s.holdPlannedFlowUnrunnable(ctx, ch.ID, dc.Task, &dc.Connector)
+		if jc != nil && errors.Is(err, ErrValidation) {
+			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable, Detail: err.Error()}, nil
+		}
+		return nil, nil, err
+	}
+
 	// form: cli の接続ツールの操作は、claude の子も J3 も起動せず、契約の start を呼んで実行 ID を記録し、その周の委譲を終える。
 	if dc.Connector.UsesContractCommands() {
 		// 契約の run もスロットは使わないが、同時委譲数（max_parallel_runs）には数える。
