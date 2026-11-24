@@ -250,3 +250,72 @@ func TestContractCommand_FactsAreReadOnlyWhenTheShapeFits(t *testing.T) {
 		})
 	}
 }
+
+const stepJSON = `{"seq": 1, "step": "analyze", "kind": "agent", "attempt": 1, "state": "finished", "outcome": "ok", "started_at": "2026-01-01T00:00:00Z",
+  "ended_at": "2026-01-01T00:01:00Z", "cost_usd": 0.5, "cost_unknown": false, "model": null, "models_used": ["m1"]}`
+
+func statusWithSteps(t *testing.T, extra string) contractReadForTest {
+	t.Helper()
+	in, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"contract_version": 1, "run_id": "r-1", "state": "running", "summary": "s",
+	  "requested_action": null, "artifacts": [], "cost_usd": null, "facts": {"a": "b"}, ` + extra + `}`})
+	out, err := NewLauncher().Status(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contractReadForTest{Result: out.Result, Status: out.Status}
+}
+
+// flow・steps は任意。在れば写し、欄の無い出力は従来どおり読む。
+func TestContractCommand_FlowAndStepsAreNormalized(t *testing.T) {
+	got := statusWithSteps(t, `"flow": "ticket", "steps": [`+stepJSON+`]`)
+	if got.Result != core.RunResultSucceeded || got.Status == nil || got.Status.Flow == nil || *got.Status.Flow != "ticket" || len(got.Status.Steps) != 1 {
+		t.Fatalf("got = %+v", got)
+	}
+	sp := got.Status.Steps[0]
+	if sp.Seq != 1 || sp.Step != "analyze" || sp.State != "finished" || *sp.Outcome != "ok" || sp.Model != nil || *sp.CostUSD != 0.5 || len(sp.ModelsUsed) != 1 {
+		t.Errorf("step = %+v", sp)
+	}
+	none := statusWithSteps(t, `"x": 1`)
+	if none.Status == nil || none.Status.Steps != nil || none.Status.Flow != nil {
+		t.Errorf("without the fields: %+v", none.Status)
+	}
+	empty := statusWithSteps(t, `"steps": []`)
+	if empty.Status == nil || empty.Status.Steps == nil || len(empty.Status.Steps) != 0 {
+		t.Errorf("empty array must stay present: %+v", empty.Status)
+	}
+}
+
+// steps の形が合わないとき（AC-111）、steps の全体を無いものとして扱い、出力は malformed にせず、ほかの欄は従来どおり読む。
+func TestContractCommand_MalformedStepsAreDroppedWithoutMalformedOutput(t *testing.T) {
+	bad := map[string]string{
+		"not an array":     `"steps": {"seq": 1}`,
+		"missing field":    `"steps": [` + strings.Replace(stepJSON, `"kind": "agent", `, "", 1) + `]`,
+		"wrong type":       `"steps": [` + strings.Replace(stepJSON, `"step": "analyze"`, `"step": 3`, 1) + `]`,
+		"state outside":    `"steps": [` + strings.Replace(stepJSON, `"finished"`, `"done"`, 1) + `]`,
+		"seq below 1":      `"steps": [` + strings.Replace(stepJSON, `"seq": 1`, `"seq": 0`, 1) + `]`,
+		"seq not integer":  `"steps": [` + strings.Replace(stepJSON, `"seq": 1`, `"seq": 1.5`, 1) + `]`,
+		"seq duplicated":   `"steps": [` + stepJSON + `,` + stepJSON + `]`,
+		"attempt below 1":  `"steps": [` + strings.Replace(stepJSON, `"attempt": 1`, `"attempt": 0`, 1) + `]`,
+		"one bad of two":   `"steps": [` + stepJSON + `,` + strings.Replace(strings.Replace(stepJSON, `"seq": 1`, `"seq": 2`, 1), `"finished"`, `"done"`, 1) + `]`,
+		"models not array": `"steps": [` + strings.Replace(stepJSON, `["m1"]`, `"m1"`, 1) + `]`,
+	}
+	for name, extra := range bad {
+		t.Run(name, func(t *testing.T) {
+			got := statusWithSteps(t, `"flow": "ticket", `+extra)
+			if got.Result != core.RunResultSucceeded || got.Status == nil {
+				t.Fatalf("result = %v status = %+v, want a normal read", got.Result, got.Status)
+			}
+			if got.Status.Steps != nil {
+				t.Errorf("steps = %+v, want none", got.Status.Steps)
+			}
+			if got.Status.Facts["a"] != "b" || got.Status.RunID != "r-1" || got.Status.Flow == nil {
+				t.Errorf("other fields were not read as before: %+v", got.Status)
+			}
+		})
+	}
+}
+
+type contractReadForTest struct {
+	Result core.RunResult
+	Status *core.ContractStatus
+}

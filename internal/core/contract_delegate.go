@@ -103,6 +103,27 @@ type ContractStatus struct {
 	CostUSD *float64
 	// Facts は出力の facts（名前から文字列への対応。無い・形が合わないときは nil）。
 	Facts map[string]string
+	// Flow は出力の flow（フローの名前。無い・文字列でないときは nil）。contract_run.flow に残す。
+	Flow *string
+	// Steps は出力の steps。nil は「無い」（steps が無い・形が合わない）で、ステップの行に触らない。
+	// 空の非 nil は「在って 0 件」で、その委譲の実行のステップの行をすべて消す。
+	Steps []ContractStep
+}
+
+// ContractStep は契約の出力の steps の 1 要素（形は invoker が確かめ済み）。API の steps と同じ欄に Seq を足したもの。
+type ContractStep struct {
+	Seq         int
+	Step        string
+	Kind        string
+	Attempt     int
+	State       string // running | finished | cancelled | interrupted
+	Outcome     *string
+	StartedAt   string
+	EndedAt     *string
+	CostUSD     *float64
+	CostUnknown bool
+	Model       *string
+	ModelsUsed  []string
 }
 
 // ContractLaunchInput は ContractClient へ渡す、契約のコマンド 1 回ぶんの情報。差し込みは core が
@@ -502,8 +523,11 @@ func findCLIConnector(d *ConnectorsDeclaration, id string) (*Connector, error) {
 		if c.ID != id {
 			continue
 		}
-		if c.Form != ConnectorFormCLI || c.Commands == nil {
+		if !c.UsesContractCommands() {
 			return nil, fmt.Errorf("%w: connector %q is not a cli connector", ErrValidation, id)
+		}
+		if c.Commands == nil { // form: flow の起動は、commands の引数の組み立てが入るまで未対応
+			return nil, fmt.Errorf("%w: connector %q (form %s) cannot be launched yet", ErrValidation, id, c.Form)
 		}
 		return c, nil
 	}
@@ -1334,7 +1358,60 @@ func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contra
 	if err != nil {
 		return err
 	}
+	if err := writeContractFlowAndSteps(ctx, tx, rowID, st); err != nil {
+		return err
+	}
 	return countUnmetFacts(ctx, tx, c, st, rowID, report)
+}
+
+// writeContractFlowAndSteps は contract_run.flow と、委譲の実行のステップの行（contract_run_step）を出力と同じ中身にする。
+// 委譲の実行の ID と seq を鍵に足すか上書きし、出力に無い seq の行は消す。steps が無い（nil）ときはステップの行に触らない。
+func writeContractFlowAndSteps(ctx context.Context, tx *sql.Tx, rowID int64, st *ContractStatus) error {
+	var flow any
+	if st.Flow != nil {
+		flow = *st.Flow
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET flow = ? WHERE id = ?`, flow, rowID); err != nil {
+		return err
+	}
+	if st.Steps == nil {
+		return nil
+	}
+	if len(st.Steps) == 0 {
+		_, err := tx.ExecContext(ctx, `DELETE FROM contract_run_step WHERE contract_run_id = ?`, rowID)
+		return err
+	}
+	seqs := make([]any, 0, len(st.Steps)+1)
+	seqs = append(seqs, rowID)
+	marks := ""
+	for _, sp := range st.Steps {
+		models, err := json.Marshal(append([]string{}, sp.ModelsUsed...))
+		if err != nil {
+			return err
+		}
+		var cost any
+		if sp.CostUSD != nil {
+			cost = usdToMicros(*sp.CostUSD)
+		}
+		unknown := 0
+		if sp.CostUnknown {
+			unknown = 1
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (contract_run_id, seq) DO UPDATE SET step = excluded.step, kind = excluded.kind, attempt = excluded.attempt,
+				state = excluded.state, outcome = excluded.outcome, started_at = excluded.started_at, ended_at = excluded.ended_at,
+				cost_usd = excluded.cost_usd, cost_unknown = excluded.cost_unknown, model = excluded.model, models_used = excluded.models_used`,
+			rowID, sp.Seq, sp.Step, sp.Kind, sp.Attempt, sp.State, stringPtrColumn(sp.Outcome), sp.StartedAt, stringPtrColumn(sp.EndedAt),
+			cost, unknown, stringPtrColumn(sp.Model), string(models)); err != nil {
+			return err
+		}
+		seqs = append(seqs, sp.Seq)
+		marks += ", ?"
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM contract_run_step WHERE contract_run_id = ? AND seq NOT IN (`+strings.TrimPrefix(marks, ", ")+`)`, seqs...)
+	return err
 }
 
 // encodeContractFacts は facts を JSON の文字列にする（nil は NULL）。

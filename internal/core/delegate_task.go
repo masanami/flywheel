@@ -297,7 +297,7 @@ func selectLaunchTasksOfChallenge(ctx context.Context, tx *sql.Tx, conn *Connect
 			continue
 		}
 		if conn != nil {
-			if _, c := conn.findConnectorRepo(t.Repo); c != nil && c.Form != ConnectorFormCLI {
+			if _, c := conn.findConnectorRepo(t.Repo); c != nil && !c.UsesContractCommands() {
 				notCLI = append(notCLI, fmt.Sprintf("%s（委譲先 %s・形 %s）", t.ID, c.ID, c.Form))
 				continue
 			}
