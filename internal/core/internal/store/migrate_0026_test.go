@@ -168,10 +168,10 @@ func TestTaskMigration(t *testing.T) {
 		}
 		cols := tableColumnInfo(t, db, "task")
 		required := []string{"id", "challenge_id", "plan_version", "title", "body", "done_criteria", "repo", "operation", "status", "created_at", "updated_at", "expand_after"}
-		nullable := []string{"key", "non_goals", "source_key", "budget_impl_micros", "budget_review_micros", "addition_id"} // budget_* は版 29、addition_id・expand_after は版 34 で足す
+		nullable := []string{"key", "non_goals", "source_key", "budget_impl_micros", "budget_review_micros", "addition_id", "planned_flow", "flow_reason"} // budget_* は版 29、addition_id・expand_after は版 34、planned_flow・flow_reason は版 40 で足す
 		// verify_not_met_streak は版 35 で足す（NOT NULL・既定 0）。
 		if len(cols) != len(required)+len(nullable)+1 {
-			t.Errorf("task columns = %v, want %d columns", cols, len(required)+len(nullable))
+			t.Errorf("task columns = %v, want %d columns", cols, len(required)+len(nullable)+1)
 		}
 		for _, c := range required {
 			// 主キー（id）は INTEGER PRIMARY KEY で notnull が 0 になりうるので、id 以外を検査する。
