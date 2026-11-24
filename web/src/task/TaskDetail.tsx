@@ -12,6 +12,7 @@ import { useChat } from "../chat/context.ts";
 import {
   CONFLICT_FIX_PENDING_TEXT,
   DELEGATE_STATE_LABELS,
+  FLOW_LABELS,
   HOLD_KIND_PARENT_DIRECT,
   LANDING_LABELS,
   LOADING_TEXT,
@@ -21,6 +22,8 @@ import {
   RUN_KIND_LABELS,
   RUN_RESULT_LABELS,
   RUN_RUNNING_LABEL,
+  STEP_LABELS,
+  STEP_STATE_LABELS,
   TASK_SPENT_LABEL,
   UPSTREAM_STATE_LABELS,
   VERDICT_LABELS,
@@ -381,6 +384,12 @@ function DelegateSection({ d }: { d: NonNullable<Task["delegate"]> }) {
           {label(DELEGATE_STATE_LABELS, d.state)}
         </b>
       </p>
+      {d.flow !== null ? (
+        <p>
+          フロー:{" "}
+          <span data-testid="delegate-flow">{label(FLOW_LABELS, d.flow)}</span>
+        </p>
+      ) : null}
       <p data-testid="delegate-summary" style={{ whiteSpace: "pre-wrap" }}>
         {d.summary}
       </p>
@@ -392,7 +401,90 @@ function DelegateSection({ d }: { d: NonNullable<Task["delegate"]> }) {
           </span>
         </p>
       ) : null}
+      <StepsTable steps={d.steps} />
     </section>
+  );
+}
+
+type Step = NonNullable<Task["delegate"]>["steps"][number];
+
+const NO_VALUE = "—";
+// 画面に出す種類（select・gate は出さない）。
+const SHOWN_STEP_KINDS = ["llm", "command", "workspace", "pull-request"];
+
+export function stepName(step: string, nth: number): string {
+  const base = Object.hasOwn(STEP_LABELS, step)
+    ? `${STEP_LABELS[step]} ${step}`
+    : step;
+  return nth >= 2 ? `${base}（${nth} 回目）` : base;
+}
+
+export function stepResult(s: Step): string {
+  if (s.state === "finished") return s.outcome ?? NO_VALUE;
+  return label(STEP_STATE_LABELS, s.state);
+}
+
+export function formatSeconds(sec: number): string {
+  const n = Math.max(0, Math.floor(sec));
+  return n < 60 ? `${n} 秒` : `${Math.floor(n / 60)} 分`;
+}
+
+export function stepDuration(s: Step, nowMs: number): string {
+  const start = Date.parse(s.started_at);
+  if (s.ended_at !== null) {
+    return formatSeconds((Date.parse(s.ended_at) - start) / 1000);
+  }
+  if (s.state !== "running") return NO_VALUE;
+  return `${formatSeconds((nowMs - start) / 1000)}経過`;
+}
+
+export function stepCost(s: Step): string {
+  if (s.cost_usd === null) return NO_VALUE;
+  return `${s.cost_usd.toFixed(2)} USD${s.cost_unknown ? "（上限額で計上）" : ""}`;
+}
+
+export function stepModels(s: Step): string {
+  return s.models_used.length === 0 ? NO_VALUE : s.models_used.join("、");
+}
+
+function StepsTable({ steps }: { steps: Step[] }) {
+  const shown = steps.filter((s) => SHOWN_STEP_KINDS.includes(s.kind));
+  if (shown.length === 0) return null;
+  const seen = new Map<string, number>();
+  const nowMs = Date.now();
+  let total = 0;
+  const rows = shown.map((s, i) => {
+    const nth = (seen.get(s.step) ?? 0) + 1;
+    seen.set(s.step, nth);
+    if (s.cost_usd !== null) total += s.cost_usd;
+    return (
+      // biome-ignore lint/suspicious/noArrayIndexKey: 同じ識別子が並びうる
+      <tr key={i} data-testid="delegate-step">
+        <td>{stepName(s.step, nth)}</td>
+        <td>{stepResult(s)}</td>
+        <td>{stepDuration(s, nowMs)}</td>
+        <td>{stepCost(s)}</td>
+        <td>{stepModels(s)}</td>
+      </tr>
+    );
+  });
+  return (
+    <div data-testid="delegate-steps">
+      <h4>ステップの進み</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>ステップ</th>
+            <th>結果</th>
+            <th>時間</th>
+            <th>費用</th>
+            <th>モデル</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+      <p data-testid="delegate-steps-total">合計 {total.toFixed(2)} USD</p>
+    </div>
   );
 }
 

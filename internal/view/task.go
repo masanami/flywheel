@@ -91,11 +91,30 @@ func FromTaskAdditions(as []core.TaskAddition) []TaskAddition {
 
 // TaskDelegate はタスクの最後の契約の実行。state は ContractState の値（記録のまま）、summary は委譲先が返した要約、
 // requested_kind は委譲先が求めていること（無ければ null）、run_id はその実行の ID。
+// flow は委譲の実行の記録の flow（無ければ null）、steps はステップの行を始まった順にすべての種類で並べたもの（無ければ `[]`）。
 type TaskDelegate struct {
-	RequestedKind *string `json:"requested_kind"`
-	RunID         string  `json:"run_id"`
-	State         string  `json:"state"`
-	Summary       string  `json:"summary"`
+	Flow          *string            `json:"flow"`
+	RequestedKind *string            `json:"requested_kind"`
+	RunID         string             `json:"run_id"`
+	State         string             `json:"state"`
+	Steps         []TaskDelegateStep `json:"steps"`
+	Summary       string             `json:"summary"`
+}
+
+// TaskDelegateStep は delegate.steps の要素（ステップ 1 回ぶん）。cost_usd は USD に直した数（無ければ null）、models_used は使ったモデルの名前、
+// state は `running`・`finished`・`cancelled`・`interrupted`。
+type TaskDelegateStep struct {
+	Attempt     int64    `json:"attempt"`
+	CostUnknown bool     `json:"cost_unknown"`
+	CostUSD     *float64 `json:"cost_usd"`
+	EndedAt     *string  `json:"ended_at"`
+	Kind        string   `json:"kind"`
+	Model       *string  `json:"model"`
+	ModelsUsed  []string `json:"models_used"`
+	Outcome     *string  `json:"outcome"`
+	StartedAt   string   `json:"started_at"`
+	State       string   `json:"state"`
+	Step        string   `json:"step"`
 }
 
 // TaskArtifact はタスクの実行の成果物 1 件。kind・ref・state は記録のまま、role は統合先の印（`integration`）か null。
@@ -142,7 +161,14 @@ func fromTaskDelegate(d *core.TaskDelegate) *TaskDelegate {
 	if d == nil {
 		return nil
 	}
-	return &TaskDelegate{RequestedKind: d.RequestedKind, RunID: d.RunID, State: string(d.State), Summary: d.Summary}
+	steps := make([]TaskDelegateStep, 0, len(d.Steps))
+	for _, sp := range d.Steps {
+		steps = append(steps, TaskDelegateStep{
+			Attempt: sp.Attempt, CostUnknown: sp.CostUnknown, CostUSD: sp.CostUSD, EndedAt: ts(sp.EndedAt), Kind: sp.Kind, Model: sp.Model,
+			ModelsUsed: append([]string{}, sp.ModelsUsed...), Outcome: sp.Outcome, StartedAt: FormatTimestamp(sp.StartedAt), State: sp.State, Step: sp.Step,
+		})
+	}
+	return &TaskDelegate{Flow: d.Flow, RequestedKind: d.RequestedKind, RunID: d.RunID, State: string(d.State), Steps: steps, Summary: d.Summary}
 }
 
 func fromTaskFacts(f map[string]string) map[string]string {

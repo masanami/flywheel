@@ -18,6 +18,7 @@ import type {
   Task,
   TreeTask,
 } from "../api/types.gen.ts";
+import { STEP_LABELS } from "../labels.ts";
 import { FakeEventSource, fixtures, installFakes } from "../testing/fakes.ts";
 
 // タスクの詳細の画面（#810）。完了条件の 1 つずつを、名前の AC-<番号> が直接確かめる。
@@ -724,6 +725,8 @@ const D = (p: Partial<NonNullable<Task["delegate"]>> = {}) => ({
   run_id: "R-1",
   state: "succeeded",
   summary: "要約",
+  flow: null,
+  steps: [],
   ...p,
 });
 
@@ -1500,4 +1503,203 @@ it("#1185: 最後の開いている保留が 409 の後の読み直しで消え�
   expect(within(root).getByTestId("hold-changed").textContent).toContain(
     "問いか選択肢が変わっていました",
   );
+});
+
+// ---- 委譲先の実行のステップの一覧（#1229。AC-146〜173 のうち画面の分）----
+type StepRow = NonNullable<Task["delegate"]>["steps"][number];
+const S = (p: Partial<StepRow> = {}): StepRow => ({
+  attempt: 1,
+  cost_unknown: false,
+  cost_usd: 1,
+  ended_at: "2026-01-01T00:00:10Z",
+  kind: "llm",
+  model: null,
+  models_used: [],
+  outcome: "pass",
+  started_at: "2026-01-01T00:00:00Z",
+  state: "finished",
+  step: "implement",
+  ...p,
+});
+const openSteps = async (steps: StepRow[], flow: string | null = null) => {
+  const { root } = await open(
+    show({ tasks: [T("T-2", { delegate: D({ steps, flow }) })] }),
+  );
+  return within(within(root).getByTestId("task-delegate"));
+};
+const rowsOf = (sec: {
+  queryAllByTestId: (id: string) => HTMLElement[];
+}) =>
+  sec
+    .queryAllByTestId("delegate-step")
+    .map((r) => Array.from(r.querySelectorAll("td")).map((c) => c.textContent));
+
+it("AC-152 AC-153 AC-154 AC-155 AC-156 #1229: 一覧は select・gate を除き、API の並びで出す。0 件なら見出しも表も出さない", async () => {
+  const sec = await openSteps([
+    S({ step: "resolve", kind: "select" }),
+    S({ step: "analyze" }),
+    S({ step: "quality", kind: "gate" }),
+    S({ step: "commit", kind: "command" }),
+  ]);
+  expect(sec.getByText("ステップの進み")).toBeTruthy();
+  expect(rowsOf(sec).map((r) => r[0])).toEqual([
+    "分析 analyze",
+    "コミット commit",
+  ]);
+  cleanup();
+  const none = await openSteps([]);
+  expect(none.queryByText("ステップの進み")).toBeNull();
+  expect(none.queryByRole("table")).toBeNull();
+  cleanup();
+  const onlyHidden = await openSteps([
+    S({ kind: "select" }),
+    S({ kind: "gate" }),
+  ]);
+  expect(onlyHidden.queryByText("ステップの進み")).toBeNull();
+  expect(onlyHidden.queryByRole("table")).toBeNull();
+});
+
+it("AC-157 AC-158 AC-159 AC-160 #1229: 名前は表にあれば「日本語名 識別子」、無ければ識別子だけ。2 回目以降は（N 回目）", async () => {
+  const sec = await openSteps([
+    S({ step: "implement" }),
+    S({ step: "fix" }),
+    S({ step: "implement", attempt: 2 }),
+    S({ step: "implement", attempt: 3 }),
+    S({ step: "mystery" }),
+  ]);
+  expect(rowsOf(sec).map((r) => r[0])).toEqual([
+    "実装 implement",
+    "直し fix",
+    "実装 implement（2 回目）",
+    "実装 implement（3 回目）",
+    "mystery",
+  ]);
+});
+
+it("AC-157 #1229: 表の 25 件すべてが「日本語名 識別子」で出る（仕様の表の文字列を固定）", async () => {
+  const want = [
+    "入力の確かめ resolve",
+    "統合ブランチの用意 integration",
+    "分析 analyze",
+    "作業ツリーの用意 workspace",
+    "実装 implement",
+    "直し fix",
+    "コミット commit",
+    "取り込み sync",
+    "コンフリクトの解消 sync-resolve",
+    "E2E テスト e2e",
+    "品質の検査 quality",
+    "PR を開く open",
+    "統合ブランチの片付け retire",
+    "PR の作成・更新 publish",
+    "CI 待ち ci",
+    "レビュー対応 respond",
+    "反映 land",
+    "反映前の取り込み land-sync",
+    "反映前のコンフリクトの解消 land-sync-resolve",
+    "取り込みの push land-push",
+    "マージ merge",
+    "片付け cleanup",
+    "成果物の受け取り adopt",
+    "PR の説明 describe",
+    "push push",
+  ];
+  const sec = await openSteps(
+    want.map((w) => S({ step: w.slice(w.lastIndexOf(" ") + 1) })),
+  );
+  expect(rowsOf(sec).map((r) => r[0])).toEqual(want);
+  expect(Object.keys(STEP_LABELS).length).toBe(25);
+});
+
+it("AC-158 #1229: Object の継承キー（constructor）は表にある識別子として扱わず、識別子だけを出す", async () => {
+  const sec = await openSteps([
+    S({ step: "constructor" }),
+    S({ step: "constructor" }),
+  ]);
+  expect(rowsOf(sec).map((r) => r[0])).toEqual([
+    "constructor",
+    "constructor（2 回目）",
+  ]);
+});
+
+it("AC-161 AC-162 AC-163 AC-164 #1229: 結果は finished なら outcome、running・interrupted・cancelled は語", async () => {
+  const sec = await openSteps([
+    S({ outcome: "fail" }),
+    S({ state: "running", outcome: null, ended_at: null }),
+    S({ state: "interrupted", outcome: null }),
+    S({ state: "cancelled", outcome: null }),
+  ]);
+  expect(rowsOf(sec).map((r) => r[1])).toEqual([
+    "fail",
+    "実行中…",
+    "中断",
+    "取り消し",
+  ]);
+});
+
+it("AC-165 #1229: 終わった行の時間は 59 秒・60 秒・119 秒で「59 秒」「1 分」「1 分」", async () => {
+  const sec = await openSteps([
+    S({ ended_at: "2026-01-01T00:00:59Z" }),
+    S({ ended_at: "2026-01-01T00:01:00Z" }),
+    S({ ended_at: "2026-01-01T00:01:59Z" }),
+  ]);
+  expect(rowsOf(sec).map((r) => r[2])).toEqual(["59 秒", "1 分", "1 分"]);
+});
+
+it("AC-166 #1229: 実行中の行の時間は始まりからの経過に「経過」を添える", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-01-01T00:03:00Z"));
+  try {
+    const sec = await openSteps([
+      S({ state: "running", outcome: null, ended_at: null }),
+    ]);
+    expect(rowsOf(sec)[0]?.[2]).toBe("3 分経過");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("AC-167 AC-168 AC-169 #1229: 費用は小数 2 桁の USD、null は「—」、cost_unknown は（上限額で計上）", async () => {
+  const sec = await openSteps([
+    S({ cost_usd: 1.9429 }),
+    S({ cost_usd: null }),
+    S({ cost_usd: 2, cost_unknown: true }),
+  ]);
+  expect(rowsOf(sec).map((r) => r[3])).toEqual([
+    "1.94 USD",
+    "—",
+    "2.00 USD（上限額で計上）",
+  ]);
+});
+
+it("AC-170 AC-171 #1229: モデルは「、」でつなぎ、空なら「—」", async () => {
+  const sec = await openSteps([
+    S({ models_used: ["opus", "sonnet"] }),
+    S({ models_used: [] }),
+  ]);
+  expect(rowsOf(sec).map((r) => r[4])).toEqual(["opus、sonnet", "—"]);
+});
+
+it("AC-172 #1229: 合計は cost_usd が数の行の額の合計（null は足さない）", async () => {
+  const sec = await openSteps([
+    S({ cost_usd: 1.5 }),
+    S({ cost_usd: null }),
+    S({ cost_usd: 0.25 }),
+  ]);
+  expect(sec.getByTestId("delegate-steps-total").textContent).toBe(
+    "合計 1.75 USD",
+  );
+});
+
+it("AC-173 #1229: flow が null でなければフローの名前を出し、null なら出さない", async () => {
+  const sec = await openSteps([S()], "ticket");
+  expect(sec.getByTestId("delegate-flow").textContent).toBe(
+    "標準の実装（ticket）",
+  );
+  cleanup();
+  const other = await openSteps([S()], "custom");
+  expect(other.getByTestId("delegate-flow").textContent).toBe("custom");
+  cleanup();
+  const none = await openSteps([S()], null);
+  expect(none.queryByTestId("delegate-flow")).toBeNull();
 });
