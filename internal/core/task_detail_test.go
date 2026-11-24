@@ -263,3 +263,64 @@ func TestTaskDetail_DelegateFlowAndSteps_AC146_AC150(t *testing.T) {
 		t.Errorf("running step must have nil ended_at/outcome: %+v", d.Steps[1])
 	}
 }
+
+// AC-135〜AC-138: 課題の詳細のタスクは、タスクの記録の planned_flow・flow_reason を写す（NULL は空）。
+func TestTaskDetail_PlannedFlowAndFlowReasonFromTaskRecord_AC135_AC138(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	id := f.newMulti(t, "d", "P2", false, multiTask{key: "a"}, multiTask{key: "b"})
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE task SET planned_flow = 'ticket-light', flow_reason = '文書だけの変更' WHERE key = 'a'`)
+		return err
+	})
+	a, _ := f.tdTask(t, id, "a")
+	if a.PlannedFlow != "ticket-light" || a.FlowReason != "文書だけの変更" {
+		t.Errorf("AC-135/137: planned_flow=%q flow_reason=%q", a.PlannedFlow, a.FlowReason)
+	}
+	b, _ := f.tdTask(t, id, "b")
+	if b.PlannedFlow != "" || b.FlowReason != "" {
+		t.Errorf("AC-136/138: NULL must read as empty, got %q %q", b.PlannedFlow, b.FlowReason)
+	}
+}
+
+// AC-141: ステップの行の effort が、課題の詳細の delegate.steps の要素の Effort になる（NULL は nil）。
+func TestTaskDetail_StepEffort_AC141(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	id := f.newMulti(t, "d", "P2", false, multiTask{key: "a"})
+	cid, _ := parseChallengeID(id)
+	_, tid := f.tdTask(t, id, "a")
+	f.tdContractRun(t, cid, tid, "e1", tdCR{state: "running", summary: "s"})
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		ins := `INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used, effort)
+			VALUES ((SELECT id FROM contract_run WHERE external_run_id = 'e1'), ?, ?, 'llm', 1, 'finished', 'pass', '2026-11-01T00:00:00Z', '2026-11-01T00:00:05Z', 0, 0, NULL, '[]', ?)`
+		if _, err := tx.Exec(ins, 1, "implement", "medium"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ins, 2, "fix", nil)
+		return err
+	})
+	tk, _ := f.tdTask(t, id, "a")
+	steps := tk.Detail.Delegate.Steps
+	if len(steps) != 2 || steps[0].Effort == nil || *steps[0].Effort != "medium" || steps[1].Effort != nil {
+		t.Fatalf("steps = %+v, want effort medium then nil", steps)
+	}
+}
+
+// AC-139/140（承認の後の分）: 計画の読み取りは、タスクの行があればタスクの記録の planned_flow・flow_reason で出す。
+func TestPlanView_ApprovedTaskUsesTaskRecordFlow_AC139_AC140(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	id := f.newMulti(t, "d", "P2", false, multiTask{key: "a"})
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE task SET planned_flow = 'ticket', flow_reason = '標準でよい' WHERE key = 'a'`)
+		return err
+	})
+	pv, err := f.s.GetPlanView(context.Background(), id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pv.Tasks) != 1 || pv.Tasks[0].PlannedFlow != "ticket" || pv.Tasks[0].FlowReason != "標準でよい" {
+		t.Errorf("tasks = %+v, want the task record's flow and reason", pv.Tasks)
+	}
+}

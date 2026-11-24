@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "scripts/ticket-light-branch.sh の出力（ticket-light ワークフローの branch）。resolve の key から作業ブランチの名前を決める",
+  "type": "object",
+  "required": ["outcome", "branch"],
+  "properties": {
+    "outcome": { "type": "string", "enum": ["ok"] },
+    "branch": { "type": "string", "description": "作業ブランチの名前。feature/<鍵>-light（鍵は task-<番号> か issue-<番号>）" }
+  },
+  "additionalProperties": false
+}

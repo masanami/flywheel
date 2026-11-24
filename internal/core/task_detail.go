@@ -28,12 +28,14 @@ type TaskDelegateStep struct {
 	CostUSD     *float64
 	EndedAt     *time.Time
 	Kind        string
-	Model       *string
-	ModelsUsed  []string
-	Outcome     *string
-	StartedAt   time.Time
-	State       string
-	Step        string
+	// Effort はステップの記録（contract_run_step.effort）の、書いた effort（NULL は nil）。
+	Effort     *string
+	Model      *string
+	ModelsUsed []string
+	Outcome    *string
+	StartedAt  time.Time
+	State      string
+	Step       string
 }
 
 // TaskArtifactView は課題の詳細のタスクの成果物 1 件。Kind・Ref・State は記録のまま。Role は統合先の印（`integration`）か nil。
@@ -181,7 +183,7 @@ func loadTaskDetail(ctx context.Context, tx *sql.Tx, cid int64, t *Task, integra
 
 // loadTaskDelegateSteps は委譲の実行のステップの行を seq の昇順で読む（行が無ければ空）。
 func loadTaskDelegateSteps(ctx context.Context, tx *sql.Tx, contractRunID int64) ([]TaskDelegateStep, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used
+	rows, err := tx.QueryContext(ctx, `SELECT step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used, effort
 		FROM contract_run_step WHERE contract_run_id = ? ORDER BY seq`, contractRunID)
 	if err != nil {
 		return nil, err
@@ -190,11 +192,11 @@ func loadTaskDelegateSteps(ctx context.Context, tx *sql.Tx, contractRunID int64)
 	out := []TaskDelegateStep{}
 	for rows.Next() {
 		var sp TaskDelegateStep
-		var outcome, ended, model sql.NullString
+		var outcome, ended, model, effort sql.NullString
 		var started, models string
 		var cost sql.NullInt64
 		var unknown int64
-		if err := rows.Scan(&sp.Step, &sp.Kind, &sp.Attempt, &sp.State, &outcome, &started, &ended, &cost, &unknown, &model, &models); err != nil {
+		if err := rows.Scan(&sp.Step, &sp.Kind, &sp.Attempt, &sp.State, &outcome, &started, &ended, &cost, &unknown, &model, &models, &effort); err != nil {
 			return nil, err
 		}
 		sp.CostUnknown = unknown != 0
@@ -203,6 +205,9 @@ func loadTaskDelegateSteps(ctx context.Context, tx *sql.Tx, contractRunID int64)
 		}
 		if model.Valid {
 			sp.Model = &model.String
+		}
+		if effort.Valid {
+			sp.Effort = &effort.String
 		}
 		if cost.Valid {
 			v := microsToUSD(cost.Int64)

@@ -587,11 +587,11 @@ J4 に回す範囲は 2 つで、同じ指示文（`internal/invoker/prompts/j4.
 
 契約の版は 1 のまま、任意の欄を足した。欄を返さない委譲先（`form: cli` の外部コマンド）の読み方は変えない。
 
-- **`flow`**: 出力の任意のキー（文字列。フローの名前。S1 は `ticket`・`reflect`）。文字列でなければ無いものとして扱う。core は契約の実行の記録（`contract_run.flow`。スキーマ版 39）に残す。
-- **`steps`**: 出力の任意のキー（配列）。フローの中の 1 つの処理（ステップ）の、1 回の実行ごとに 1 要素。要素の欄: `seq`（実行の中の通し番号。1 以上で重ならない）・`step`（識別子）・`kind`・`attempt`（何回目か。1 以上）・`state`（`running`・`finished`・`cancelled`・`interrupted` の 4 値）・`outcome`・始まった時刻（`started_at`）・終わった時刻（`ended_at`）・`cost_usd`（数か `null`）・`cost_unknown`（費用を得られず上限額を使ったものとして数えたとき真）・`model`（書いたモデル。無ければ `null`）・`models_used`（使ったモデルの名前の配列）。`cost_usd` の合計は契約の `cost_usd` と一致する。
+- **`flow`**: 出力の任意のキー（文字列。フローの名前。S1 は `ticket`・`reflect`。S2 から `ticket-light` も）。文字列でなければ無いものとして扱う。core は契約の実行の記録（`contract_run.flow`。スキーマ版 39）に残す。
+- **`steps`**: 出力の任意のキー（配列）。フローの中の 1 つの処理（ステップ）の、1 回の実行ごとに 1 要素。要素の欄: `seq`（実行の中の通し番号。1 以上で重ならない）・`step`（識別子）・`kind`・`attempt`（何回目か。1 以上）・`state`（`running`・`finished`・`cancelled`・`interrupted` の 4 値）・`outcome`・始まった時刻（`started_at`）・終わった時刻（`ended_at`）・`cost_usd`（数か `null`）・`cost_unknown`（費用を得られず上限額を使ったものとして数えたとき真）・`model`（書いたモデル。無ければ `null`）・`effort`（任意。文字列か `null`。ステップに渡した `claude --effort` の値で、欄が無い要素は `null` と読む。文字列でも `null` でもない要素が 1 つでもあれば、`steps` の全体を「無い」として扱う）・`models_used`（使ったモデルの名前の配列）。`cost_usd` の合計は契約の `cost_usd` と一致する。
 - **形が合わないときの扱い**: `steps` が無い・配列でない・要素のどれか 1 つでも形が合わない（必須の欄が無い・型が違う・`state` が 4 値の外・`seq` が 1 未満か重なる・`attempt` が 1 未満）ときは、`steps` の全体を「無い」として扱う。出力の全体は不正にせず（`malformed`・`invalid_output` にしない）、ほかの欄は同じに読む。読み取りは `internal/invoker` が形を確かめ、core の契約の状態の型に `flow` と `steps` を載せて渡す。
-- **ストアへの写し**: core は、契約の状態を記録する処理と同じトランザクションの中で、その契約の実行のステップの行（`contract_run_step`。スキーマ版 39）を、出力の `steps` と同じ中身にする（契約の実行の ID と `seq` を鍵に、足すか上書きし、出力に無い `seq` の行は消す）。`steps` が「無い」ときは、ステップの行に触らない。`Export`・`Import` に含む。
-- **宣言**: `form: flow` の委譲先は、`commands`・`contract_version` を書けない。core が、自分の実行ファイルの `flow` のコマンドの引数を組み立てて、`form: cli` と同じ契約のコマンドの起動の口で起動する（`start`・`resume` には `--permission-mode <宣言の値>` と `--delegated-run <契約のコマンドの run の ID>` を必ず付ける）。操作に `flow`（進めるフローの名前）、委譲先に任意の `challenge_id_prefix`・`models` を書ける。`required_facts` は `cli` と同じに書ける。反映の依頼の口は宣言に書かなくても持ち、`repos[].reflect_connector` は `flow` の形を指せる。
+- **ストアへの写し**: core は、契約の状態を記録する処理と同じトランザクションの中で、その契約の実行のステップの行（`contract_run_step`。スキーマ版 39。`effort` の列はスキーマ版 40）を、出力の `steps` と同じ中身にする（契約の実行の ID と `seq` を鍵に、足すか上書きし、出力に無い `seq` の行は消す）。`steps` が「無い」ときは、ステップの行に触らない。`Export`・`Import` に含む。
+- **宣言**: `form: flow` の委譲先は、`commands`・`contract_version` を書けない。core が、自分の実行ファイルの `flow` のコマンドの引数を組み立てて、`form: cli` と同じ契約のコマンドの起動の口で起動する（`start`・`resume` には `--permission-mode <宣言の値>` と `--delegated-run <契約のコマンドの run の ID>` を必ず付ける）。操作に `flow`（進めるフローの名前。`ticket` か `ticket-light`）、委譲先に任意の `challenge_id_prefix` を書ける（S1 の `models` は S2 で外した。書くと設定の誤り。モデルと effort は埋め込んだフローの定義で決まる）。`required_facts` は `cli` と同じに書ける。反映の依頼の口は宣言に書かなくても持ち、`repos[].reflect_connector` は `flow` の形を指せる。
 
 #### 委譲の流れ（`form: cli`）【決定 2026-11-10 オーナー。Issue #532。後半は #550】
 
