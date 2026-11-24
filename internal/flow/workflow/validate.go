@@ -187,6 +187,9 @@ func (v *validator) llm(s *Step) {
 	if s.Model != "" && v.wf.Model(s.Model) == nil {
 		v.errf(s.Line, "steps.%s: model refers to $models.%s, which models does not define", s.ID, s.Model)
 	}
+	if s.Effort != "" && v.wf.Effort(s.Effort) == nil {
+		v.errf(s.Line, "steps.%s: effort refers to $efforts.%s, which efforts does not define", s.ID, s.Effort)
+	}
 	if s.Session == "continue" {
 		src := v.wf.Step(s.SessionFrom)
 		switch {

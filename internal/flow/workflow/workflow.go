@@ -8,9 +8,6 @@
 package workflow
 
 import (
-	"fmt"
-	"sort"
-	"strings"
 	"time"
 )
 
@@ -99,7 +96,9 @@ type Workflow struct {
 	ReleaseOn []string
 	// Models は最上位の models（変数の名前 → 既定のモデルの名前）。llm ステップの model が $models.<名前> で指す。
 	Models []*ModelVar
-	Steps  []*Step
+	// Efforts は最上位の efforts（変数の名前 → effort）。llm ステップの effort が $efforts.<名前> で指す。
+	Efforts []*EffortVar
+	Steps   []*Step
 	// Routes は overridable.routes（docs/harness-runtime-overrides.md §5.2）。上書きで付け替えてよい遷移と候補。
 	Routes []*RouteDecl
 	// Skips は overridable.skips（§5.2・§6.2 の規則 6）。付け替えで省いてよいと定義が明示した、fail へ落ちうるステップ。
@@ -157,53 +156,56 @@ type ModelVar struct {
 	Line  int
 }
 
-// ResolveModels は定義の既定の値に、flow start の --model の値（変数の名前 → 値）を重ねた解決値を返す。
-// 定義が持たない変数の値を渡す・値が空なのは誤り。定義が models を持たなければ、渡す値が無い限り nil を返す。
-func ResolveModels(wf *Workflow, given map[string]string) (map[string]string, error) {
-	for _, name := range sortedKeys(given) {
-		if wf.Model(name) == nil {
-			return nil, fmt.Errorf("model variable %q is not defined by workflow %s (defined: %s)", name, wf.ID, modelNames(wf))
-		}
-		if given[name] == "" {
-			return nil, fmt.Errorf("model variable %q has an empty value", name)
-		}
-	}
+// ResolveModels は定義の models を、変数の名前 → モデルの名前の写像にする。定義が models を持たなければ nil を返す。
+// モデルは定義の値だけで決まる（flow start の引数・宣言では差し替えない）。
+func ResolveModels(wf *Workflow) map[string]string {
 	if len(wf.Models) == 0 {
-		return nil, nil
+		return nil
 	}
 	out := make(map[string]string, len(wf.Models))
 	for _, m := range wf.Models {
 		out[m.Name] = m.Value
-		if v, ok := given[m.Name]; ok {
-			out[m.Name] = v
+	}
+	return out
+}
+
+// Effort は名前で effort の変数を引く。無ければ nil。
+func (w *Workflow) Effort(name string) *EffortVar {
+	for _, e := range w.Efforts {
+		if e.Name == name {
+			return e
 		}
 	}
-	return out, nil
+	return nil
 }
 
-func modelNames(wf *Workflow) string {
-	if len(wf.Models) == 0 {
-		return "none"
-	}
-	names := make([]string, 0, len(wf.Models))
-	for _, m := range wf.Models {
-		names = append(names, m.Name)
-	}
-	sort.Strings(names)
-	return strings.Join(names, ", ")
+// EffortVar は efforts の 1 行: 変数の名前と値（EffortValues のどれか）。
+type EffortVar struct {
+	Name  string
+	Value string
+	Line  int
 }
 
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+// EffortValues は efforts の値に書ける 5 つの effort（claude の --effort が受ける値）。
+var EffortValues = []string{"low", "medium", "high", "xhigh", "max"}
+
+// ResolveEfforts は定義の efforts を、変数の名前 → effort の写像にする。定義が efforts を持たなければ nil を返す。
+func ResolveEfforts(wf *Workflow) map[string]string {
+	if len(wf.Efforts) == 0 {
+		return nil
 	}
-	sort.Strings(keys)
-	return keys
+	out := make(map[string]string, len(wf.Efforts))
+	for _, e := range wf.Efforts {
+		out[e.Name] = e.Value
+	}
+	return out
 }
 
 // ModelRefPrefix は llm ステップの model に書ける参照の接頭辞（$models.<名前>）。
 const ModelRefPrefix = "$models."
+
+// EffortRefPrefix は llm ステップの effort に書ける参照の接頭辞（$efforts.<名前>）。
+const EffortRefPrefix = "$efforts."
 
 // FactDecl は facts の 1 行。Refs は $steps.<段>.<欄> だけ（読み込みで、段が在り、欄が出力スキーマの文字列であることを検査する）。
 type FactDecl struct {
@@ -291,7 +293,9 @@ type Step struct {
 	// 値は参照かリテラルの文字列。解決した値が空の文字列なら渡さない。
 	AddDirs []*Binding
 	// Model は model: $models.<名前> の <名前>（モデルの変数。書かなければ空で、claude に --model を渡さない）。
-	Model       string
+	Model string
+	// Effort は effort: $efforts.<名前> の <名前>（effort の変数。書かなければ空で、claude に --effort を渡さない）。
+	Effort      string
 	Session     string  // new | continue
 	SessionFrom string  // continue:<step> の <step>
 	BudgetUSD   float64 // --max-budget-usd の上限（残予算と小さいほうを付与する）

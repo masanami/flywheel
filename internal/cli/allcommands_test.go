@@ -565,9 +565,8 @@ var runLevelUsageErrorCases = [][]string{
 	{"answer", "C-1", "--choice", "Q1=x"},                       // 選択肢の番号が 1 以上の整数でない
 	{"answer", "C-1", "--option", " "},                          // --option の識別が空
 	{"flow", "start", "--delegated-run", "R-1", "ticket"},       // flow の --permission-mode が無い（flowLaunchFlags）
-	{"flow", "start", "--permission-mode", "bypassPermissions", "--delegated-run", "R-1", "ticket"},       // --permission-mode が 3 値の外
-	{"flow", "start", "--permission-mode", "auto", "--delegated-run", "R-1", "--model", "main", "ticket"}, // flow の --model が <変数>=<値> でない・未定義の変数
-	{"flow", "resume", "--permission-mode", "auto", "RUN-1"},                                              // flow の --delegated-run が無い
+	{"flow", "start", "--permission-mode", "bypassPermissions", "--delegated-run", "R-1", "ticket"}, // --permission-mode が 3 値の外
+	{"flow", "resume", "--permission-mode", "auto", "RUN-1"},                                        // flow の --delegated-run が無い
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の

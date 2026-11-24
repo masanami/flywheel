@@ -79,14 +79,11 @@ func runFlowStart(a Args) (any, error) {
 	if uerr != nil {
 		return nil, uerr
 	}
-	if err := flow.CheckModelFlags(a.Positional[0], a.Multi["model"]); err != nil {
-		return nil, NewError(CodeUsageError, err.Error())
-	}
 	env, cerr := flowEnv(a)
 	if cerr != nil {
 		return nil, cerr
 	}
-	return rawExit{flow.Start(env, flow.StartOptions{Name: a.Positional[0], Inputs: a.Multi["input"], Models: a.Multi["model"], PermissionMode: mode, DelegatedRun: delegated})}, nil
+	return rawExit{flow.Start(env, flow.StartOptions{Name: a.Positional[0], Inputs: a.Multi["input"], PermissionMode: mode, DelegatedRun: delegated})}, nil
 }
 
 func runFlowStatus(a Args) (any, error) {
@@ -140,8 +137,6 @@ func flowCommands() []Command {
 			Path: []string{"flow", "start"}, MinPositional: 1, MaxPositional: 1,
 			Flags: []flagDef{
 				{Name: "input", HasValue: true, Repeatable: true},
-				// <変数>=<値>。フローが定義しているモデルの変数の値を差し替える（resume は受けない: 始めた値を続ける）。
-				{Name: "model", HasValue: true, Repeatable: true},
 				// 権限モードと、委譲の子の目印に使う run の ID。必須化と使い道は後続のタスクが足す（いまは受けるだけ）。
 				{Name: "permission-mode", HasValue: true},
 				{Name: "delegated-run", HasValue: true},

@@ -31,6 +31,8 @@ type Engine struct {
 	Cwd        string
 	// Models は解決したモデルの変数（run_started の値）。変数を指す llm ステップだけが、その値を --model に付ける。
 	Models map[string]string
+	// Efforts は effort の変数（run_started の値）。変数を指す llm ステップだけが、その値を --effort に付ける。
+	Efforts map[string]string
 
 	// ClaudeBin は llm 種類が起動する claude の実行ファイル（空なら PATH の claude）。テストは偽の claude を指す。
 	ClaudeBin string
@@ -65,8 +67,10 @@ type StartParams struct {
 	WorkflowDir string
 	Cwd         string
 	Origin      string
-	// Models は解決したモデルの変数（定義の既定の値に --model の値を重ねたもの）。run_started に記録する。
+	// Models は解決したモデルの変数（定義の models の値）。run_started に記録する。
 	Models map[string]string
+	// Efforts は effort の変数（定義の efforts）。run_started に記録する。
+	Efforts map[string]string
 	// CLIVersion・Embedded は run_started に記録する（§7.3・N3）。
 	CLIVersion string
 	Embedded   bool
@@ -111,6 +115,7 @@ func Start(p StartParams) (*Engine, error) {
 			Facts:       facts,
 			ReleaseOn:   p.WF.ReleaseOn,
 			Models:      p.Models,
+			Efforts:     p.Efforts,
 			Origin:      p.Origin,
 			Cwd:         p.Cwd,
 			PID:         os.Getpid(),
@@ -129,7 +134,7 @@ func Start(p StartParams) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{WF: p.WF, Run: run, ScriptsDir: p.ScriptsDir, Cwd: p.Cwd, Models: p.Models}, nil
+	return &Engine{WF: p.WF, Run: run, ScriptsDir: p.ScriptsDir, Cwd: p.Cwd, Models: p.Models, Efforts: p.Efforts}, nil
 }
 
 // overrideLayers は上書きの層の番号（docs/harness-runtime-overrides.md §3 の表の層）。写しの名前に使う。
