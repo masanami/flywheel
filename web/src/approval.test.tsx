@@ -42,6 +42,8 @@ function challenge(status: string, version = 3) {
     id: "C-1",
     priority: null,
     reporter: "me",
+    chat_sessions: [],
+    spec_cost_usd: 0,
     status,
     status_label: "",
     title: "題名",

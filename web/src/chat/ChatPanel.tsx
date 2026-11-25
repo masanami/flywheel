@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NoticeItem } from "../NoticeItem.tsx";
 import { api } from "../api/client.ts";
-import { ApiError } from "../api/error.ts";
 import type { ChatMessage, ChatPostRequest } from "../api/types.gen.ts";
 import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
@@ -9,10 +8,12 @@ import { Markdown } from "../markdown/Markdown.tsx";
 import { type NoticeLine, noticeLine } from "../notices.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
 import { useNotices } from "../useNotices.ts";
+import { ActivityList } from "./ActivityList.tsx";
+import { PromptView } from "./PromptView.tsx";
+import { SessionList } from "./SessionList.tsx";
+import { errorText } from "./errorText.ts";
 import {
   CHAT_EMPTY_TEXT,
-  CHAT_ENGINE_MISSING_TEXT,
-  CHAT_FULL_TOOLS_TEXT,
   CHAT_NOTICE_LIMIT,
   CHAT_REPLYING_TEXT,
   CHAT_STATE_TEXTS,
@@ -76,14 +77,15 @@ export function postViewing(v: Viewing | null): ChatPostRequest["viewing"] {
   };
 }
 
-function errorText(e: unknown): string {
-  if (e instanceof ApiError && e.status === 503) {
-    return CHAT_ENGINE_MISSING_TEXT;
-  }
-  return e instanceof Error ? e.message : String(e);
-}
-
-function MessageView({ m }: { m: ChatMessage }) {
+function MessageView({
+  m,
+  agentName,
+  onAnswered,
+}: {
+  m: ChatMessage;
+  agentName: string;
+  onAnswered: () => void;
+}) {
   const note =
     m.role === "orchestrator" ? CHAT_STATE_TEXTS[m.state] : undefined;
   return (
@@ -96,6 +98,15 @@ function MessageView({ m }: { m: ChatMessage }) {
       ) : (
         <>
           {m.body !== "" ? <Markdown text={m.body} /> : null}
+          <ActivityList activity={m.activity} />
+          {m.prompts.map((p) => (
+            <PromptView
+              key={p.id}
+              agentName={agentName}
+              prompt={p}
+              onAnswered={onAnswered}
+            />
+          ))}
           {note !== undefined ? (
             <p
               className="chat-state"
@@ -104,25 +115,6 @@ function MessageView({ m }: { m: ChatMessage }) {
             >
               {note}
             </p>
-          ) : null}
-          {m.activity.length > 0 ? (
-            <details className="chat-activity" data-testid="chat-activity">
-              <summary>実行したコマンド</summary>
-              <ul>
-                {m.activity.map((a, i) => (
-                  // 同じコマンドが続きうるので、並びの位置を key にする（並びは増えるだけ）
-                  // biome-ignore lint/suspicious/noArrayIndexKey: 上の理由
-                  <li key={i}>
-                    <code>{a.target}</code>{" "}
-                    {a.state === "ok"
-                      ? "（成功）"
-                      : a.state === "error"
-                        ? "（失敗）"
-                        : null}
-                  </li>
-                ))}
-              </ul>
-            </details>
           ) : null}
         </>
       )}
@@ -154,6 +146,7 @@ export function ChatPanel({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [listOpen, setListOpen] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: フォーカスの合図は focusRequest だけ
@@ -203,6 +196,7 @@ export function ChatPanel({
     const req: ChatPostRequest = { text: t };
     const v = postViewing(viewing);
     if (v !== undefined) req.viewing = v;
+    setListOpen(false);
     void run(async () => {
       await api.chatSend(agentName, req);
       // 送っている間に打ち足した分は消さない
@@ -222,11 +216,6 @@ export function ChatPanel({
           たたむ
         </button>
       </header>
-      {chat?.tools === "full" ? (
-        <p className="chat-tools" data-testid="chat-tools">
-          {CHAT_FULL_TOOLS_TEXT}
-        </p>
-      ) : null}
       {viewing !== null && viewing.title !== null ? (
         <p className="chat-viewing" data-testid="chat-viewing">
           いま見ているもの: {viewing.title}
@@ -238,13 +227,35 @@ export function ChatPanel({
         ) : null}
         <button
           type="button"
+          aria-expanded={listOpen}
+          onClick={() => setListOpen((o) => !o)}
+        >
+          {listOpen ? "会話の一覧を閉じる" : "会話の一覧"}
+        </button>
+        <button
+          type="button"
           disabled={busy || replying}
-          onClick={() => void run(() => api.chatNew(agentName))}
+          onClick={() => {
+            setListOpen(false);
+            void run(() => api.chatNew(agentName));
+          }}
         >
           新しい会話
         </button>
       </div>
-      <div className="chat-log">
+      {listOpen ? (
+        <SessionList
+          live={live}
+          agentName={agentName}
+          resumeDisabled={busy || replying}
+          onResumed={() => {
+            setListOpen(false);
+            reload();
+          }}
+        />
+      ) : null}
+      {/* 一覧を開いている間も欄の記録は残し、確認に書きかけた文を失わない */}
+      <div className="chat-log" hidden={listOpen}>
         {result.state === "loading" ? <p>{LOADING_TEXT}</p> : null}
         {result.state === "error" ? (
           <p data-testid="chat-load-error">{errorText(result.error)}</p>
@@ -254,7 +265,12 @@ export function ChatPanel({
           <ol className="chat-messages">
             {entries.map((e) =>
               e.kind === "message" ? (
-                <MessageView key={e.message.id} m={e.message} />
+                <MessageView
+                  key={e.message.id}
+                  m={e.message}
+                  agentName={agentName}
+                  onAnswered={reload}
+                />
               ) : (
                 <NoticeItem key={e.line.key} line={e.line} badge />
               ),

@@ -85,6 +85,11 @@ function destinations(agents: string[], challengeId?: string): Destination[] {
         hash: `${c}/plan`,
         wait: () => screen.findByTestId("challenge-detail"),
       },
+      {
+        id: `${first}/transcript`,
+        hash: `#/a/${first}/chat/s-1`,
+        wait: title("会話の全文"),
+      },
       // 課題の詳細は最後に開く（この後、詳細の中を操作する）。
       {
         id: `${first}/challenge`,
@@ -173,6 +178,8 @@ function awaitingApproval(): Record<string, unknown> {
     created_at: "",
     dependencies: [],
     dependents: [],
+    chat_sessions: [],
+    spec_cost_usd: 0,
     description: "説明",
     done_criteria: "完了条件",
     id: "C-1",
@@ -354,8 +361,10 @@ it("AC-221: 全画面を操作しても fetch は GET と許可表の POST（承
   const allowed = [
     /^\/api\/v1\/workspaces\/[^/]+\/challenges\/[^/]+\/approve$/,
     /^\/api\/v1\/workspaces\/[^/]+\/cycle$/,
-    // 対話の欄（#1002）の書き込み
+    // 対話の欄（#1002）の書き込み。確認への答えと、閉じた会話の続き（#1288）を含む
     /^\/api\/v1\/workspaces\/[^/]+\/chat\/(messages|stop|new)$/,
+    /^\/api\/v1\/workspaces\/[^/]+\/chat\/prompts\/\d+\/answer$/,
+    /^\/api\/v1\/workspaces\/[^/]+\/chat\/sessions\/[^/]+\/resume$/,
     // 画面のボタンで受ける操作（区切り S4d-2）: 選ぶだけの回答・取り込み・サイクルを止める・フォローアップを済みにする／捨てる
     /^\/api\/v1\/workspaces\/[^/]+\/challenges\/[^/]+\/holds\/[^/]+\/answer$/,
     /^\/api\/v1\/workspaces\/[^/]+\/ingest$/,

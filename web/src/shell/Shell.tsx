@@ -3,6 +3,7 @@ import { AllScreen } from "../all/AllScreen.tsx";
 import { ApproveCompletionScreen } from "../approve-completion/ApproveCompletionScreen.tsx";
 import { ChallengesScreen } from "../challenges/ChallengesScreen.tsx";
 import { ChatPanel, type Viewing } from "../chat/ChatPanel.tsx";
+import { TranscriptScreen } from "../chat/TranscriptScreen.tsx";
 import { ChatContext } from "../chat/context.ts";
 import { CycleScreen } from "../cycle/CycleScreen.tsx";
 import { ChallengeDetail } from "../detail/ChallengeDetail.tsx";
@@ -230,6 +231,14 @@ function AgentBody({
             id={route.id}
           />
         </ChallengeGate>
+      );
+    case "transcript":
+      return (
+        <TranscriptScreen
+          live={live}
+          agentName={agentName}
+          sessionId={route.sessionId}
+        />
       );
     case "task":
       return (
