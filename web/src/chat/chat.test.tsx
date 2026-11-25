@@ -181,6 +181,21 @@ it("AC-9: やりとりが 0 件の会話では、「オーケストレーター�
   ).toBeInTheDocument();
 });
 
+// 対話の欄の作り替え（docs/features/chat-session.md「許可の正本と宣言」）: 道具の範囲の宣言をやめたので、
+// 欄に道具の範囲の表示（やめた文言「すべての道具を許可しています」を含む）は出ない。
+it("欄に、道具の範囲の表示が出ない（会話が空のとき）", async () => {
+  await open();
+  await panel().findByText("オーケストレーターに、相談や指示を書けます。");
+  expect(panel().queryByText(/道具の範囲|すべての道具を許可/)).toBeNull();
+});
+
+it("欄に、道具の範囲の表示が出ない（返事があるとき）", async () => {
+  chatBody = chatOf({ messages: [msg({ id: 2, body: "返事です" })] });
+  await open();
+  await panel().findByText("返事です");
+  expect(panel().queryByText(/道具の範囲|すべての道具を許可/)).toBeNull();
+});
+
 it("AC-25/26: 返事の本文の見出しと箇条書きが、見出し・箇条書きの要素として描かれる", async () => {
   chatBody = chatOf({
     messages: [msg({ id: 2, body: "# 見出しです\n\n- 項目です" })],
