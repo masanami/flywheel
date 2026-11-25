@@ -154,3 +154,213 @@ test("#1289: 確認を待つ間に「止める」を押すと、返事が止ま�
     "止めました。",
   );
 });
+
+// i 番目に起動した実行エンジンが受けた、確認への答えの行。
+function answersOf(start: number): unknown[] {
+  const file = join(
+    process.env[FAKE_LOG_ENV] ?? "",
+    `start.${start}`,
+    "answers",
+  );
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+}
+
+for (const { button, reason, state, response } of [
+  {
+    button: "許可する",
+    reason: "",
+    state: "allowed",
+    response: {
+      behavior: "allow",
+      updatedInput: { command: "rm -rf build", description: "d" },
+    },
+  },
+  {
+    button: "断る",
+    reason: "消さないで",
+    state: "denied",
+    response: { behavior: "deny", message: "消さないで" },
+  },
+]) {
+  test(`#1290: 許可の確認で「${button}」を押すと、実行エンジンへその答えだけが届き、返事が続く`, async ({
+    page,
+  }) => {
+    const panel = await openFresh(page);
+    await send(page, "許可を求める");
+    const first = await engineLine(page, 0);
+    const prompt = panel.getByTestId("chat-prompt");
+    await expect(prompt).toHaveAttribute("data-state", "pending");
+    if (reason !== "")
+      await prompt.getByRole("textbox", { name: "断る理由" }).fill(reason);
+    await prompt.getByRole("button", { name: button }).click();
+    await expect(prompt).toHaveAttribute("data-state", state);
+    await expect(prompt.getByRole("button")).toHaveCount(0);
+    await expect(replies(page).nth(0)).toContainText("答えを受けた");
+    await idle(page);
+    // 許可の書き足し（updatedPermissions）を含まない、その 1 回だけの答え。
+    expect(answersOf(first.start)).toEqual([
+      {
+        type: "control_response",
+        response: { subtype: "success", request_id: "r1", response },
+      },
+    ]);
+  });
+}
+
+test("#1290: 問いの選択肢を押すと、答えが updatedInput.answers に入って届き、返事が続く", async ({
+  page,
+}) => {
+  const panel = await openFresh(page);
+  await send(page, "問いを出す");
+  const first = await engineLine(page, 0);
+  const prompt = panel.getByTestId("chat-prompt");
+  await expect(prompt).toHaveAttribute("data-state", "pending");
+  await prompt.getByRole("button", { name: "案B" }).click();
+  await expect(prompt).toHaveAttribute("data-state", "answered");
+  await expect(replies(page).nth(0)).toContainText("答えを受けた");
+  await idle(page);
+  expect(answersOf(first.start)).toMatchObject([
+    {
+      response: {
+        request_id: "q1",
+        response: {
+          behavior: "allow",
+          updatedInput: { answers: { "どちらにする？": "案B" } },
+        },
+      },
+    },
+  ]);
+});
+
+const sessionRows = (page: Page) =>
+  page.getByTestId("chat-panel").getByTestId("chat-session");
+
+async function openSessionList(page: Page) {
+  await page
+    .getByTestId("chat-panel")
+    .getByRole("button", { name: "会話の一覧", exact: true })
+    .click();
+}
+
+test("#1290: 会話の一覧から閉じた会話を続けると、前のプロセスが終わり、次の発言は --resume で起動する。全文も開ける", async ({
+  page,
+}) => {
+  const panel = await openFresh(page);
+  await send(page, "続きを話す相談");
+  await engineLine(page, 0);
+  await idle(page);
+  await panel.getByRole("button", { name: "新しい会話" }).click();
+  await expect(panel.getByTestId("chat-message-owner")).toHaveCount(0);
+  await send(page, "別の相談");
+  const other = await engineLine(page, 0);
+  await idle(page);
+  const otherPid = pidOf(other.start, "pid");
+  expect(alive(otherPid)).toBe(true);
+
+  await openSessionList(page);
+  // 新しい順。開いている会話には「続ける」が無い。
+  await expect(sessionRows(page).nth(0)).toContainText("別の相談");
+  await expect(
+    sessionRows(page).nth(0).getByRole("button", { name: "続ける" }),
+  ).toHaveCount(0);
+  const target = sessionRows(page).nth(1);
+  await expect(target).toContainText("続きを話す相談");
+  await target.getByRole("button", { name: "続ける" }).click();
+  await expect(panel.getByTestId("chat-message-owner")).toHaveText([
+    /続きを話す相談/,
+  ]);
+  await expect.poll(() => alive(otherPid)).toBe(false);
+
+  await send(page, "続き");
+  const next = await engineLine(page, 1);
+  expect(next).toMatchObject({ mode: "--resume", received: 1 });
+  expect(next.start).toBeGreaterThan(other.start);
+  await idle(page);
+
+  await openSessionList(page);
+  await sessionRows(page)
+    .filter({ hasText: "続きを話す相談" })
+    .getByRole("link", { name: "全文" })
+    .click();
+  const entries = page
+    .getByTestId("chat-transcript")
+    .getByTestId("transcript-entry");
+  await expect(entries).toHaveText([
+    /続きを話す相談/,
+    /受信1/,
+    /続き/,
+    /--resume 受信1/,
+  ]);
+});
+
+test("#1290: 全文のファイルが無い会話は「全文はもう無い」になり、続ける口と全文の口は transcript_unavailable で断る", async ({
+  page,
+}) => {
+  const panel = await openFresh(page);
+  await send(page, "全文を残さない相談");
+  await engineLine(page, 0);
+  await idle(page);
+  const chat = await (
+    await page.request.get("/api/v1/workspaces/seed/chat")
+  ).json();
+  await panel.getByRole("button", { name: "新しい会話" }).click();
+  await expect(panel.getByTestId("chat-message-owner")).toHaveCount(0);
+
+  await openSessionList(page);
+  const row = sessionRows(page).filter({ hasText: "全文を残さない相談" });
+  await expect(row).toContainText("全文はもう無い");
+  await expect(row.getByRole("button", { name: "続ける" })).toHaveCount(0);
+  await expect(row.getByRole("link", { name: "全文" })).toHaveCount(0);
+
+  const base = `/api/v1/workspaces/seed/chat/sessions/${chat.session_id}`;
+  const transcript = await page.request.get(`${base}/transcript`);
+  expect(transcript.status()).toBe(404);
+  expect((await transcript.json()).error.code).toBe("transcript_unavailable");
+  const csrf = await page
+    .locator('meta[name="flywheel-csrf"]')
+    .getAttribute("content");
+  const resume = await page.request.post(`${base}/resume`, {
+    headers: { "X-Flywheel-CSRF": csrf ?? "" },
+  });
+  expect(resume.status()).toBe(409);
+  expect((await resume.json()).error.code).toBe("transcript_unavailable");
+});
+
+test("#1290: 確認への答えと「続ける」は CSRF の値が無いと断られ、よそのサイトからの読み取りも断られる", async ({
+  page,
+}) => {
+  const panel = await openFresh(page);
+  await send(page, "許可を求める");
+  const first = await engineLine(page, 0);
+  const prompt = panel.getByTestId("chat-prompt");
+  await expect(prompt).toHaveAttribute("data-state", "pending");
+  const chat = await (
+    await page.request.get("/api/v1/workspaces/seed/chat")
+  ).json();
+  const id = chat.messages.at(-1).prompts[0].id;
+  const base = "/api/v1/workspaces/seed/chat";
+
+  for (const path of [
+    `/prompts/${id}/answer`,
+    `/sessions/${chat.session_id}/resume`,
+  ]) {
+    const res = await page.request.post(base + path, {
+      data: { decision: "allow" },
+    });
+    expect(res.status()).toBe(403);
+  }
+  for (const path of ["/sessions", `/sessions/${chat.session_id}/transcript`]) {
+    const res = await page.request.get(base + path, {
+      headers: { Origin: "http://evil.example" },
+    });
+    expect(res.status()).toBe(403);
+  }
+  await expect(prompt).toHaveAttribute("data-state", "pending");
+  expect(answersOf(first.start)).toEqual([]);
+  await panel.getByRole("button", { name: "止める" }).click();
+  await expect(prompt).toHaveAttribute("data-state", "expired");
+});

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 // 本物の serve の E2E の準備の段。
-//   1. 一時ディレクトリに HOME・XDG_CONFIG_HOME・作業ディレクトリ・ワークスペース（seed）を作る
+//   1. 一時ディレクトリに HOME・XDG_CONFIG_HOME・CLAUDE_CONFIG_DIR・作業ディレクトリ・ワークスペース（seed）を作る
 //   2. Go のテスト TestE2ESeed（internal/core/e2e_seed_test.go）で、ワークスペースへ種のストアを毎回作る
 //   3. ビルド済みの build/flywheel を `serve --port 0 --workspace <ワークスペース>` で起動し、
 //      標準エラーの `listening on <addr>` から番地を読んで、試験へ環境変数で渡す
@@ -97,6 +97,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const workspace = join(root, "seed");
   const bin = join(root, "bin");
   const fakeLog = join(root, "fake-claude");
+  // 対話の欄の会話のファイルの置き場。手元の CLAUDE_CONFIG_DIR を引き継がないように、ここで必ず置き換える。
+  const claudeConfig = join(root, "claude-config");
   for (const d of [home, xdg, cwd, bin, fakeLog])
     mkdirSync(d, { recursive: true });
   const fake = join(bin, "claude");
@@ -121,6 +123,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         ...process.env,
         HOME: home,
         XDG_CONFIG_HOME: xdg,
+        CLAUDE_CONFIG_DIR: claudeConfig,
         PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       },
       stdio: ["ignore", "inherit", "pipe"],
