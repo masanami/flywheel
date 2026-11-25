@@ -230,10 +230,13 @@ func (c *conversation) addPending(requestID string, req pendingRequest) {
 	c.pending[requestID] = req
 }
 
-func (c *conversation) dropRequest(requestID string) {
+// dropRequest は答えを待っている確認から requestID を外し、あったかを返す。
+func (c *conversation) dropRequest(requestID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	_, ok := c.pending[requestID]
 	delete(c.pending, requestID)
+	return ok
 }
 
 func (c *conversation) dropPending() {

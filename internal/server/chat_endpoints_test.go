@@ -226,6 +226,69 @@ func TestChat_AnswerThatCannotBeSentExpiresThePrompt(t *testing.T) {
 	}
 }
 
+// promptStates は最後の返事の確認の状態を、実行エンジンの識別ごとに返す（view の確認は識別を持たないので ID で引く）。
+func promptStates(t *testing.T, port int) map[int64]string {
+	t.Helper()
+	out := map[int64]string{}
+	for _, p := range lastReply(getChat(t, port)).Prompts {
+		out[p.ID] = p.State
+	}
+	return out
+}
+
+// 2 つの確認が答えを待っている状態にして、確認の ID を返す。
+func (e *chatEnvT) twoPrompts(t *testing.T) (conv *fakeConv, first, second int64) {
+	t.Helper()
+	conv = e.send(t, 0, "やって")
+	conv.started()
+	conv.prompt(permissionPrompt("r1"))
+	conv.prompt(permissionPrompt("r2"))
+	ps := lastReply(getChat(t, e.port)).Prompts
+	if len(ps) != 2 {
+		t.Fatalf("prompts = %+v, want 2", ps)
+	}
+	return conv, ps[0].ID, ps[1].ID
+}
+
+// 実行エンジンが取り下げた確認は、その 1 件だけが expired になり、ほかの確認へは答えられる。
+func TestChat_CancelledPromptExpiresOnlyThatPrompt(t *testing.T) {
+	e := newChatEnv(t)
+	conv, first, second := e.twoPrompts(t)
+	conv.cancelPrompt("r1")
+	if got := promptStates(t, e.port); got[first] != "expired" || got[second] != "pending" {
+		t.Fatalf("states = %v, want only the first expired", got)
+	}
+	// 取り下げた確認への答えは送らず、409。
+	if code, body := e.answer(t, first, `{"decision":"allow"}`); code != 409 {
+		t.Fatalf("answer to the cancelled prompt = %d %s", code, body)
+	}
+	noEngineAnswer(t, conv)
+	// ほかの確認は答えられて、答えは実行エンジンへ届く。
+	if code, body := e.answer(t, second, `{"decision":"allow"}`); code != http.StatusNoContent {
+		t.Fatalf("answer to the other prompt = %d %s", code, body)
+	}
+	if a := <-conv.answers; a.requestID != "r2" {
+		t.Errorf("answer = %+v", a)
+	}
+	if got := promptStates(t, e.port); got[first] != "expired" || got[second] != "allowed" {
+		t.Errorf("states = %v", got)
+	}
+}
+
+// 答えを実行エンジンへ送れなかったときは、その確認だけが expired になる（プロセスが動いていれば、ほかの確認は
+// 答えを待ったまま）。
+func TestChat_AnswerThatCannotBeSentExpiresOnlyThatPrompt(t *testing.T) {
+	e := newChatEnv(t)
+	conv, first, second := e.twoPrompts(t)
+	conv.answerErr = errors.New("broken pipe")
+	if code, body := e.answer(t, first, `{"decision":"allow"}`); code != 409 {
+		t.Fatalf("answer = %d %s", code, body)
+	}
+	if got := promptStates(t, e.port); got[first] != "expired" || got[second] != "pending" {
+		t.Errorf("states = %v, want only the first expired", got)
+	}
+}
+
 // このサーバが持つプロセスの無い確認（ストアに残っただけ）への答えは、送れないので 409 で expired になる。
 func TestChat_AnswerWithoutAProcessExpiresThePrompt(t *testing.T) {
 	e := newChatEnv(t)
@@ -349,6 +412,46 @@ func TestChat_SessionsListsClosedSessionsNewestFirst(t *testing.T) {
 		if ref.WorkDir != e.ws {
 			t.Errorf("ref = %+v, want work dir %s", ref, e.ws)
 		}
+	}
+}
+
+// 全文のファイルの有無を調べている間は、ストアを借りず、書き込みのロックも握らない（ファイルの調べは遅いことがあり、
+// 握ったままだと同じワークスペースのほかの書き込みが待たされる）。
+func TestChat_TranscriptCheckHoldsNeitherTheStoreNorTheWriteLock(t *testing.T) {
+	for name, call := range map[string]func(t *testing.T, e *chatEnvT, id string){
+		"list":   func(t *testing.T, e *chatEnvT, _ string) { getSessions(t, e.port) },
+		"resume": func(t *testing.T, e *chatEnvT, id string) { e.post(t, "/sessions/"+id+"/resume", http.StatusNoContent) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newChatEnv(t)
+			old, _ := e.twoSessions(t)
+			e.inv.setTranscript(old.in.SessionID)
+			entry := e.s.chat.fleet.byName["w"]
+			checks := 0
+			e.inv.onHasTranscript = func() {
+				checks++
+				// 借りたままなら、ストアの状態を変える側（Lock）は入れない。
+				if !entry.mu.TryLock() {
+					t.Error("the store is still leased while the transcript is checked")
+				} else {
+					entry.mu.Unlock()
+				}
+				// 書き込みのロックを握ったままなら、別の接続の書き込みは待たされて ErrStoreBusy になる。
+				st, err := core.OpenWorkspace(e.ws)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer func() { _ = st.Close() }()
+				if _, err := st.ExpireAllChatPrompts(context.Background()); err != nil {
+					t.Errorf("a write during the transcript check failed: %v", err)
+				}
+			}
+			call(t, e, old.in.SessionID)
+			if checks == 0 {
+				t.Fatal("the transcript was never checked")
+			}
+		})
 	}
 }
 

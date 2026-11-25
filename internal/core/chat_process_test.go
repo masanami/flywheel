@@ -415,6 +415,47 @@ func TestChatPrompt_ExpireByReplyAndAll(t *testing.T) {
 	}
 }
 
+// 識別で 1 件だけ expired にする。ほかの確認・別の返事の同じ識別・答えた確認は変えない。
+func TestChatPrompt_ExpireOneByRequestID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, dir := newWorkspaceStore(t)
+	first := mustPost(t, s, "1", nil)
+	must(t, s.FinishChatReplyWithTotal(ctx, first.ReplyMessageID, ChatStateDone, nil))
+	// 終わった返事に残った同じ識別の pending の行（過去の不整合）は、別の返事の取り下げで変えない。
+	coretest.Exec(t, dir, `INSERT INTO chat_prompt (message_id, request_id, kind, tool, target, state, created_at)
+		VALUES (?, 'a', 'permission', 'Bash', 'z', 'pending', '2026-11-25T00:00:00.000Z')`, first.ReplyMessageID)
+	second := mustPost(t, s, "2", nil)
+	mustPrompt(t, s, second.ReplyMessageID, permissionRequest("a"))
+	mustPrompt(t, s, second.ReplyMessageID, permissionRequest("b"))
+	answered := mustPrompt(t, s, second.ReplyMessageID, permissionRequest("c"))
+	must(t, errOf(s.AnswerChatPrompt(ctx, answered, ChatPromptAnswer{Decision: ChatDecisionDeny})))
+
+	n, err := s.ExpireChatPromptByRequest(ctx, second.ReplyMessageID, "a")
+	must(t, err)
+	if n != 1 {
+		t.Errorf("expired = %d, want 1", n)
+	}
+	states := map[string]ChatPromptState{}
+	for _, p := range replyOf(t, s, second.ReplyMessageID).Prompts {
+		states[p.RequestID] = p.State
+	}
+	if states["a"] != ChatPromptExpired || states["b"] != ChatPromptPending || states["c"] != ChatPromptDenied {
+		t.Errorf("states = %v, want only a expired", states)
+	}
+	// 答えを待っていない確認・無い識別は何も変えない。
+	for _, id := range []string{"a", "c", "nope"} {
+		n, err := s.ExpireChatPromptByRequest(ctx, second.ReplyMessageID, id)
+		must(t, err)
+		if n != 0 {
+			t.Errorf("ExpireChatPromptByRequest(%q) = %d, want 0", id, n)
+		}
+	}
+	if got := chatCount(t, s, `SELECT COUNT(*) FROM chat_prompt WHERE state = 'pending'`); got != 2 {
+		t.Errorf("pending = %d, want b and the other reply's a", got)
+	}
+}
+
 func usd(v float64) *float64 { return &v }
 
 func sessionTotalMicros(t *testing.T, s *Store, sessionID int64) int {
@@ -562,7 +603,7 @@ func TestChatSessions_ResumeChecksInOrder(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s, _ := newWorkspaceStore(t)
-	yes, no := func(string) bool { return true }, func(string) bool { return false }
+	yes, no := true, false
 	old := mustPost(t, s, "a", nil)
 	must(t, s.MarkChatEngineStarted(ctx, old.SessionID))
 	must(t, s.FinishChatReplyWithTotal(ctx, old.ReplyMessageID, ChatStateDone, usd(0.25)))
@@ -587,9 +628,6 @@ func TestChatSessions_ResumeChecksInOrder(t *testing.T) {
 	before = dump()
 	if err := s.ResumeChatSession(ctx, old.EngineSession, no); !errors.Is(err, ErrChatTranscriptUnavailable) {
 		t.Errorf("no transcript: err = %v", err)
-	}
-	if err := s.ResumeChatSession(ctx, old.EngineSession, nil); !errors.Is(err, ErrChatTranscriptUnavailable) {
-		t.Errorf("no checker: err = %v", err)
 	}
 	if string(dump()) != string(before) {
 		t.Fatal("a refused resume changed the store")
@@ -616,7 +654,7 @@ func TestChatSessions_ResumeWithNoOpenSession(t *testing.T) {
 	old := mustPost(t, s, "a", nil)
 	must(t, s.FinishChatReplyWithTotal(ctx, old.ReplyMessageID, ChatStateDone, nil))
 	must(t, s.CloseChat(ctx))
-	must(t, s.ResumeChatSession(ctx, old.EngineSession, func(string) bool { return true }))
+	must(t, s.ResumeChatSession(ctx, old.EngineSession, true))
 	if got := openEngineSession(t, s); got != old.EngineSession {
 		t.Errorf("open session = %q", got)
 	}

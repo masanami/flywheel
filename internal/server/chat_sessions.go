@@ -18,16 +18,12 @@ import (
 // （全文の口では HTTP 404、続ける口では 409）。
 const CodeTranscriptUnavailable = "transcript_unavailable"
 
-// transcriptAvailable は、workDir の会話の全文のファイルが見つかるかを返す関数を作る。実行エンジンが
-// 組み込まれていなければ nil（core はどの会話も「見つからない」として扱う）。
-func (c *chatRunner) transcriptAvailable(ctx context.Context, workDir string) func(string) bool {
+// hasTranscript は、workDir の会話の全文のファイルが見つかるかを返す。実行エンジンが組み込まれていなければ
+// 偽（どの会話も「見つからない」として扱う）。ファイルを調べるので遅いことがあり、ストアを借りている間と、書き込みの
+// 中では呼ばない。
+func (c *chatRunner) hasTranscript(ctx context.Context, workDir, engineSession string) bool {
 	inv := c.engine()
-	if inv == nil {
-		return nil
-	}
-	return func(engineSession string) bool {
-		return inv.HasTranscript(ctx, core.ChatTranscriptRef{SessionID: engineSession, WorkDir: workDir})
-	}
+	return inv != nil && inv.HasTranscript(ctx, core.ChatTranscriptRef{SessionID: engineSession, WorkDir: workDir})
 }
 
 // chatSessionsHandler は `GET …/chat/sessions`。
@@ -42,11 +38,15 @@ func chatSessionsHandler(c *chatRunner) http.HandlerFunc {
 			writeError(w, le.Status, le.Code, le.Message)
 			return
 		}
-		defer release()
-		sessions, err := st.ListChatSessions(r.Context(), c.transcriptAvailable(r.Context(), st.Workspace()))
+		workDir := st.Workspace()
+		sessions, err := st.ListChatSessions(r.Context(), nil)
+		release() // 全文のファイルを調べる間は、ストアを借りない
 		if err != nil {
 			writeCoreError(w, err)
 			return
+		}
+		for i := range sessions {
+			sessions[i].TranscriptAvailable = c.hasTranscript(r.Context(), workDir, sessions[i].EngineSession)
 		}
 		writeJSON(w, http.StatusOK, view.FromChatSessions(sessions))
 	}
@@ -67,14 +67,24 @@ func chatResumeHandler(c *chatRunner) http.HandlerFunc {
 		a := c.agent(name)
 		a.op.Lock()
 		defer a.op.Unlock()
+		// 全文のファイルの有無は、書き込みの前に調べる（書き込みのロックを握ったままファイルを調べない）。判定の順は
+		// core が持ち、調べた結果はその順で使う。
 		st, release, le := c.fleet.Acquire(r.Context(), name)
+		if le != nil {
+			writeError(w, le.Status, le.Code, le.Message)
+			return
+		}
+		workDir := st.Workspace()
+		release()
+		available := c.hasTranscript(r.Context(), workDir, engineSession)
+		st, release, le = c.fleet.Acquire(r.Context(), name)
 		if le != nil {
 			writeError(w, le.Status, le.Code, le.Message)
 			return
 		}
 		release = sync.OnceFunc(release)
 		defer release()
-		if err := st.ResumeChatSession(r.Context(), engineSession, c.transcriptAvailable(r.Context(), st.Workspace())); err != nil {
+		if err := st.ResumeChatSession(r.Context(), engineSession, available); err != nil {
 			switch {
 			case errors.Is(err, core.ErrChatReplying):
 				writeError(w, http.StatusConflict, CodeConflict, err.Error())
