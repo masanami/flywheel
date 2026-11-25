@@ -877,9 +877,12 @@ func TestConversation_SendIsBoundedByItsContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conv.Stop(context.Background()) }()
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	// 送る文は、管の容量（macOS・Linux とも 64KiB）を超えれば足りる。大きすぎると、遅い環境では、行を組み立てている
+	// 間に ctx が切れ、書き始める前に戻る（そのときは何も書いていないので、プロセスは止めない。main の CI で、
+	// 4MiB・300ms のときにそうなって落ちた）。書き込みが詰まってから ctx が切れるように、文を小さく、時間を長くする。
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := conv.Send(ctx, core.ChatUtterance{Text: strings.Repeat("x", 4<<20)}); !errors.Is(err, context.DeadlineExceeded) {
+	if err := conv.Send(ctx, core.ChatUtterance{Text: strings.Repeat("x", 256<<10)}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Send = %v, want deadline exceeded", err)
 	}
 	rec.waitExit(t)
