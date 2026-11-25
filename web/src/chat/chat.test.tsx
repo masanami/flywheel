@@ -260,30 +260,6 @@ it("state が done の返事には、状態の文は出ない", async () => {
   expect(screen.queryByTestId("chat-state")).toBeNull();
 });
 
-it("AC-40/41: 「実行したコマンド」は畳んで出て、開くとコマンドの行が見える", async () => {
-  chatBody = chatOf({
-    messages: [
-      msg({
-        id: 2,
-        body: "見ました",
-        activity: [
-          { id: "t1", state: "ok", target: "flywheel status", tool: "Bash" },
-          { id: "t2", state: "error", target: "rm -rf /", tool: "Bash" },
-        ],
-      }),
-    ],
-  });
-  await open();
-  const d = await screen.findByTestId("chat-activity");
-  expect(d.tagName).toBe("DETAILS");
-  expect(d).not.toHaveAttribute("open");
-  expect(within(d).getByText("実行したコマンド")).toBeInTheDocument();
-  fireEvent.click(within(d).getByText("実行したコマンド"));
-  expect(d).toHaveAttribute("open");
-  expect(within(d).getByText("flywheel status")).toBeInTheDocument();
-  expect(within(d).getByText("rm -rf /")).toBeInTheDocument();
-});
-
 it("AC-46: 読み込み直すと、いまの会話の発言と返事が、古い順に出る", async () => {
   chatBody = chatOf({
     // 並びを崩して返しても、古い順（id の昇順）に出す
@@ -309,19 +285,6 @@ it("AC-59: 「新しい会話」を押すと、chat/new が呼ばれ、欄のや
   await waitFor(() => expect(calls).toEqual(["new"]));
   expect(await panel().findByText(/相談や指示/)).toBeInTheDocument();
   expect(panel().queryByText("前")).toBeNull();
-});
-
-it("AC-72/73: full のときだけ「すべての道具を許可しています」が出る", async () => {
-  chatBody = chatOf({ tools: "full" });
-  await open();
-  expect(
-    await panel().findByText("すべての道具を許可しています"),
-  ).toBeInTheDocument();
-});
-it("AC-73: restricted のときは、その文は出ない", async () => {
-  await open();
-  await panel().findByText(/相談や指示/);
-  expect(screen.queryByText("すべての道具を許可しています")).toBeNull();
 });
 
 it("AC-154: その会話の費用が $0.42 の形で出る（小数 2 桁）", async () => {

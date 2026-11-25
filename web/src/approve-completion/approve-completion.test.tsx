@@ -167,6 +167,8 @@ function showBody(o: Over = {}) {
     integration_ref: null,
     priority: null,
     reporter: "me",
+    chat_sessions: [],
+    spec_cost_usd: 0,
     status,
     status_label: "",
     title: "題名",

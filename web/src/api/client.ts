@@ -3,7 +3,10 @@ import type {
   ApprovalSummaryResponse,
   ChatPostRequest,
   ChatPostResponse,
+  ChatPromptAnswerRequest,
   ChatResponse,
+  ChatSessionsResponse,
+  ChatTranscriptResponse,
   CycleScreen,
   CycleStart,
   CycleStarted,
@@ -126,12 +129,25 @@ export interface CycleApi {
   startCycle(name: string): Promise<CycleStarted>;
 }
 
-// 対話の欄。読み取りは GET …/chat、書き込みは文を送る・止める・新しい会話（CSRF つきの POST）。
+// 対話の欄。読み取りは GET …/chat・会話の一覧・全文、書き込みは文を送る・止める・新しい会話・確認への答え・
+// 閉じた会話の続き（CSRF つきの POST）。
 export interface ChatApi {
   chat(name: string): Promise<ChatResponse>;
   chatSend(name: string, req: ChatPostRequest): Promise<ChatPostResponse>;
   chatStop(name: string): Promise<unknown>;
   chatNew(name: string): Promise<unknown>;
+  // 許可の確認と問いへの答え。
+  chatAnswer(
+    name: string,
+    promptId: number,
+    req: ChatPromptAnswerRequest,
+  ): Promise<unknown>;
+  chatSessions(name: string): Promise<ChatSessionsResponse>;
+  chatResume(name: string, sessionId: string): Promise<unknown>;
+  chatTranscript(
+    name: string,
+    sessionId: string,
+  ): Promise<ChatTranscriptResponse>;
 }
 
 // 画面のボタンで受ける操作（いまの守りの CSRF つきの POST）。回答は保留の ID で指し、読んだときの照合の値を送る。
@@ -201,12 +217,26 @@ const cycleApi: CycleApi = {
   startCycle: (name) => post<CycleStarted>(`${ws(name)}/cycle`),
 };
 
-const chatApi: ChatApi = {
+const chatSessionPath = (name: string, sessionId: string) =>
+  `${ws(name)}/chat/sessions/${encodeURIComponent(sessionId)}`;
+
+// 開発時の mock モードの、画面の通しの試験が本物の要求を確かめるときにも使う（mock/install.ts）。
+export const chatApi: ChatApi = {
   chat: (name) => get<ChatResponse>(`${ws(name)}/chat`),
   chatSend: (name, req) =>
     post<ChatPostResponse>(`${ws(name)}/chat/messages`, req),
   chatStop: (name) => post<unknown>(`${ws(name)}/chat/stop`),
   chatNew: (name) => post<unknown>(`${ws(name)}/chat/new`),
+  chatAnswer: (name, promptId, req) =>
+    post<unknown>(`${ws(name)}/chat/prompts/${promptId}/answer`, req),
+  chatSessions: (name) =>
+    get<ChatSessionsResponse>(`${ws(name)}/chat/sessions`),
+  chatResume: (name, sessionId) =>
+    post<unknown>(`${chatSessionPath(name, sessionId)}/resume`),
+  chatTranscript: (name, sessionId) =>
+    get<ChatTranscriptResponse>(
+      `${chatSessionPath(name, sessionId)}/transcript`,
+    ),
 };
 
 const screenWriteApi: ScreenWriteApi = {
@@ -263,6 +293,10 @@ export const api: ApiClient = {
   chatSend: (n, r) => impl.chatSend(n, r),
   chatStop: (n) => impl.chatStop(n),
   chatNew: (n) => impl.chatNew(n),
+  chatAnswer: (n, p, r) => impl.chatAnswer(n, p, r),
+  chatSessions: (n) => impl.chatSessions(n),
+  chatResume: (n, s) => impl.chatResume(n, s),
+  chatTranscript: (n, s) => impl.chatTranscript(n, s),
   answerHold: (n, c, h, r) => impl.answerHold(n, c, h, r),
   ingest: (n, r) => impl.ingest(n, r),
   cycleStop: (n) => impl.cycleStop(n),

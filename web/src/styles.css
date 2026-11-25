@@ -598,10 +598,64 @@ body {
   font-weight: bold;
 }
 .chat-state,
-.chat-viewing,
-.chat-tools {
+.chat-viewing {
   color: var(--board-muted-fg);
   margin: 0.25rem 0;
+}
+.chat-prompt {
+  margin: 0.5rem 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--board-needs-human-border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.chat-prompt fieldset {
+  min-width: 0;
+  margin: 0.25rem 0;
+}
+/* 許可の確認の対象は全文を見せる（高さを制限せず、省略もしない） */
+.chat-prompt-target {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-prompt-actions,
+.chat-session-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.chat-prompt-text {
+  display: block;
+  margin: 0.25rem 0;
+}
+.chat-prompt-text input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.chat-prompt-options,
+.chat-session-challenges {
+  list-style: none;
+  margin: 0.25rem 0;
+  padding: 0;
+}
+.chat-activity,
+.chat-session,
+.detail-chat {
+  overflow-wrap: anywhere;
+}
+.chat-session {
+  margin: 0.75rem 0;
+}
+.detail-chat {
+  min-width: 0;
+  font-size: 0.85rem;
+}
+.transcript {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.transcript-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .chat-form textarea {
   width: 100%;
