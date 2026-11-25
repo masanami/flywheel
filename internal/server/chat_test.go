@@ -31,6 +31,9 @@ type fakeChat struct {
 	startErr error
 	sendErr  error
 	convs    []*fakeConv
+	// transcripts は全文のファイルがある会話（会話の識別 → 項目の並び）。refs は全文を指す入力の記録。
+	transcripts map[string][]core.ChatTranscriptEntry
+	refs        []core.ChatTranscriptRef
 	// onStart は起動のたびに呼ぶ。
 	onStart func(core.ChatStartInput)
 }
@@ -39,11 +42,33 @@ func newFakeChat() *fakeChat { return &fakeChat{} }
 
 func (f *fakeChat) Available(context.Context) error { return f.availErr }
 
-func (f *fakeChat) ReadTranscript(context.Context, core.ChatTranscriptRef) ([]core.ChatTranscriptEntry, error) {
-	return nil, core.ErrChatTranscriptUnavailable
+func (f *fakeChat) ReadTranscript(_ context.Context, ref core.ChatTranscriptRef) ([]core.ChatTranscriptEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refs = append(f.refs, ref)
+	entries, ok := f.transcripts[ref.SessionID]
+	if !ok {
+		return nil, core.ErrChatTranscriptUnavailable
+	}
+	return entries, nil
 }
 
-func (f *fakeChat) HasTranscript(context.Context, core.ChatTranscriptRef) bool { return false }
+func (f *fakeChat) HasTranscript(_ context.Context, ref core.ChatTranscriptRef) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refs = append(f.refs, ref)
+	_, ok := f.transcripts[ref.SessionID]
+	return ok
+}
+
+func (f *fakeChat) setTranscript(sessionID string, entries ...core.ChatTranscriptEntry) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.transcripts == nil {
+		f.transcripts = map[string][]core.ChatTranscriptEntry{}
+	}
+	f.transcripts[sessionID] = entries
+}
 
 func (f *fakeChat) StartConversation(_ context.Context, in core.ChatStartInput, ev core.ChatConversationEvents) (core.ChatConversation, error) {
 	f.mu.Lock()
@@ -91,6 +116,9 @@ type fakeConv struct {
 	sendErr error
 	sent    chan core.ChatUtterance
 	answers chan fakeAnswer
+	// answerErr は答えを送るときの誤り。onAnswer は答えを受けた後、戻る前に呼ぶ。
+	answerErr error
+	onAnswer  func()
 
 	events sync.Mutex
 	mu     sync.Mutex
@@ -107,7 +135,13 @@ func (c *fakeConv) Send(_ context.Context, u core.ChatUtterance) error {
 }
 
 func (c *fakeConv) Answer(_ context.Context, requestID string, a core.ChatPromptAnswer) error {
+	if c.answerErr != nil {
+		return c.answerErr
+	}
 	c.answers <- fakeAnswer{requestID, a}
+	if c.onAnswer != nil {
+		c.onAnswer()
+	}
 	return nil
 }
 
