@@ -6,14 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 )
 
 // このファイルは画面の対話の欄（docs/features/core-redesign-s4d.md S4d-1）の会話・発言の core の口を持つ。
 // 会話（chat_session）と発言（chat_message）の正本はストアで、実行エンジンの側の会話のファイルには頼らない。
-// 実行エンジンの起動（チャットの実行）は internal/invoker が実装する ChatInvoker の仕事で、ここは記録の規則だけを持つ。
+// 実行エンジンの起動（チャットの実行）は internal/invoker が実装する ChatConversationInvoker の仕事で、ここは記録の規則だけを持つ。
 
 // ErrChatReplying は返事が進行中（state が replying の発言がある）のとき、次の発言を受けないことを表す。
 var ErrChatReplying = errors.New("core: a chat reply is still in progress")
@@ -22,25 +21,16 @@ var ErrChatReplying = errors.New("core: a chat reply is still in progress")
 const (
 	// ChatEnvSession の値は、会話の識別（ChatSession.EngineSession）。
 	ChatEnvSession = "FLYWHEEL_CHAT_SESSION"
-	// ChatEnvMessage の値は、いま答えているオーナーの発言の識別（ChatMessage.ID の 10 進表記）。
+	// ChatEnvMessage と ChatEnvTools は、いまは付けない過去の印の名前。親の環境に残っていても、
+	// 起動するプロセスへ引き継がないために持つ。
 	ChatEnvMessage = "FLYWHEEL_CHAT_MESSAGE"
-	// ChatEnvTools の値は、道具の範囲（restricted・full）。
-	ChatEnvTools = "FLYWHEEL_CHAT_TOOLS"
+	ChatEnvTools   = "FLYWHEEL_CHAT_TOOLS"
 )
 
 // ChatSessionMarkEnv は会話ごとに起動する実行エンジンの環境に足す印を返す。印は会話の識別だけ
 // （起動したまま続けるプロセスの環境は起動のときに決まり、発言ごとに変えられないため）。
 func ChatSessionMarkEnv(engineSession string) []string {
 	return []string{ChatEnvSession + "=" + engineSession}
-}
-
-// ChatMarkEnv は返事ごとに起動する実行エンジンの環境に足す印（KEY=VALUE の一覧）を返す。
-func ChatMarkEnv(engineSession string, ownerMessageID int64, tools ChatTools) []string {
-	return []string{
-		ChatEnvSession + "=" + engineSession,
-		ChatEnvMessage + "=" + strconv.FormatInt(ownerMessageID, 10),
-		ChatEnvTools + "=" + string(tools),
-	}
 }
 
 // ChatRole は発言の主。
@@ -104,12 +94,6 @@ func (v *ChatViewing) empty() bool {
 	return v == nil || (v.ChallengeID == "" && v.TaskID == "" && v.Title == "")
 }
 
-// ChatCommand は返事 1 回の形の対話の実行（ChatInvoker）が渡す、実行したコマンド 1 つ（実行した行と、成功したか）。
-type ChatCommand struct {
-	Command string `json:"command"`
-	OK      bool   `json:"ok"`
-}
-
 // ChatSession は会話。
 type ChatSession struct {
 	ID int64
@@ -158,7 +142,7 @@ type ChatTurn struct {
 	Resume        bool
 	// NewSession は、この発言で会話を作ったか。
 	NewSession bool
-	// Viewing は core が題名を引いた「いま見ているもの」（無ければ nil）。ChatLaunchInput.Viewing へそのまま渡す。
+	// Viewing は core が題名を引いた「いま見ているもの」（無ければ nil）。ChatUtterance.Viewing へそのまま渡す。
 	Viewing *ChatViewing
 }
 
@@ -414,36 +398,7 @@ func (s *Store) AppendChatSpeech(ctx context.Context, messageID int64, text stri
 	})
 }
 
-// AppendChatCommand は返事の行の道具の一覧へ、終わったコマンドを 1 つ足す（返事 1 回の形の対話の実行が使う。
-// 道具の使用の識別は持たない）。返事が進行中でなければ ErrValidation。
-func (s *Store) AppendChatCommand(ctx context.Context, messageID int64, cmd ChatCommand) error {
-	return s.chatWrite(ctx, func(tx *sql.Tx) error {
-		if err := requireReplying(ctx, tx, messageID); err != nil {
-			return err
-		}
-		return updateChatActivity(ctx, tx, messageID, func(list []ChatActivity) ([]ChatActivity, error) {
-			return append(list, ChatActivity{Tool: chatLegacyTool, Target: cutRunes(cmd.Command, ChatToolTargetLimit), State: chatActivityResult(cmd.OK)}), nil
-		})
-	})
-}
-
 func validChatCost(v float64) bool { return v >= 0 && !math.IsNaN(v) && !math.IsInf(v, 0) }
-
-// FinishChatReply は返事を終える（返事 1 回の形の対話の実行が使う）。costUSD は実行エンジンが返した費用で、そのまま
-// この返事の費用にする。0 より大きければ会話の費用の累計にも残す（この会話を会話の単位の形で続けたときに、同じ分を
-// 二重に数えないため）。ほかの規則は FinishChatReplyWithTotal と同じ。
-func (s *Store) FinishChatReply(ctx context.Context, messageID int64, state ChatMessageState, costUSD float64) error {
-	if !validChatCost(costUSD) {
-		return ErrValidation
-	}
-	return s.finishChatReply(ctx, messageID, state, func(tx *sql.Tx, sessionID int64) (int64, error) {
-		micros := usdToMicros(costUSD)
-		if micros == 0 {
-			return 0, nil
-		}
-		return micros, setChatCostTotal(ctx, tx, sessionID, micros)
-	})
-}
 
 func setChatCostTotal(ctx context.Context, tx *sql.Tx, sessionID, micros int64) error {
 	_, err := tx.ExecContext(ctx, `UPDATE chat_session SET engine_cost_total = ? WHERE id = ?`, micros, sessionID)
@@ -462,27 +417,6 @@ func (s *Store) FinishChatReplyWithTotal(ctx context.Context, messageID int64, s
 	if totalUSD != nil && !validChatCost(*totalUSD) {
 		return ErrValidation
 	}
-	return s.finishChatReply(ctx, messageID, state, func(tx *sql.Tx, sessionID int64) (int64, error) {
-		if totalUSD == nil {
-			return 0, nil
-		}
-		var prev int64
-		if err := tx.QueryRowContext(ctx, `SELECT engine_cost_total FROM chat_session WHERE id = ?`, sessionID).Scan(&prev); err != nil {
-			return 0, err
-		}
-		total := usdToMicros(*totalUSD)
-		if err := setChatCostTotal(ctx, tx, sessionID, total); err != nil {
-			return 0, err
-		}
-		if total < prev {
-			return total, nil
-		}
-		return total - prev, nil
-	})
-}
-
-// finishChatReply は返事を終える共通の書き込み。cost は同じトランザクションの中で返事の費用（100 万分の 1 USD）を決める。
-func (s *Store) finishChatReply(ctx context.Context, messageID int64, state ChatMessageState, cost func(tx *sql.Tx, sessionID int64) (int64, error)) error {
 	if !isChatEndState(state) {
 		return ErrValidation
 	}
@@ -495,7 +429,7 @@ func (s *Store) finishChatReply(ctx context.Context, messageID int64, state Chat
 		if err := tx.QueryRowContext(ctx, `SELECT session_id FROM chat_message WHERE id = ?`, messageID).Scan(&sessionID); err != nil {
 			return err
 		}
-		micros, err := cost(tx, sessionID)
+		micros, err := chatReplyCost(ctx, tx, sessionID, totalUSD)
 		if err != nil {
 			return err
 		}
@@ -517,6 +451,25 @@ func (s *Store) finishChatReply(ctx context.Context, messageID int64, state Chat
 		}
 		return nil
 	})
+}
+
+// chatReplyCost は返事の費用（100 万分の 1 USD）を累計の差で決め、会話の累計を更新する。
+func chatReplyCost(ctx context.Context, tx *sql.Tx, sessionID int64, totalUSD *float64) (int64, error) {
+	if totalUSD == nil {
+		return 0, nil
+	}
+	var prev int64
+	if err := tx.QueryRowContext(ctx, `SELECT engine_cost_total FROM chat_session WHERE id = ?`, sessionID).Scan(&prev); err != nil {
+		return 0, err
+	}
+	total := usdToMicros(*totalUSD)
+	if err := setChatCostTotal(ctx, tx, sessionID, total); err != nil {
+		return 0, err
+	}
+	if total < prev {
+		return total, nil
+	}
+	return total - prev, nil
 }
 
 // CloseChat は開いている会話を閉じる（次の発言は新しい会話になる）。開いている会話が無ければ何もしない。

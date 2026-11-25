@@ -198,7 +198,6 @@ export function chatMock(ctx: MockContext) {
         session_id: s?.id ?? null,
         started_at: s?.started_at ?? null,
         state: isReplying(s) ? "replying" : "idle",
-        tools: "restricted",
       });
     },
     async chatSend(name, req) {

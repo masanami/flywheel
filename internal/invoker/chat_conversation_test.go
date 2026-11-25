@@ -260,6 +260,9 @@ func TestConversation_WorkDirAndEnv(t *testing.T) {
 	cwdLog := filepath.Join(t.TempDir(), "cwd")
 	envLog := filepath.Join(t.TempDir(), "env")
 	t.Setenv(core.DelegatedRunEnvVar, "7")
+	// 過去の印は、親の環境にあっても渡さない。
+	t.Setenv(core.ChatEnvMessage, "1")
+	t.Setenv(core.ChatEnvTools, "restricted")
 	in := startInput(t)
 	in.Env = core.ChatSessionMarkEnv(chatSession)
 	conv, rec := startFake(t, fakeClaudeFixture{CwdLogPath: cwdLog, EnvDumpPath: envLog, Script: []fakeStep{{Read: true, Out: initLine}}}, in)
@@ -276,6 +279,9 @@ func TestConversation_WorkDirAndEnv(t *testing.T) {
 		t.Error("the session mark is missing")
 	}
 	for _, l := range lines {
+		if strings.HasPrefix(l, core.ChatEnvMessage+"=") || strings.HasPrefix(l, core.ChatEnvTools+"=") {
+			t.Errorf("an old chat mark reached the engine: %s", l)
+		}
 		if strings.HasPrefix(l, core.DelegatedRunEnvVar+"=") {
 			t.Errorf("the delegated marker reached the engine: %s", l)
 		}

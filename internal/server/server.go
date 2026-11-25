@@ -1,6 +1,7 @@
 // Package server は `flywheel serve` の HTTP サーバである。手元の待ち受け
 // （127.0.0.1 だけ）・Host と Origin の検査・終了の口を持つ。状態の読み書きは
-// core の公開 API だけを通し、server 自身はストアの外にも状態を持たない
+// core の公開 API だけを通し、server 自身はストアの外に状態を持たない（例外は、対話の欄の動いている
+// 実行エンジンのプロセスと、その入出力の管、休ませるための時計）
 // （docs/features/m4-ui-server.md）。このパッケージはストアのパッケージ・
 // internal/cli・internal/invoker を import しない。
 package server
@@ -75,7 +76,7 @@ func newServerWithLauncher(ln net.Listener, workspaces []core.FleetWorkspace, cf
 	cfg = cfg.withDefaults()
 	s := &Server{ln: ln, fleet: NewFleet(workspaces), checks: newCheckCache(defaultCheckTTL), done: make(chan struct{}), cfg: cfg, hub: newEventHub(workspaces)}
 	s.chat = newChatRunner(s.fleet)
-	// 前の起動が落ちて進行中のまま残った返事を、止めた状態にする（ストアの無いワークスペースは飛ばす）。
+	// 前の起動が落ちて残った返事と確認を片付ける（ストアの無いワークスペースは飛ばす）。
 	// 待ち受けを始める前（要求を受ける前）に済ませる。
 	s.chat.recoverInterrupted(context.Background())
 	port := ln.Addr().(*net.TCPAddr).Port
@@ -87,9 +88,9 @@ func newServerWithLauncher(ln net.Listener, workspaces []core.FleetWorkspace, cf
 	return s
 }
 
-// SetChatInvoker は対話の欄の実行エンジン（core.ChatInvoker）を渡す。Serve の前に呼ぶ。渡さなければ、
+// SetChatInvoker は対話の欄の実行エンジン（core.ChatConversationInvoker）を渡す。Serve の前に呼ぶ。渡さなければ、
 // 文を送る口は 503 を返す。
-func (s *Server) SetChatInvoker(inv core.ChatInvoker) {
+func (s *Server) SetChatInvoker(inv core.ChatConversationInvoker) {
 	s.chat.mu.Lock()
 	s.chat.invoker = inv
 	s.chat.mu.Unlock()
@@ -121,6 +122,7 @@ func (s *Server) Shutdown() error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = s.http.Close()
 	}
+	// 対話の欄のプロセスは、ストアを閉じる前にすべて止める。
 	s.chat.stopAll()
 	s.hub.wait()
 	s.fleet.Close()
@@ -150,7 +152,7 @@ func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done 
 	mux.HandleFunc("/api/v1/workspaces/{name}/chat", chatGetHandler(fleet))
 	mux.HandleFunc("/api/v1/workspaces/{name}/chat/messages", chatMessagesHandler(chat))
 	mux.HandleFunc("/api/v1/workspaces/{name}/chat/stop", chatStopHandler(chat))
-	mux.HandleFunc("/api/v1/workspaces/{name}/chat/new", chatNewHandler(fleet))
+	mux.HandleFunc("/api/v1/workspaces/{name}/chat/new", chatNewHandler(chat))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/holds/{hold}/answer", holdAnswerHandler(fleet, launch))
 	mux.HandleFunc("/api/v1/workspaces/{name}/ingest", ingestHandler(fleet, newGitHubIssueSource, launch))
 	mux.HandleFunc("/api/v1/workspaces/{name}/followups", followupsHandler(fleet))

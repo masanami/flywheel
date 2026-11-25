@@ -49,52 +49,7 @@ const (
 	// 既定（1 回の J6 で書ける記憶の件数と、1 件の大きさ〔バイト〕）。
 	defaultMemoryWriteFiles = 5
 	defaultMemoryWriteBytes = 8192
-
-	// defaultChatMaxTurns・defaultChatTimeoutSec は対話の欄の 1 回の返事のターン数と時間（秒）の上限の既定。
-	defaultChatMaxTurns   = 30
-	defaultChatTimeoutSec = 600
 )
-
-// ChatTools は対話の欄の実行エンジンに許す道具の範囲（chat_tools）。
-type ChatTools string
-
-// ChatTools の 2 値。
-const (
-	// ChatToolsRestricted は読み取り・検索・flywheel のコマンドだけを許す（既定）。
-	ChatToolsRestricted ChatTools = "restricted"
-	// ChatToolsFull はすべてを許す。
-	ChatToolsFull ChatTools = "full"
-)
-
-// ChatToolsFromWorkspace はワークスペースの宣言（chat_tools）から道具の範囲を読む。workspaceFlag が空なら
-// FLYWHEEL_WORKSPACE、それも無ければカレントディレクトリから親へ遡って見つかったワークスペースを使う（ストアを
-// 開くコマンドと同じ決め方）。ワークスペースが見つからない・宣言を読めない・宣言が full でないときは restricted
-// （fail-closed）。環境変数の値は読まない（印を付けた側が書き換えられるため）。
-func ChatToolsFromWorkspace(workspaceFlag string) ChatTools {
-	base, explicit, err := resolveBaseDirExplicit(workspaceFlag)
-	if err != nil {
-		return ChatToolsRestricted
-	}
-	if explicit {
-		if !storeExistsAt(base) {
-			return ChatToolsRestricted
-		}
-	} else {
-		dir, ok := findWorkspace(base)
-		if !ok {
-			return ChatToolsRestricted
-		}
-		base = dir
-	}
-	decl, err := LoadAgentDeclaration(base)
-	if err != nil || decl.ChatTools != ChatToolsFull {
-		return ChatToolsRestricted
-	}
-	return ChatToolsFull
-}
-
-// ChatToolsValues は chat_tools の閉集合（restricted・full）を返す。
-func ChatToolsValues() []ChatTools { return []ChatTools{ChatToolsRestricted, ChatToolsFull} }
 
 // defaultChatApprovableOperations は chat_approvable_operations の既定（反映だけ）。呼び出しごとに新しい
 // 切り片を返し、既定の値を共有して書き換えられないようにする。
@@ -176,12 +131,6 @@ type AgentDeclaration struct {
 	// `memory` を使ったときは false）。backup の段は、宣言したときだけ memory_dir をコミットする。
 	MemoryDirDeclared bool
 
-	// ChatTools は chat_tools（対話の欄の実行エンジンに許す道具の範囲。既定 restricted）。
-	ChatTools ChatTools
-	// ChatMaxTurns は chat_max_turns（1 回の返事のターン数の上限。正の整数。既定 30）。
-	ChatMaxTurns int
-	// ChatTimeoutSec は chat_timeout_sec（1 回の返事の時間の上限〔秒〕。正の整数。既定 600）。
-	ChatTimeoutSec int
 	// ChatApprovableOperations は chat_approvable_operations（欄から承認できる不可逆操作の種類。
 	// 項目が無いときは反映〔release〕だけ。空の一覧は「どの種類も承認できない」で、項目が無いこととは別）。
 	ChatApprovableOperations []OperationKind
@@ -214,9 +163,6 @@ func defaultAgentDeclaration() *AgentDeclaration {
 		MemoryDir:        defaultMemoryDir,
 		MemoryWriteLimit: MemoryWriteLimit{Files: defaultMemoryWriteFiles, Bytes: defaultMemoryWriteBytes},
 
-		ChatTools:                ChatToolsRestricted,
-		ChatMaxTurns:             defaultChatMaxTurns,
-		ChatTimeoutSec:           defaultChatTimeoutSec,
 		ChatApprovableOperations: defaultChatApprovableOperations(),
 		DefaultsUsed:             true,
 	}
@@ -320,7 +266,7 @@ var agentTopLevelKeys = map[string]bool{
 	"timeout_sec": true, "max_parallel_runs": true, "rework_limit": true, "failure_limit": true, "improve_threshold": true,
 	"cycle_poll_interval_sec": true, "auto_cycle": true, "supervisor": true,
 	"memory_dir": true, "memory_write_limit": true,
-	"chat_tools": true, "chat_max_turns": true, "chat_timeout_sec": true, "chat_approvable_operations": true,
+	"chat_approvable_operations": true,
 }
 
 var memoryWriteLimitKeys = map[string]bool{"files": true, "bytes": true}
@@ -338,7 +284,7 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := rejectRemovedKeys(raw, []string{"conflict_prediction_budget_usd", "serial_judgment_cycle_budget_usd", "behind_update_limit"}, "top-level"); err != nil {
+	if err := rejectRemovedKeys(raw, []string{"conflict_prediction_budget_usd", "serial_judgment_cycle_budget_usd", "behind_update_limit", "chat_tools", "chat_max_turns", "chat_timeout_sec"}, "top-level"); err != nil {
 		return nil, err
 	}
 	if err := rejectUnknownKeys(raw, agentTopLevelKeys, "top-level"); err != nil {
@@ -541,39 +487,6 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 		usedDefault = true
 	}
 
-	if v, ok := raw["chat_tools"]; ok {
-		t, err := parseChatTools(v)
-		if err != nil {
-			return nil, fmt.Errorf("chat_tools: %w", err)
-		}
-		decl.ChatTools = t
-	} else {
-		decl.ChatTools = ChatToolsRestricted
-		usedDefault = true
-	}
-
-	if v, ok := raw["chat_max_turns"]; ok {
-		i, err := decodeIntLiteral(v)
-		if err != nil {
-			return nil, fmt.Errorf("chat_max_turns: %w", err)
-		}
-		decl.ChatMaxTurns = i
-	} else {
-		decl.ChatMaxTurns = defaultChatMaxTurns
-		usedDefault = true
-	}
-
-	if v, ok := raw["chat_timeout_sec"]; ok {
-		i, err := decodeIntLiteral(v)
-		if err != nil {
-			return nil, fmt.Errorf("chat_timeout_sec: %w", err)
-		}
-		decl.ChatTimeoutSec = i
-	} else {
-		decl.ChatTimeoutSec = defaultChatTimeoutSec
-		usedDefault = true
-	}
-
 	if v, ok := raw["chat_approvable_operations"]; ok {
 		ops, err := parseChatApprovableOperations(v)
 		if err != nil {
@@ -587,22 +500,6 @@ func parseAgentDeclaration(data []byte) (*AgentDeclaration, error) {
 
 	decl.DefaultsUsed = usedDefault
 	return decl, nil
-}
-
-// parseChatTools は chat_tools を解釈する。restricted・full 以外（null・文字列以外を含む）は拒否する。
-func parseChatTools(raw json.RawMessage) (ChatTools, error) {
-	if isJSONNull(raw) {
-		return "", fmt.Errorf("must not be null")
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return "", err
-	}
-	switch t := ChatTools(s); t {
-	case ChatToolsRestricted, ChatToolsFull:
-		return t, nil
-	}
-	return "", fmt.Errorf("must be %q or %q, got %q", ChatToolsRestricted, ChatToolsFull, s)
 }
 
 // parseChatApprovableOperations は chat_approvable_operations を解釈する。空の一覧は受理する
@@ -955,12 +852,6 @@ func (d *AgentDeclaration) validate() error {
 	}
 	if d.ImproveThreshold <= 0 {
 		return fmt.Errorf("%w: improve_threshold must be a positive integer, got %d", ErrConfigInvalid, d.ImproveThreshold)
-	}
-	if d.ChatMaxTurns <= 0 {
-		return fmt.Errorf("%w: chat_max_turns must be a positive integer, got %d", ErrConfigInvalid, d.ChatMaxTurns)
-	}
-	if d.ChatTimeoutSec <= 0 {
-		return fmt.Errorf("%w: chat_timeout_sec must be a positive integer, got %d", ErrConfigInvalid, d.ChatTimeoutSec)
 	}
 	if d.CyclePollIntervalSec <= 0 {
 		return fmt.Errorf("%w: cycle_poll_interval_sec must be a positive integer, got %d", ErrConfigInvalid, d.CyclePollIntervalSec)

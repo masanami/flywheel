@@ -50,7 +50,7 @@ func (f *chatEnvFix) close(t *testing.T) {
 	}
 	for _, m := range chat.Messages {
 		if m.State == core.ChatStateReplying {
-			if err := s.FinishChatReply(context.Background(), m.ID, core.ChatStateDone, 0); err != nil {
+			if err := s.FinishChatReplyWithTotal(context.Background(), m.ID, core.ChatStateDone, nil); err != nil {
 				t.Fatal(err)
 			}
 		}

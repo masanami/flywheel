@@ -182,7 +182,7 @@ func TestChatApproval_MarkChecksRejectAndChangeNothing(t *testing.T) {
 			return f.mark(t, "")
 		}},
 		{"AC-115 返事が進行中でない", func(t *testing.T, f *chatFix) Attestation {
-			if err := f.s.FinishChatReply(context.Background(), f.turn.ReplyMessageID, ChatStateDone, 0); err != nil {
+			if err := f.s.FinishChatReplyWithTotal(context.Background(), f.turn.ReplyMessageID, ChatStateDone, nil); err != nil {
 				t.Fatal(err)
 			}
 			return f.mark(t, "")
@@ -428,7 +428,7 @@ func TestChatApproval_MarkCheckAppliesToWithdrawAndFollowups(t *testing.T) {
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
 	f := newChatFix(t, s)
-	if err := s.FinishChatReply(context.Background(), f.turn.ReplyMessageID, ChatStateDone, 0); err != nil {
+	if err := s.FinishChatReplyWithTotal(context.Background(), f.turn.ReplyMessageID, ChatStateDone, nil); err != nil {
 		t.Fatal(err)
 	}
 	prev, err := s.PrepareWithdraw(context.Background(), c.ID, "やめる")
@@ -478,7 +478,7 @@ func TestChatApproval_MarkCheckIsUnchangedWhileNoticesExist(t *testing.T) {
 				t.Fatalf("the notice (%v) must come after the owner's message (%+v, %v)", notices[0].At, chat, err)
 			}
 			if !inProgress {
-				if err := s.FinishChatReply(context.Background(), f.turn.ReplyMessageID, ChatStateDone, 0); err != nil {
+				if err := s.FinishChatReplyWithTotal(context.Background(), f.turn.ReplyMessageID, ChatStateDone, nil); err != nil {
 					t.Fatal(err)
 				}
 			}

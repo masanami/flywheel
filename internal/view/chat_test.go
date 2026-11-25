@@ -22,13 +22,13 @@ func chatJSON(t *testing.T, v any) string {
 
 // 会話が無いとき: session_id・started_at は null、messages は空の配列、state は idle。
 func TestFromChat_NoSession(t *testing.T) {
-	got := chatJSON(t, view.FromChat(&core.Chat{Messages: []core.ChatMessage{}}, core.ChatToolsRestricted))
-	want := `{"cost_usd":0,"messages":[],"session_id":null,"started_at":null,"state":"idle","tools":"restricted"}`
+	got := chatJSON(t, view.FromChat(&core.Chat{Messages: []core.ChatMessage{}}))
+	want := `{"cost_usd":0,"messages":[],"session_id":null,"started_at":null,"state":"idle"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 	// Messages が nil でも `[]` で出る。
-	if got := chatJSON(t, view.FromChat(&core.Chat{}, core.ChatToolsFull)); !strings.Contains(got, `"messages":[]`) || !strings.Contains(got, `"tools":"full"`) {
+	if got := chatJSON(t, view.FromChat(&core.Chat{})); !strings.Contains(got, `"messages":[]`) {
 		t.Errorf("nil messages: %s", got)
 	}
 }
@@ -44,11 +44,11 @@ func TestFromChat_MessagesViewingActivityAndState(t *testing.T) {
 			{ID: 2, Role: core.ChatRoleOrchestrator, Body: "a", State: core.ChatStateReplying, CostUSD: 1.5, CreatedAt: at, Activity: []core.ChatActivity{{ID: "toolu_1", Tool: "Bash", Target: "flywheel status", State: core.ChatActivityError}}},
 		},
 	}
-	got := chatJSON(t, view.FromChat(chat, core.ChatToolsRestricted))
+	got := chatJSON(t, view.FromChat(chat))
 	want := `{"cost_usd":1.5,"messages":[` +
 		`{"activity":[],"body":"q","cost_usd":0,"created_at":"2026-11-22T01:02:03.000Z","id":1,"prompts":[],"role":"owner","state":"done","viewing":{"challenge_id":"C-1","task_id":null,"title":"題"}},` +
 		`{"activity":[{"id":"toolu_1","state":"error","target":"flywheel status","tool":"Bash"}],"body":"a","cost_usd":1.5,"created_at":"2026-11-22T01:02:03.000Z","id":2,"prompts":[],"role":"orchestrator","state":"replying","viewing":null}` +
-		`],"session_id":"uuid-1","started_at":"2026-11-22T01:02:03.000Z","state":"replying","tools":"restricted"}`
+		`],"session_id":"uuid-1","started_at":"2026-11-22T01:02:03.000Z","state":"replying"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
@@ -74,7 +74,6 @@ func TestChatPostShapes(t *testing.T) {
 func TestClosedSets_ChatCodes(t *testing.T) {
 	want := map[string][]string{
 		"CHAT_MESSAGE_STATE_CODES": {"replying", "done", "stopped", "limit", "rate_limited", "session_lost", "failed"},
-		"CHAT_TOOLS_CODES":         {"restricted", "full"},
 		"CHAT_ROLE_CODES":          {"owner", "orchestrator"},
 		"CHAT_PANEL_STATE_CODES":   {"idle", "replying"},
 	}
@@ -101,7 +100,7 @@ func TestFromChat_Prompts(t *testing.T) {
 			Questions: []core.ChatQuestion{{Question: "色は？", Options: []core.ChatQuestionOption{{Label: "赤", Description: "red"}}, MultiSelect: true}},
 			Answer:    &core.ChatPromptAnswer{Answers: map[string]string{"色は？": "赤"}}},
 	}}}}
-	got := chatJSON(t, view.FromChat(chat, core.ChatToolsRestricted).Messages[0].Prompts)
+	got := chatJSON(t, view.FromChat(chat).Messages[0].Prompts)
 	const ts = `"2026-11-25T01:02:03.000Z"`
 	want := `[{"answer":null,"answered_at":null,"created_at":` + ts + `,"id":1,"kind":"permission","questions":[],"state":"pending","target":"` + long + `","tool":"Bash"},` +
 		`{"answer":{"answers":null,"decision":"deny","message":"だめ"},"answered_at":` + ts + `,"created_at":` + ts + `,"id":2,"kind":"permission","questions":[],"state":"denied","target":"{}","tool":"Write"},` +

@@ -111,7 +111,6 @@ const chatOf = (o: Partial<ChatResponse> = {}): ChatResponse => ({
   session_id: null,
   started_at: null,
   state: "idle",
-  tools: "restricted",
   ...o,
 });
 const replyingWith = (m: Partial<ChatMessage>): ChatResponse =>
@@ -212,16 +211,6 @@ it("道具の一覧は畳んで出て、1 行に道具の名前・対象・状�
     "Grep 検索の語 実行中",
   ]);
   expect(within(d).getAllByText("実行中")).toHaveLength(1);
-});
-
-// ---- 道具の範囲の表示 ----
-
-it("道具の範囲の表示は出ない（応答の tools が full でも読まない）", async () => {
-  chatBody = chatOf({ tools: "full" });
-  await open();
-  await panel().findByText(/相談や指示/);
-  expect(panel().queryByText(/すべての道具/)).toBeNull();
-  expect(screen.queryByTestId("chat-tools")).toBeNull();
 });
 
 // ---- 許可の確認 ----

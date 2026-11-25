@@ -137,14 +137,13 @@ type ChatMessage struct {
 }
 
 // ChatResponse は `GET …/chat` の成功の形。会話が無ければ session_id・started_at は null で、messages は空。
-// cost_usd は会話の費用の合計。tools はエージェントの宣言の道具の範囲（restricted・full）。
+// cost_usd は会話の費用の合計。
 type ChatResponse struct {
 	CostUSD   float64       `json:"cost_usd"`
 	Messages  []ChatMessage `json:"messages"`
 	SessionID *string       `json:"session_id"`
 	StartedAt *string       `json:"started_at"`
 	State     string        `json:"state"`
-	Tools     string        `json:"tools"`
 }
 
 // ChatPostViewing は `POST …/chat/messages` の入力の viewing（欄が見せていた課題とタスク。題名は core が読む）。
@@ -164,9 +163,9 @@ type ChatPostResponse struct {
 	ID int64 `json:"id"`
 }
 
-// FromChat は読んだ会話を ChatResponse へ変換する。tools は宣言の道具の範囲。
-func FromChat(c *core.Chat, tools core.ChatTools) ChatResponse {
-	out := ChatResponse{CostUSD: c.CostUSD, Messages: make([]ChatMessage, 0, len(c.Messages)), State: ChatStateIdle, Tools: string(tools)}
+// FromChat は読んだ会話を ChatResponse へ変換する。
+func FromChat(c *core.Chat) ChatResponse {
+	out := ChatResponse{CostUSD: c.CostUSD, Messages: make([]ChatMessage, 0, len(c.Messages)), State: ChatStateIdle}
 	if c.Replying {
 		out.State = ChatStateReplying
 	}
