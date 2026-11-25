@@ -208,7 +208,7 @@ func TestCheckPromptSizes_ExactLimitPasses_OneByteOverFails(t *testing.T) {
 		"j6.md":   6144,
 		"j8.md":   8192,
 		"sv.md":   6144,
-		"chat.md": 4706,
+		"chat.md": 4682,
 	}
 
 	mkFS := func(sizes map[string]int) fstest.MapFS {

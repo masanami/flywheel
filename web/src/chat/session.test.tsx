@@ -764,6 +764,25 @@ it("答えを待つ確認が新しく出ると、その確認を欄の見える�
   }
 });
 
+it("答えを待つ確認が同時に 2 件出たら古いほうへ送り、それに答え終えたら次の確認へ送る", async () => {
+  const spy = spyScroll();
+  try {
+    chatBody = replyingWith({
+      prompts: [permission({ id: 9 }), permission({ id: 7 })],
+    });
+    await open();
+    await waitFor(() => expect(spy.scrolled).toEqual(["7"]));
+
+    chatBody = replyingWith({
+      prompts: [permission({ id: 9 }), permission({ id: 7, state: "allowed" })],
+    });
+    changed();
+    await waitFor(() => expect(spy.scrolled).toEqual(["7", "9"]));
+  } finally {
+    spy.restore();
+  }
+});
+
 it("欄を開いたときに答えを待つ確認があれば、その確認を見える位置へ送る", async () => {
   const spy = spyScroll();
   try {

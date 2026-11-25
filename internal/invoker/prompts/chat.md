@@ -27,7 +27,7 @@
 
 ## コマンドの形
 
-- 使い方は `flywheel help` の 1 回で全部出る（`--help` は無い）。下の形は引かずに使う。
+- 使い方は `flywheel help` の 1 回で全部出る。下の形は引かずに使う。
 - 状況を読む: `flywheel status`・`flywheel show <ID>`・`flywheel list`。
 - 課題を作る: `flywheel create --title <題名> [--description <説明>]`。ほかのフラグは使い方で確かめる。
 - 承認と差し戻し: `flywheel approve <ID>`・`flywheel reject <ID> --reason <理由>`。

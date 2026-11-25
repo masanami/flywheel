@@ -154,32 +154,31 @@ export function ChatPanel({
     if (focusRequest > 0 && open) input.current?.focus();
   }, [focusRequest]);
 
-  // 答えを待つ確認が新しく出たら、欄の見える位置まで送る（flywheel#1303）。
+  // 答えを待つ確認のうち先頭（いちばん古いもの）が変わったら、欄の見える位置まで送る（flywheel#1303）。
+  // 同時に 2 件出たときは古いほうへ送り、それに答え終えたら次へ送る。
   // 欄をたたんでいる間・一覧を開いている間に出た分は、見えるようになったときに送る。
   const log = useRef<HTMLDivElement>(null);
-  const shownPending = useRef<Set<number>>(new Set());
-  const pendingIds =
+  const scrolledTo = useRef<number | null>(null);
+  const firstPending =
     result.state === "ready"
       ? result.data.messages
           .flatMap((m) => m.prompts)
           .filter((p) => p.state === "pending")
-          .map((p) => p.id)
-          .sort((a, b) => a - b)
-          .join(",")
-      : "";
+          .reduce<number | null>(
+            (min, p) => (min === null || p.id < min ? p.id : min),
+            null,
+          )
+      : null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: open・listOpen は、見えるようになったときに送り直すための合図
   useEffect(() => {
-    const ids = pendingIds === "" ? [] : pendingIds.split(",").map(Number);
     const box = log.current;
-    if (box === null || box.hidden) return;
-    const fresh = ids.filter((id) => !shownPending.current.has(id));
-    shownPending.current = new Set(ids);
-    const first = fresh[0];
-    if (first === undefined) return;
+    if (firstPending === null || box === null || box.hidden) return;
+    if (scrolledTo.current === firstPending) return;
+    scrolledTo.current = firstPending;
     box
-      .querySelector(`[data-prompt-id="${first}"]`)
+      .querySelector(`[data-prompt-id="${firstPending}"]`)
       ?.scrollIntoView?.({ block: "nearest" });
-  }, [pendingIds, open, listOpen]);
+  }, [firstPending, open, listOpen]);
 
   if (!open) {
     return (
