@@ -230,14 +230,44 @@ func promptQuestions(input json.RawMessage) []core.ChatQuestion {
 }
 
 // promptTarget は許可の確認の対象の全文。Bash はコマンドの全文、ほか（コマンドが読めない Bash を含む）は道具の
-// 入力の JSON。オーナーが何を許すかを見て決めるので、切らない。
+// 入力の JSON。オーナーが何を許すかを見て決めるので、切らない。Bash の入力に command と description のほかの
+// 項目（裏で実行する・サンドボックスを外すなどの指定）があれば、コマンドの全文の後に、空行を挟んで「指定: 」と
+// それらの項目だけの JSON を続ける（「許可する」は入力の全体を許すので、見えない指定を残さない）。
 func promptTarget(tool string, input json.RawMessage) string {
 	if tool == "Bash" {
 		if cmd, ok := inputString(input, "command"); ok {
+			if extra := bashExtraInput(input); extra != "" {
+				return cmd + "\n\n" + bashExtraLabel + extra
+			}
 			return cmd
 		}
 	}
 	return compactJSON(input)
+}
+
+// bashExtraLabel は、確認の対象の中で、コマンドのほかの指定の JSON の前に置く見出し。
+const bashExtraLabel = "指定: "
+
+// bashExtraInput は Bash の入力から command と description を除いた項目だけの JSON（キーの辞書順）。ほかの項目が
+// 無ければ空。名前はちょうど一致で比べる（大文字と小文字の違うキーは、ほかの項目として見せる）。
+func bashExtraInput(input json.RawMessage) string {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(input, &m) != nil {
+		return ""
+	}
+	delete(m, "command")
+	delete(m, "description")
+	if len(m) == 0 {
+		return ""
+	}
+	// 入力の JSON の見せ方（compactJSON）と同じく、<・>・& を書き換えない。
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if enc.Encode(m) != nil {
+		return ""
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // inputString は道具の入力から、名前が key とちょうど一致する文字列の値を返す。構造体へ読むと大文字と小文字の
