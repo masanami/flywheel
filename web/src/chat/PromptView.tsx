@@ -53,6 +53,7 @@ export function PromptView({
     <div
       className="chat-prompt"
       data-testid="chat-prompt"
+      data-prompt-id={prompt.id}
       data-kind={prompt.kind}
       data-state={prompt.state}
     >

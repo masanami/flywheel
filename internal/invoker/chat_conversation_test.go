@@ -922,6 +922,9 @@ func TestChatInstructions_ForTheKeptConversation(t *testing.T) {
 		"対象のリポジトリへ文書を書くときは、`.flywheel/repos/` の下の本体のクローンでブランチを切り替えず、作業ツリーを分けて作る",
 		"課題の作成・承認・回答をすると、この会話はその課題に自動で紐づく",
 		"ターミナルの対話の記録の形で承認を記録したりしない",
+		"使い方は `flywheel help` の 1 回で全部出る（`--help` は無い）",
+		"`flywheel create --title <題名> [--description <説明>]`",
+		"リダイレクトやパイプ（`2>&1`・`| head` など）を付けない",
 	} {
 		if !strings.Contains(ins, p) {
 			t.Errorf("chat.md lacks %q", p)

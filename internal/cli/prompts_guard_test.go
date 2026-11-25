@@ -239,14 +239,15 @@ func TestForbiddenTerms_DetectsJ8ClosedValues(t *testing.T) {
 }
 
 // TestChatPrompt_PassesForbiddenTermsCheck は、対話の欄の指示文（chat.md）が語の検査を通ることを確かめる。
-// 欄の指示文は flywheel のコマンド（answer・create・cycle status・cycle stop）を名指しする役目を持つので、
-// コマンドの名前の語（answer・create・status・cycle・stop）と、answer のフラグ（--replan・--hold）の語 replan（スーパーバイザーの手の名前と同じ文字）と hold（保留の表の名前と同じ文字）だけは
+// 欄の指示文は flywheel のコマンド（answer・create・cycle status・cycle stop・show・list・approve・reject）を名指しする役目を持つので、
+// コマンドの名前の語（answer・create・status・cycle・stop・show・list・approve・reject）と、answer のフラグ（--replan・--hold）の語 replan（スーパーバイザーの手の名前と同じ文字）と hold（保留の表の名前と同じ文字）だけは
 // 禁止語から外し、残りの禁止語と金額の表記を検査する。
 func TestChatPrompt_PassesForbiddenTermsCheck(t *testing.T) {
 	t.Parallel()
 	src := realForbiddenSources()
 	terms := slices.DeleteFunc(invoker.ForbiddenTerms(src), func(s string) bool {
-		return s == "answer" || s == "create" || s == "status" || s == "cycle" || s == "stop" || s == "replan" || s == "hold"
+		return s == "answer" || s == "create" || s == "status" || s == "cycle" || s == "stop" || s == "replan" || s == "hold" ||
+			s == "show" || s == "list" || s == "approve" || s == "reject"
 	})
 	if len(terms) == 0 {
 		t.Fatal("no forbidden terms")

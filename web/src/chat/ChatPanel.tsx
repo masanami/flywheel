@@ -154,6 +154,33 @@ export function ChatPanel({
     if (focusRequest > 0 && open) input.current?.focus();
   }, [focusRequest]);
 
+  // 答えを待つ確認が新しく出たら、欄の見える位置まで送る（flywheel#1303）。
+  // 欄をたたんでいる間・一覧を開いている間に出た分は、見えるようになったときに送る。
+  const log = useRef<HTMLDivElement>(null);
+  const shownPending = useRef<Set<number>>(new Set());
+  const pendingIds =
+    result.state === "ready"
+      ? result.data.messages
+          .flatMap((m) => m.prompts)
+          .filter((p) => p.state === "pending")
+          .map((p) => p.id)
+          .sort((a, b) => a - b)
+          .join(",")
+      : "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: open・listOpen は、見えるようになったときに送り直すための合図
+  useEffect(() => {
+    const ids = pendingIds === "" ? [] : pendingIds.split(",").map(Number);
+    const box = log.current;
+    if (box === null || box.hidden) return;
+    const fresh = ids.filter((id) => !shownPending.current.has(id));
+    shownPending.current = new Set(ids);
+    const first = fresh[0];
+    if (first === undefined) return;
+    box
+      .querySelector(`[data-prompt-id="${first}"]`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [pendingIds, open, listOpen]);
+
   if (!open) {
     return (
       <aside className="chat-panel chat-collapsed" data-testid="chat-panel">
@@ -255,7 +282,7 @@ export function ChatPanel({
         />
       ) : null}
       {/* 一覧を開いている間も欄の記録は残し、確認に書きかけた文を失わない */}
-      <div className="chat-log" hidden={listOpen}>
+      <div className="chat-log" ref={log} hidden={listOpen}>
         {result.state === "loading" ? <p>{LOADING_TEXT}</p> : null}
         {result.state === "error" ? (
           <p data-testid="chat-load-error">{errorText(result.error)}</p>
