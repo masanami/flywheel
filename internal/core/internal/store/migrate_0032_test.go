@@ -24,8 +24,8 @@ func TestChatMigration(t *testing.T) {
 			t.Errorf("user_version = %d, want the latest %d (>= %d)", got, latestProdVersion(t), migrationChatVersion)
 		}
 		for table, cols := range map[string][]string{
-			"chat_session": {"id", "engine_session", "engine_started", "started_at", "closed_at"},
-			"chat_message": {"id", "session_id", "role", "body", "state", "cost_usd", "viewing_challenge_id", "viewing_task_id", "viewing_title", "activity", "created_at", "ended_at"},
+			"chat_session": {"id", "engine_session", "engine_started", "started_at", "closed_at", "engine_cost_total"},
+			"chat_message": {"id", "session_id", "role", "body", "state", "cost_usd", "viewing_challenge_id", "viewing_task_id", "viewing_title", "activity", "created_at", "ended_at", "charged_challenge_id"},
 		} {
 			info := tableColumnInfo(t, db, table)
 			for _, c := range cols {

@@ -1131,6 +1131,11 @@ func FillAllTables(t *testing.T, workspace string) {
 			  VALUES (1, 'owner', '状況を教えて "quoted"', 'done', 0, 'C-1', 'T-1', '見ている題名', '[]', ?, ?)`, []any{at, at}},
 			{`INSERT INTO chat_message (session_id, role, body, state, cost_usd, viewing_challenge_id, viewing_task_id, viewing_title, activity, created_at, ended_at)
 			  VALUES (1, 'orchestrator', '返事', 'done', 1250000, NULL, NULL, NULL, '[{"command":"flywheel status","ok":true}]', ?, ?)`, []any{at, at}},
+			{`UPDATE chat_session SET engine_cost_total = 1250000 WHERE id = 1`, nil},
+			{`UPDATE chat_message SET charged_challenge_id = 1 WHERE id = 2`, nil},
+			{`INSERT INTO chat_prompt (message_id, request_id, kind, tool, target, questions, state, answer, created_at, answered_at)
+			  VALUES (2, 'req-1', 'question', 'AskUserQuestion', '', '[{"question":"どちら \"q\"","options":[{"label":"A","description":"d"}],"multi_select":false}]', 'answered', '{"answers":{"どちら \"q\"":"A"}}', ?, ?)`, []any{at, at}},
+			{`INSERT INTO chat_link (session_id, challenge_id, action, message_id, created_at) VALUES (1, 1, 'create', 2, ?)`, []any{at}},
 			{`INSERT INTO source_child (challenge_id, source_id, external_key, parent_external_key, url, title, body, upstream_state, created_at, updated_at)
 			  VALUES (1, 'src', 'o/r#9', 'o/r#1', 'https://github.com/o/r/issues/9', 't', 'b', 'open', ?, ?)`, []any{at, at}},
 			{`UPDATE task SET source_key = 'o/r#9' WHERE id = 1`, nil},

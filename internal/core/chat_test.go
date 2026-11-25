@@ -289,7 +289,7 @@ func TestChat_SpeechesAndCommandsAccumulateInOrder(t *testing.T) {
 	if reply.Body != "確かめます。\n\n1 件ありました。" {
 		t.Errorf("body = %q", reply.Body)
 	}
-	if want := []ChatCommand{{"flywheel status", true}, {"flywheel nosuch", false}}; !reflect.DeepEqual(reply.Activity, want) {
+	if want := []ChatActivity{{Tool: "Bash", Target: "flywheel status", State: ChatActivityOK}, {Tool: "Bash", Target: "flywheel nosuch", State: ChatActivityError}}; !reflect.DeepEqual(reply.Activity, want) {
 		t.Errorf("activity = %+v, want %+v", reply.Activity, want)
 	}
 	if reply.State != ChatStateReplying {

@@ -234,6 +234,8 @@ type InitResult struct {
 	Workspace string // ワークスペースの絶対パス
 	StorePath string // ストアファイルの絶対パス
 	Created   bool   // この呼び出しでストアを新規作成したか（false なら冪等な再実行）
+	// ClaudeSettingsCreated はこの呼び出しでワークスペースの Claude Code の設定のファイルを作ったか。
+	ClaudeSettingsCreated bool
 }
 
 // gitignoreContents は .flywheel/.gitignore の内容（D10: ストアを Git で追跡

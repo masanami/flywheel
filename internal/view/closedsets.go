@@ -93,6 +93,22 @@ func ClosedSets() []ClosedSet {
 	for _, v := range core.ChatToolsValues() {
 		chatTools = append(chatTools, string(v))
 	}
+	var activityStates, promptKinds, promptStates, chatDecisions, transcriptKinds []string
+	for _, v := range core.ChatActivityStates() {
+		activityStates = append(activityStates, string(v))
+	}
+	for _, v := range core.ChatPromptKinds() {
+		promptKinds = append(promptKinds, string(v))
+	}
+	for _, v := range core.ChatPromptStates() {
+		promptStates = append(promptStates, string(v))
+	}
+	for _, v := range core.ChatDecisions() {
+		chatDecisions = append(chatDecisions, string(v))
+	}
+	for _, v := range core.ChatTranscriptKinds() {
+		transcriptKinds = append(transcriptKinds, string(v))
+	}
 	var stopKinds, hands, actionResults, rejectReasons, supervisorStates, followupSources []string
 	for _, v := range core.StopKindValues() {
 		stopKinds = append(stopKinds, string(v))
@@ -142,6 +158,11 @@ func ClosedSets() []ClosedSet {
 		{Name: "CHAT_TOOLS_CODES", Codes: chatTools},
 		{Name: "CHAT_ROLE_CODES", Codes: chatRoles},
 		{Name: "CHAT_PANEL_STATE_CODES", Codes: []string{ChatStateIdle, ChatStateReplying}},
+		{Name: "CHAT_ACTIVITY_STATE_CODES", Codes: activityStates},
+		{Name: "CHAT_PROMPT_KIND_CODES", Codes: promptKinds},
+		{Name: "CHAT_PROMPT_STATE_CODES", Codes: promptStates},
+		{Name: "CHAT_DECISION_CODES", Codes: chatDecisions},
+		{Name: "CHAT_TRANSCRIPT_KIND_CODES", Codes: transcriptKinds},
 		{Name: "STOP_KIND_CODES", Codes: stopKinds},
 		{Name: "SUPERVISOR_HAND_CODES", Codes: hands},
 		{Name: "SUPERVISOR_RESULT_CODES", Codes: actionResults},

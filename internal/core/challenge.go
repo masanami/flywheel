@@ -260,6 +260,21 @@ type ChallengeDetail struct {
 	SupervisorHandsTaken map[SupervisorHand]int
 	// SupervisorQuestions はスーパーバイザーが答えた子の問い（結果が executed の対処の記録の questions。古い順。無ければ空のスライス）。
 	SupervisorQuestions []SupervisorQuestion
+	// SpecCostUSD は仕様づくりの費用（対話の欄の返事のうち、この課題に数えた分の合計）。課題の予算には数えない。
+	SpecCostUSD float64
+	// ChatSessions は課題に紐づいた会話（無ければ空）。
+	ChatSessions []ChallengeChatSession
+}
+
+// ChallengeChatSession は課題に紐づいた対話の欄の会話。
+type ChallengeChatSession struct {
+	// EngineSession は会話の識別。
+	EngineSession string
+	StartedAt     time.Time
+	// FirstMessage は最初のオーナーの発言の先頭（ChatSessionSummary.FirstMessage と同じ形）。
+	FirstMessage string
+	// CostUSD はこの課題に数えた費用。
+	CostUSD float64
 }
 
 // ChallengeDetailBudget は課題の詳細の予算。EstimateUSD は見込み（取りやめでないタスクの枠の合計）、LimitUSD は上限

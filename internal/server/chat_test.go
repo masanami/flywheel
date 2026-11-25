@@ -353,7 +353,7 @@ func TestChat_SpeechCommandsAndCostAreRecordedAsTheyHappen(t *testing.T) {
 	for {
 		c := getChat(t, port)
 		if r := lastReply(c); r.Body == "1 つ目" && len(r.Activity) == 1 {
-			if c.State != view.ChatStateReplying || r.State != "replying" || !r.Activity[0].Ok {
+			if c.State != view.ChatStateReplying || r.State != "replying" || r.Activity[0].State != "ok" {
 				t.Fatalf("mid-reply = %+v", c)
 			}
 			break
@@ -366,7 +366,7 @@ func TestChat_SpeechCommandsAndCostAreRecordedAsTheyHappen(t *testing.T) {
 	close(release)
 	c := waitReply(t, port)
 	r := lastReply(c)
-	if r.Body != "1 つ目\n\n2 つ目" || len(r.Activity) != 2 || r.Activity[1].Ok || r.CostUSD != 0.12 || r.State != "done" {
+	if r.Body != "1 つ目\n\n2 つ目" || len(r.Activity) != 2 || r.Activity[1].State != "error" || r.CostUSD != 0.12 || r.State != "done" {
 		t.Errorf("reply = %+v", r)
 	}
 	inv.run = func(_ context.Context, _ core.ChatLaunchInput, _ core.ChatEvents) (core.ChatLaunchOutput, error) {

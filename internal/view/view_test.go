@@ -71,6 +71,9 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.MarkReadResponse{}, view.BudgetResponse{}, view.ExportBody{}, view.ExportResponse{}, view.ImportBody{}, view.ImportResponse{},
 		view.ApprovalPlan{}, view.ApprovalRelease{}, view.ApprovalOtherOperation{}, view.ApprovalSummary{}, view.ApprovalSummaryResponse{}, view.DirectCompletion{}, view.ChallengeDirectCompletionResponse{}, view.StatusParentAgent{}, view.ShowCardResponse{}, view.ApprovedCardResponse{},
 		view.VersionResponse{}, view.FollowupPromoteResponse{},
+		view.ChatActivity{}, view.ChatMessage{}, view.ChatResponse{}, view.ChatQuestionOption{}, view.ChatQuestion{}, view.ChatPromptAnswer{}, view.ChatPrompt{},
+		view.ChatPromptAnswerRequest{}, view.ChatSessionChallenge{}, view.ChatSessionSummary{}, view.ChatSessionsResponse{},
+		view.ChallengeChatSession{}, view.ChatTranscriptEntry{}, view.ChatTranscriptResponse{}, view.ShowChallenge{},
 	}
 	for _, v := range types {
 		rt := reflect.TypeOf(v)
@@ -338,7 +341,7 @@ func TestShowAndActionableChallengeCarryEveryChallengeKey(t *testing.T) {
 		got   map[string]bool
 		added []string
 	}{
-		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"dependencies", "dependents", "followup_of", "improvement", "integration_ref", "uses_integration"}},
+		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"chat_sessions", "spec_cost_usd", "dependencies", "dependents", "followup_of", "improvement", "integration_ref", "uses_integration"}},
 		"ActionableChallenge": {tags(view.ActionableChallenge{}), []string{"unmet_dependencies"}},
 	} {
 		want := map[string]bool{}

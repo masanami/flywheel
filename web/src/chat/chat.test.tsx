@@ -23,6 +23,7 @@ const msg = (o: Partial<ChatMessage> & { id: number }): ChatMessage => ({
   body: "",
   cost_usd: 0,
   created_at: "2026-11-22T00:00:00.000Z",
+  prompts: [],
   role: "orchestrator",
   state: "done",
   viewing: null,
@@ -266,8 +267,8 @@ it("AC-40/41: 「実行したコマンド」は畳んで出て、開くとコマ
         id: 2,
         body: "見ました",
         activity: [
-          { command: "flywheel status", ok: true },
-          { command: "rm -rf /", ok: false },
+          { id: "t1", state: "ok", target: "flywheel status", tool: "Bash" },
+          { id: "t2", state: "error", target: "rm -rf /", tool: "Bash" },
         ],
       }),
     ],
