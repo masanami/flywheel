@@ -13,8 +13,9 @@ import (
 	"github.com/masanami/flywheel/internal/view"
 )
 
-// このファイルは対話の欄の口（docs/features/chat-session.md「画面・API設計」）。会話の実行エンジンの
-// プロセスの寿命は chat_process.go が持つ。
+// このファイルは対話の欄の口のうち、読み取りと、発言・止める・新しい会話（docs/features/chat-session.md
+// 「画面・API設計」）。確認への答えは chat_prompts.go、会話の一覧・続ける・全文は chat_sessions.go。会話の
+// 実行エンジンのプロセスの寿命は chat_process.go が持つ。
 
 // CodeEngineUnavailable は実行エンジンのコマンドが見つからないときのエラーコード（HTTP 503）。
 const CodeEngineUnavailable = "engine_unavailable"
@@ -44,17 +45,15 @@ func chatGetHandler(fleet *Fleet) http.HandlerFunc {
 	}
 }
 
-func decodeChatPost(r *http.Request) (view.ChatPostRequest, bool) {
-	var req view.ChatPostRequest
+// decodeChatBody は本文の JSON を 1 つだけ読む。知らないキーと、後に続く値は受けない。
+func decodeChatBody(r *http.Request, into any) bool {
 	dec := json.NewDecoder(io.LimitReader(r.Body, chatBodyLimit))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		return req, false
+	if err := dec.Decode(into); err != nil {
+		return false
 	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return req, false
-	}
-	return req, true
+	_, err := dec.Token()
+	return errors.Is(err, io.EOF)
 }
 
 // knownAgent は name のエージェントのストアを借りられるかを確かめ、借りられなければ誤りを返す。ストアはすぐ返す。
@@ -83,8 +82,8 @@ func chatMessagesHandler(c *chatRunner) http.HandlerFunc {
 			return
 		}
 
-		req, ok := decodeChatPost(r)
-		if !ok || strings.TrimSpace(req.Text) == "" {
+		var req view.ChatPostRequest
+		if ok := decodeChatBody(r, &req); !ok || strings.TrimSpace(req.Text) == "" {
 			writeError(w, http.StatusBadRequest, CodeValidationFailed, `本文は {"text": <空でない文字列>, "viewing": {"challenge_id", "task_id"}（省略可）} だけを受け付ける`)
 			return
 		}
@@ -135,7 +134,7 @@ func chatMessagesHandler(c *chatRunner) http.HandlerFunc {
 		release()
 		if err := c.deliver(a, name, workDir, inv, turn, core.ChatUtterance{Text: req.Text, Viewing: turn.Viewing}); err != nil {
 			// 発言は記録した後なので、返事を失敗として終える。
-			c.finishReply(name, turn.ReplyMessageID, core.ChatStateFailed, nil)
+			c.finishReply(a, name, turn.ReplyMessageID, core.ChatStateFailed, nil)
 		}
 		writeJSON(w, http.StatusOK, view.ChatPostResponse{ID: turn.OwnerMessageID})
 	}
@@ -161,12 +160,14 @@ func chatStopHandler(c *chatRunner) http.HandlerFunc {
 			defer cancel()
 			if err := c.stopProcess(ctx, a, p); err != nil {
 				// 止め切れなくても、行は止めた状態にする（終わっていれば何も変わらない）。
-				c.finishReply(name, replyID, core.ChatStateStopped, nil)
+				c.finishReply(a, name, replyID, core.ChatStateStopped, nil)
 				writeError(w, http.StatusInternalServerError, CodeInternalError, "実行エンジンを止められない: "+err.Error())
 				return
 			}
 		} else {
 			// このサーバが持つ返事が無いのに、ストアが進行中のままなら（終わりを書けなかった等）、行の側を止める。
+			a.settle.Lock()
+			defer a.settle.Unlock()
 			c.withStore(name, func(st *core.Store) {
 				if chat, err := st.ReadChat(r.Context()); err == nil && chat.Replying {
 					_, _ = st.StopInterruptedChatReplies(r.Context())

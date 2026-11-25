@@ -1,17 +1,21 @@
 package server
 
 // このファイルは、対話の欄の実行エンジンのプロセスの寿命を持つ（docs/features/chat-session.md「会話と Claude Code の
-// プロセス」「機能全体の設計」）。起動・発言の送り・休ませる・止める・サーバの停止と起動の片付け。実行エンジンは
+// プロセス」「機能全体の設計」）。起動・発言と確認の答えの送り・休ませる・止める・サーバの停止と起動の片付け。実行エンジンは
 // core.ChatConversationInvoker（internal/invoker が実装する）で受け取る。返事の進み・道具の一覧・確認はストアへ書き、
 // サーバがストアの外に持つのは、動いているプロセスと、その入出力の管、休ませるための時計だけ。
 //
-// 排他は 2 つ。chatAgent.op はエージェントごとの操作（発言・止める・新しい会話・休ませる・サーバの停止）を
-// 直列にする。chatAgent.mu はプロセスの状態を守る。実行エンジンの途中の分を受ける関数は op を取らず、mu を
-// 持ったままプロセスを止めない（止める側は、途中の分を受ける関数がすべて返るのを待つため）。
+// 排他は 3 つ。chatAgent.op はエージェントごとの操作（発言・止める・新しい会話・続ける・休ませる・サーバの停止）を
+// 直列にする。chatAgent.settle は、確認への答え（確かめる・送る・記録する）と返事の終わりの記録を直列にする
+// （返事を終えると答えを待つ確認は expired になるので、送ってから記録するまでの間に返事を終えない）。
+// chatAgent.mu はプロセスの状態を守る。実行エンジンの途中の分を受ける関数は op を取らず、mu を持ったまま
+// プロセスを止めない（止める側は、途中の分を受ける関数がすべて返るのを待つため）。settle を持つ側は op を取らず、
+// ストアを借りたまま settle を取らない。
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,9 +31,15 @@ const (
 	chatStopWait = 10 * time.Second
 	// chatAnswerWait は、実行エンジンへ答えを書くのを待つ上限。
 	chatAnswerWait = 10 * time.Second
+	// chatWriteAttempts と chatWriteRetryWait は、書けなかった書き込みをやり直す回数と間。
+	chatWriteAttempts  = 5
+	chatWriteRetryWait = 100 * time.Millisecond
 	// chatBetweenRepliesDenyMessage は、返事の合間に届いた確認を断るときに添える文。
 	chatBetweenRepliesDenyMessage = "いまは答えられません。次の返事の中で尋ね直してください。"
 )
+
+// errChatAnswerNotSent は、確認への答えを実行エンジンへ送れなかったことを表す。
+var errChatAnswerNotSent = errors.New("答えを実行エンジンへ送れなかった")
 
 // chatRunner は欄の実行エンジンのプロセスを管理する。
 type chatRunner struct {
@@ -49,7 +59,8 @@ type chatRunner struct {
 
 // chatAgent はエージェント（ワークスペース）1 つの状態。動いているプロセスは高々 1 つ。
 type chatAgent struct {
-	op sync.Mutex
+	op     sync.Mutex
+	settle sync.Mutex
 
 	mu   sync.Mutex
 	proc *chatProcess
@@ -290,13 +301,75 @@ func (c *chatRunner) prompt(a *chatAgent, p *chatProcess, req core.ChatPromptReq
 }
 
 func deny(p *chatProcess, req core.ChatPromptRequest) error {
+	return answerEngine(p, req.RequestID, core.ChatPromptAnswer{Decision: core.ChatDecisionDeny, Message: chatBetweenRepliesDenyMessage})
+}
+
+// answerEngine は確認への答えをプロセスへ送る。
+func answerEngine(p *chatProcess, requestID string, answer core.ChatPromptAnswer) error {
 	<-p.ready
 	if p.conv == nil {
 		return errors.New("実行エンジンを起動できていない")
 	}
+	// 書き込みの途中で取り消すとプロセスが止まるので、要求の ctx は使わない。
 	ctx, cancel := context.WithTimeout(context.Background(), chatAnswerWait)
 	defer cancel()
-	return p.conv.Answer(ctx, req.RequestID, core.ChatPromptAnswer{Decision: core.ChatDecisionDeny, Message: chatBetweenRepliesDenyMessage})
+	return p.conv.Answer(ctx, requestID, answer)
+}
+
+// answerPrompt は確認への答えを受ける。答えを待っていて形が合うことを core で確かめ、先に実行エンジンへ送り、
+// 送れたら記録する。送れなければ、その返事の答えを待つ確認を expired にして errChatAnswerNotSent を返す
+// （答えは記録しない）。ほかの誤りは core の誤り。プロセスを待つ間は、ストアを借りない。
+func (c *chatRunner) answerPrompt(ctx context.Context, a *chatAgent, name string, promptID int64, answer core.ChatPromptAnswer) error {
+	a.settle.Lock()
+	defer a.settle.Unlock()
+	st, release, le := c.fleet.Acquire(ctx, name)
+	if le != nil {
+		return le
+	}
+	prompt, err := st.CheckChatPromptAnswer(ctx, promptID, answer)
+	release()
+	if err != nil {
+		return err
+	}
+
+	p, replyID := a.replying()
+	if p == nil || replyID != prompt.MessageID {
+		err = errors.New("確認を求めたプロセスが動いていない")
+	} else {
+		err = answerEngine(p, prompt.RequestID, answer)
+	}
+	if err != nil {
+		if werr := c.writeWithRetry(name, func(st *core.Store) error {
+			_, err := st.ExpireChatReplyPrompts(context.Background(), prompt.MessageID)
+			return err
+		}); werr != nil {
+			return werr
+		}
+		return fmt.Errorf("%w: %s", errChatAnswerNotSent, err.Error())
+	}
+	return c.writeWithRetry(name, func(st *core.Store) error {
+		_, err := st.AnswerChatPrompt(context.Background(), promptID, answer)
+		return err
+	})
+}
+
+// writeWithRetry はストアを借りて書く。ほかの書き込みとぶつかったときは、短く間を置いて数回やり直す。
+func (c *chatRunner) writeWithRetry(name string, fn func(st *core.Store) error) error {
+	var err error
+	for attempt := 0; attempt < chatWriteAttempts; attempt++ {
+		st, release, le := c.fleet.Acquire(context.Background(), name)
+		if le != nil {
+			err = le
+		} else {
+			err = fn(st)
+			release()
+			if !errors.Is(err, core.ErrStoreBusy) {
+				return err
+			}
+		}
+		time.Sleep(chatWriteRetryWait)
+	}
+	return err
 }
 
 // replyEnded は返事の終わりを記録し、休ませるための時計を始める。
@@ -319,7 +392,7 @@ func (c *chatRunner) replyEnded(a *chatAgent, p *chatProcess, end core.ChatReply
 	if total != nil && *total < 0 {
 		total = nil
 	}
-	c.finishReply(p.name, replyID, state, total)
+	c.finishReply(a, p.name, replyID, state, total)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -353,7 +426,7 @@ func (c *chatRunner) exited(a *chatAgent, p *chatProcess) {
 		if stopping {
 			state = core.ChatStateStopped
 		}
-		c.finishReply(p.name, replyID, state, nil)
+		c.finishReply(a, p.name, replyID, state, nil)
 	}
 	p.cleanup()
 	// 終わりを記録してから外す（外した後は、次の発言が新しいプロセスを起動する）。
@@ -381,8 +454,10 @@ func (c *chatRunner) rest(a *chatAgent, p *chatProcess, generation int) {
 
 // finishReply は返事の終わりを記録する。記録に失敗すると返事の行が replying のまま残り、次の発言も「新しい会話」も
 // 409 になるので、短く間を置いて数回やり直す（それでも書けなければ、stop が行の側から止められる）。
-func (c *chatRunner) finishReply(name string, replyID int64, state core.ChatMessageState, total *float64) {
-	for attempt := 0; attempt < 5; attempt++ {
+func (c *chatRunner) finishReply(a *chatAgent, name string, replyID int64, state core.ChatMessageState, total *float64) {
+	a.settle.Lock()
+	defer a.settle.Unlock()
+	for attempt := 0; attempt < chatWriteAttempts; attempt++ {
 		done := false
 		c.withStore(name, func(st *core.Store) {
 			err := st.FinishChatReplyWithTotal(context.Background(), replyID, state, total)
@@ -391,7 +466,7 @@ func (c *chatRunner) finishReply(name string, replyID int64, state core.ChatMess
 		if done {
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(chatWriteRetryWait)
 	}
 }
 

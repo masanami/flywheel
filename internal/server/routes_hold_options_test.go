@@ -12,6 +12,13 @@ import (
 // holdAnswerRoute は、画面のボタンで選ぶだけの回答を受ける、唯一の経路。
 const holdAnswerRoute = "/api/v1/workspaces/{name}/challenges/{id}/holds/{hold}/answer"
 
+// chatPromptAnswerRoute は、対話の欄の確認（許可の確認と問い）への答えの口。保留の口ではない（呼ぶのは確認の答えの API だけで、
+// 保留の回答の API を呼ばないことは、下のソースの検査が確かめる）。
+const chatPromptAnswerRoute = "/api/v1/workspaces/{name}/chat/prompts/{id}/answer"
+
+// coreAnswerRefs は保留の回答の API の参照。AnswerRequest は識別子の全体で照合する（view.ChatPromptAnswerRequest は別の型）。
+var coreAnswerRefs = []*regexp.Regexp{regexp.MustCompile(`ExecuteAnswer`), regexp.MustCompile(`PrepareAnswer`), regexp.MustCompile(`\bAnswerRequest\b`)}
+
 func TestRoutesHaveNoWayToAnswerHoldByOption(t *testing.T) {
 	src, err := os.ReadFile("server.go")
 	if err != nil {
@@ -25,6 +32,9 @@ func TestRoutesHaveNoWayToAnswerHoldByOption(t *testing.T) {
 	for _, m := range routes {
 		if m[1] == holdAnswerRoute {
 			found = true
+			continue
+		}
+		if m[1] == chatPromptAnswerRoute {
 			continue
 		}
 		p := strings.ToLower(m[1])
@@ -57,8 +67,8 @@ func TestServerSourcesDoNotCallCoreAnswer(t *testing.T) {
 		if f == "hold_answer.go" {
 			continue // 画面のボタンで選ぶだけの回答の口だけが、core の回答を呼ぶ
 		}
-		for _, banned := range []string{"ExecuteAnswer", "PrepareAnswer", "AnswerRequest"} {
-			if strings.Contains(string(b), banned) {
+		for _, banned := range coreAnswerRefs {
+			if banned.Match(b) {
 				t.Errorf("%s が %s を参照している。保留へ答える口は hold_answer.go だけ", f, banned)
 			}
 		}
