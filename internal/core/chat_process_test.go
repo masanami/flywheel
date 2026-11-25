@@ -70,7 +70,7 @@ func TestChatTool_Refusals(t *testing.T) {
 	turn := mustPost(t, s, "q", nil)
 	startTool(t, s, turn.ReplyMessageID, "toolu_1", "Bash", "ls")
 	// 過去の形の要素（識別が空）は、道具の結果で変えられない。
-	must(t, s.AppendChatCommand(ctx, turn.ReplyMessageID, ChatCommand{Command: "old", OK: true}))
+	appendLegacyCommand(t, s, turn.ReplyMessageID, "old")
 	before := replyOf(t, s, turn.ReplyMessageID).Activity
 	for name, c := range map[string]struct {
 		err  error
@@ -95,7 +95,7 @@ func TestChatTool_Refusals(t *testing.T) {
 	if err := s.FinishChatTool(ctx, turn.ReplyMessageID, "toolu_1", false); !errors.Is(err, ErrValidation) {
 		t.Errorf("a second result for the same tool use: err = %v, want ErrValidation", err)
 	}
-	must(t, s.FinishChatReply(ctx, turn.ReplyMessageID, ChatStateDone, 0))
+	must(t, s.FinishChatReplyWithTotal(ctx, turn.ReplyMessageID, ChatStateDone, nil))
 	if err := s.StartChatTool(ctx, turn.ReplyMessageID, ChatToolUse{ID: "late", Tool: "Bash"}); !errors.Is(err, ErrValidation) {
 		t.Errorf("start after the reply ended: err = %v, want ErrValidation", err)
 	}
@@ -193,7 +193,7 @@ func TestChatPrompt_RecordRefusals(t *testing.T) {
 			t.Errorf("%s: err = %v, want ErrValidation", name, err)
 		}
 	}
-	must(t, s.FinishChatReply(ctx, turn.ReplyMessageID, ChatStateDone, 0))
+	must(t, s.FinishChatReplyWithTotal(ctx, turn.ReplyMessageID, ChatStateDone, nil))
 	if _, err := s.RecordChatPrompt(ctx, turn.ReplyMessageID, permissionRequest("r")); !errors.Is(err, ErrValidation) {
 		t.Errorf("record after the reply ended: err = %v, want ErrValidation", err)
 	}
@@ -344,7 +344,6 @@ func TestChatReply_StoppedOrFailedClosesRunningToolsAndPendingPrompts(t *testing
 		"cumulative": func(s *Store, id int64, st ChatMessageState) error {
 			return s.FinishChatReplyWithTotal(ctx, id, st, nil)
 		},
-		"per reply": func(s *Store, id int64, st ChatMessageState) error { return s.FinishChatReply(ctx, id, st, 0) },
 	}
 	for how, finish := range finishers {
 		for _, state := range []ChatMessageState{ChatStateStopped, ChatStateFailed} {
@@ -382,7 +381,7 @@ func TestChatPrompt_ExpireByReplyAndAll(t *testing.T) {
 	ctx := context.Background()
 	s, dir := newWorkspaceStore(t)
 	first := mustPost(t, s, "1", nil)
-	must(t, s.FinishChatReply(ctx, first.ReplyMessageID, ChatStateDone, 0))
+	must(t, s.FinishChatReplyWithTotal(ctx, first.ReplyMessageID, ChatStateDone, nil))
 	second := mustPost(t, s, "2", nil)
 	mustPrompt(t, s, second.ReplyMessageID, permissionRequest("a"))
 	answered := mustPrompt(t, s, second.ReplyMessageID, permissionRequest("b"))
@@ -584,7 +583,7 @@ func TestChatSessions_ResumeChecksInOrder(t *testing.T) {
 	if string(dump()) != string(before) {
 		t.Fatal("a refused or no-op resume changed the store")
 	}
-	must(t, s.FinishChatReply(ctx, cur.ReplyMessageID, ChatStateDone, 0))
+	must(t, s.FinishChatReplyWithTotal(ctx, cur.ReplyMessageID, ChatStateDone, nil))
 	before = dump()
 	if err := s.ResumeChatSession(ctx, old.EngineSession, no); !errors.Is(err, ErrChatTranscriptUnavailable) {
 		t.Errorf("no transcript: err = %v", err)
@@ -615,7 +614,7 @@ func TestChatSessions_ResumeWithNoOpenSession(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newWorkspaceStore(t)
 	old := mustPost(t, s, "a", nil)
-	must(t, s.FinishChatReply(ctx, old.ReplyMessageID, ChatStateDone, 0))
+	must(t, s.FinishChatReplyWithTotal(ctx, old.ReplyMessageID, ChatStateDone, nil))
 	must(t, s.CloseChat(ctx))
 	must(t, s.ResumeChatSession(ctx, old.EngineSession, func(string) bool { return true }))
 	if got := openEngineSession(t, s); got != old.EngineSession {
@@ -631,22 +630,11 @@ func TestChat_SessionMarkEnvHasOnlyTheSession(t *testing.T) {
 	}
 }
 
-// 返事 1 回の形の口が受ける費用は実行エンジンが返した累計なので、会話の累計にも残す（その会話を会話の単位の形で
-// 続けたときに、同じ分を二重に数えない）。費用が 0（分からない）の返事は、累計を変えない。
-func TestChatCost_PerReplyFinishKeepsTheRecordedTotal(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s, _ := newWorkspaceStore(t)
-	first := mustPost(t, s, "a", nil)
-	must(t, s.FinishChatReply(ctx, first.ReplyMessageID, ChatStateDone, 0.25))
-	stopped := mustPost(t, s, "b", nil)
-	must(t, s.FinishChatReply(ctx, stopped.ReplyMessageID, ChatStateStopped, 0))
-	if got := sessionTotalMicros(t, s, first.SessionID); got != 250000 {
-		t.Fatalf("total = %d, want 250000", got)
-	}
-	next := mustPost(t, s, "c", nil)
-	must(t, s.FinishChatReplyWithTotal(ctx, next.ReplyMessageID, ChatStateDone, usd(0.40)))
-	if got := replyOf(t, s, next.ReplyMessageID).CostUSD; math.Abs(got-0.15) > 1e-9 {
-		t.Errorf("cost = %v, want 0.15", got)
-	}
+// appendLegacyCommand は、過去の形の道具の一覧の要素（command・ok）を返事の行へ直に足す。
+func appendLegacyCommand(t *testing.T, s *Store, messageID int64, command string) {
+	t.Helper()
+	must(t, s.db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE chat_message SET activity = json_insert(activity, '$[#]', json_object('command', ?, 'ok', json('true'))) WHERE id = ?`, command, messageID)
+		return err
+	}))
 }

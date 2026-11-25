@@ -42,7 +42,6 @@ const chatOf = (o: Partial<ChatResponse> = {}): ChatResponse => ({
   session_id: null,
   started_at: null,
   state: "idle",
-  tools: "restricted",
   ...o,
 });
 

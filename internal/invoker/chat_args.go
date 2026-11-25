@@ -2,56 +2,13 @@ package invoker
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/masanami/flywheel/internal/core"
 )
 
-// buildChatArgs は返事ごとに起動する実行エンジンの起動の引数を組み立てる。判断の呼び出しの引数（buildArgs）にならい、
-// 違いは次のとおり。
-//
-//   - 出力は "--output-format stream-json --verbose"（--verbose が無いと stream-json は始まらない。発言の途中の
-//     断片を流す --include-partial-messages は付けない）。
-//   - "--max-turns" にターン数の上限を渡す。
-//   - restricted: 許す道具は Read・Grep・Glob・Bash(flywheel:*) の 4 つだけ、禁じる道具は Edit・Write・
-//     NotebookEdit・WebFetch・WebSearch・Task。許可の扱いは判断の呼び出しと同じ default（尋ねる相手がいないので、
-//     許していない道具は断られる）。書き込む・実行するシェルのコマンドを断るのは、この許可の設定だけが頼り
-//     （読み取りだけと見なされるコマンドは、実行エンジンが尋ねずに通す）。"--setting-sources" に空を渡し、利用者の設定の
-//     許可が加わらないようにする。
-//   - full: 許す道具・禁じる道具の指定を付けず、許可の扱いはすべて許す。
-//   - 指示文を "--append-system-prompt" で追加の指示に入れる。
-//
-// オーナーの発言・いま見ているものは引数に現れない（標準入力で渡す）。
-func buildChatArgs(in core.ChatLaunchInput, instructions string) []string {
-	args := []string{
-		"-p",
-		chatSessionFlag(in.Resume), in.SessionID,
-		"--output-format", "stream-json",
-		"--verbose",
-		"--max-turns", strconv.Itoa(in.MaxTurns),
-	}
-	if in.Tools == core.ChatToolsFull {
-		args = append(args, "--permission-mode", "bypassPermissions")
-	} else {
-		args = append(args,
-			"--allowedTools", "Read", "Grep", "Glob", "Bash(flywheel:*)",
-			"--disallowedTools", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task",
-			"--permission-mode", "default",
-			// 設定の出どころを空にする。利用者の設定（~/.claude など）の許可が上の許可に加わらないようにする。
-			"--setting-sources", "",
-		)
-	}
-	return append(args, "--append-system-prompt", instructions)
-}
-
 // chatViewingSectionLabel は「いま見ているもの」のデータの区画の名前。
 const chatViewingSectionLabel = "いま見ているもの"
-
-// buildChatStdin は返事ごとに起動する実行エンジンの標準入力を組み立てる。
-func buildChatStdin(in core.ChatLaunchInput) []byte {
-	return []byte(chatUtteranceText(in.Text, in.Viewing))
-}
 
 // chatOwnerHeading は、実行エンジンへ送る文の中で、オーナーの発言の前に置く見出し。
 const chatOwnerHeading = "# オーナーの発言\n\n"

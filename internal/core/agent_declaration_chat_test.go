@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -14,95 +15,21 @@ func loadChatDecl(t *testing.T, json string) (*AgentDeclaration, error) {
 	return LoadAgentDeclaration(writeAgentJSON(t, json))
 }
 
-// AC-63: chat_tools が無いとき、道具の範囲は restricted。
-func TestChatDeclaration_ToolsDefaultsToRestricted(t *testing.T) {
+// chat_tools・chat_max_turns・chat_timeout_sec は無くした項目で、書いた宣言は読み込みが誤り（値は問わない。
+// 黙って無視しない）。
+func TestChatDeclaration_RemovedKeysAreInvalid(t *testing.T) {
 	t.Parallel()
-	for name, content := range map[string]string{"no_file": "", "key_absent": `{"position_file": "p.md"}`} {
-		t.Run(name, func(t *testing.T) {
-			var decl *AgentDeclaration
-			var err error
-			if content == "" {
-				decl, err = LoadAgentDeclaration(t.TempDir())
-			} else {
-				decl, err = loadChatDecl(t, content)
+	for key, values := range map[string][]string{
+		"chat_tools":       {`"restricted"`, `"full"`, `null`},
+		"chat_max_turns":   {`30`, `null`},
+		"chat_timeout_sec": {`600`, `null`},
+	} {
+		for _, v := range values {
+			_, err := loadChatDecl(t, fmt.Sprintf(`{%q: %s}`, key, v))
+			if !errors.Is(err, ErrConfigInvalid) || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "removed") {
+				t.Errorf("%s: %s: error = %v, want ErrConfigInvalid naming the key and \"removed\"", key, v, err)
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if decl.ChatTools != ChatToolsRestricted {
-				t.Errorf("ChatTools = %q, want restricted", decl.ChatTools)
-			}
-		})
-	}
-}
-
-func TestChatDeclaration_ToolsFullIsAccepted(t *testing.T) {
-	t.Parallel()
-	decl, err := loadChatDecl(t, `{"chat_tools": "full"}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decl.ChatTools != ChatToolsFull {
-		t.Errorf("ChatTools = %q, want full", decl.ChatTools)
-	}
-}
-
-// AC-64: restricted・full 以外は読み込みが誤り。
-func TestChatDeclaration_ToolsOtherValuesAreInvalid(t *testing.T) {
-	t.Parallel()
-	for _, v := range []string{`"all"`, `""`, `"Full"`, `"restricted "`, `null`, `1`, `true`, `["full"]`} {
-		t.Run(v, func(t *testing.T) {
-			_, err := loadChatDecl(t, fmt.Sprintf(`{"chat_tools": %s}`, v))
-			if !errors.Is(err, ErrConfigInvalid) {
-				t.Fatalf("error = %v, want ErrConfigInvalid", err)
-			}
-		})
-	}
-}
-
-// AC-98・AC-103: chat_max_turns は無いとき 30、0 以下は誤り。
-func TestChatDeclaration_MaxTurns(t *testing.T) {
-	t.Parallel()
-	decl, err := loadChatDecl(t, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decl.ChatMaxTurns != 30 {
-		t.Errorf("default ChatMaxTurns = %d, want 30", decl.ChatMaxTurns)
-	}
-	decl, err = loadChatDecl(t, `{"chat_max_turns": 2}`)
-	if err != nil || decl.ChatMaxTurns != 2 {
-		t.Fatalf("chat_max_turns 2: %v, %+v", err, decl)
-	}
-	for _, v := range []string{"0", "-1", "1.5", `"3"`, "null"} {
-		t.Run(v, func(t *testing.T) {
-			if _, err := loadChatDecl(t, fmt.Sprintf(`{"chat_max_turns": %s}`, v)); !errors.Is(err, ErrConfigInvalid) {
-				t.Fatalf("error = %v, want ErrConfigInvalid", err)
-			}
-		})
-	}
-}
-
-// AC-104: chat_timeout_sec は既定 600、0 以下は誤り。
-func TestChatDeclaration_TimeoutSec(t *testing.T) {
-	t.Parallel()
-	decl, err := loadChatDecl(t, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decl.ChatTimeoutSec != 600 {
-		t.Errorf("default ChatTimeoutSec = %d, want 600", decl.ChatTimeoutSec)
-	}
-	decl, err = loadChatDecl(t, `{"chat_timeout_sec": 5}`)
-	if err != nil || decl.ChatTimeoutSec != 5 {
-		t.Fatalf("chat_timeout_sec 5: %v, %+v", err, decl)
-	}
-	for _, v := range []string{"0", "-5", "0.5", `"9"`, "null"} {
-		t.Run(v, func(t *testing.T) {
-			if _, err := loadChatDecl(t, fmt.Sprintf(`{"chat_timeout_sec": %s}`, v)); !errors.Is(err, ErrConfigInvalid) {
-				t.Fatalf("error = %v, want ErrConfigInvalid", err)
-			}
-		})
+		}
 	}
 }
 
@@ -158,7 +85,7 @@ func TestChatDeclaration_KeysAreListedForTheForbiddenTerms(t *testing.T) {
 	for _, k := range AgentDeclarationKeys() {
 		have[k] = true
 	}
-	for _, k := range []string{"chat_tools", "chat_max_turns", "chat_timeout_sec", "chat_approvable_operations"} {
+	for _, k := range []string{"chat_approvable_operations"} {
 		if !have[k] {
 			t.Errorf("AgentDeclarationKeys lacks %q", k)
 		}

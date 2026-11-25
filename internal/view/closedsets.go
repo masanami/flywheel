@@ -83,15 +83,12 @@ func ClosedSets() []ClosedSet {
 	for _, o := range []ConditionsOutlook{OutlookNotReleasing, OutlookReleasing, OutlookApprovedRelease} {
 		headings = append(headings, ConditionsAfterReleaseHeading(o))
 	}
-	var chatStates, chatTools, chatRoles []string
+	var chatStates, chatRoles []string
 	for _, v := range core.ChatMessageStates() {
 		chatStates = append(chatStates, string(v))
 	}
 	for _, v := range []core.ChatRole{core.ChatRoleOwner, core.ChatRoleOrchestrator} {
 		chatRoles = append(chatRoles, string(v))
-	}
-	for _, v := range core.ChatToolsValues() {
-		chatTools = append(chatTools, string(v))
 	}
 	var activityStates, promptKinds, promptStates, chatDecisions, transcriptKinds []string
 	for _, v := range core.ChatActivityStates() {
@@ -155,7 +152,6 @@ func ClosedSets() []ClosedSet {
 		{Name: "EXECUTION_RESULT_WORDS", Codes: execLabels},
 		{Name: "CONDITIONS_AFTER_RELEASE_HEADINGS", Codes: headings},
 		{Name: "CHAT_MESSAGE_STATE_CODES", Codes: chatStates},
-		{Name: "CHAT_TOOLS_CODES", Codes: chatTools},
 		{Name: "CHAT_ROLE_CODES", Codes: chatRoles},
 		{Name: "CHAT_PANEL_STATE_CODES", Codes: []string{ChatStateIdle, ChatStateReplying}},
 		{Name: "CHAT_ACTIVITY_STATE_CODES", Codes: activityStates},

@@ -260,6 +260,9 @@ func TestConversation_WorkDirAndEnv(t *testing.T) {
 	cwdLog := filepath.Join(t.TempDir(), "cwd")
 	envLog := filepath.Join(t.TempDir(), "env")
 	t.Setenv(core.DelegatedRunEnvVar, "7")
+	// 過去の印は、親の環境にあっても渡さない。
+	t.Setenv(core.ChatEnvMessage, "1")
+	t.Setenv(core.ChatEnvTools, "restricted")
 	in := startInput(t)
 	in.Env = core.ChatSessionMarkEnv(chatSession)
 	conv, rec := startFake(t, fakeClaudeFixture{CwdLogPath: cwdLog, EnvDumpPath: envLog, Script: []fakeStep{{Read: true, Out: initLine}}}, in)
@@ -276,6 +279,9 @@ func TestConversation_WorkDirAndEnv(t *testing.T) {
 		t.Error("the session mark is missing")
 	}
 	for _, l := range lines {
+		if strings.HasPrefix(l, core.ChatEnvMessage+"=") || strings.HasPrefix(l, core.ChatEnvTools+"=") {
+			t.Errorf("an old chat mark reached the engine: %s", l)
+		}
 		if strings.HasPrefix(l, core.DelegatedRunEnvVar+"=") {
 			t.Errorf("the delegated marker reached the engine: %s", l)
 		}
@@ -525,7 +531,7 @@ func TestConversation_PromptKindAndTarget(t *testing.T) {
 	out := controlLine(t, "r1", "Write", `{"file_path":"/x","content":"<a&b>`+long+`"}`, false) +
 		controlLine(t, "r2", "AskUserQuestion", q, false) +
 		controlLine(t, "r3", "AskUserQuestion", q, true) +
-		// 大文字の違うキーは、コマンドの全文として読まない（実行されるのは command の値）。
+		// 大文字の違うキーは、コマンドの全文として読まない（実行されるのは command の値）。ほかの指定として見せる。
 		controlLine(t, "r4", "Bash", `{"command":"rm -rf x\necho done","Command":"ls"}`, true) +
 		controlLine(t, "r5", "Bash", `{"cmd":"ls"}`, false) +
 		controlLine(t, "r6", "AskUserQuestion", `{"questions":[]}`, true)
@@ -542,7 +548,7 @@ func TestConversation_PromptKindAndTarget(t *testing.T) {
 	if got[2].Kind != core.ChatPromptQuestion || !got[2].Questions[0].MultiSelect {
 		t.Errorf("question: %+v", got[2])
 	}
-	if got[3].Kind != core.ChatPromptPermission || got[3].Target != "rm -rf x\necho done" {
+	if got[3].Kind != core.ChatPromptPermission || got[3].Target != "rm -rf x\necho done\n\n指定: {\"Command\":\"ls\"}" {
 		t.Errorf("Bash with interaction: %+v", got[3])
 	}
 	if got[4].Target != `{"cmd":"ls"}` {
@@ -955,5 +961,37 @@ func TestConversation_StderrOfAnEarlierReplyIsNotUsed(t *testing.T) {
 	rec.waitExit(t)
 	if len(rec.ends) != 2 || strings.Contains(rec.exits[0].ErrorSummary, "You've hit") {
 		t.Errorf("ends = %+v, exits = %+v", rec.ends, rec.exits)
+	}
+}
+
+// Bash の入力に command と description のほかの項目があれば、確認の対象は、コマンドの全文・空行・「指定: 」と
+// その項目だけの JSON の順になる（「許可する」は入力の全体を許すので、見えない指定を残さない）。
+func TestConversation_BashPromptTargetShowsOtherInputItems(t *testing.T) {
+	out := controlLine(t, "r1", "Bash", `{"command":"sleep 100","description":"待つ","run_in_background":true}`, false) +
+		// 複数の項目はキーの辞書順で、値はそのまま（<・>・& を書き換えない）。description は出さない。
+		controlLine(t, "r2", "Bash", `{"timeout": 5000, "command":"make gate\necho done", "dangerouslyDisableSandbox":true, "description":"d", "note":"<a&b>"}`, false)
+	conv, rec := startFake(t, fakeClaudeFixture{Script: []fakeStep{{Read: true, Out: out}}}, startInput(t))
+	send(t, conv, "x")
+	rec.waitPrompts(t, 2)
+	got := rec.prompts
+	if want := "sleep 100\n\n指定: {\"run_in_background\":true}"; got[0].Kind != core.ChatPromptPermission || got[0].Target != want {
+		t.Errorf("run_in_background: target = %q, want %q", got[0].Target, want)
+	}
+	if want := "make gate\necho done\n\n指定: {\"dangerouslyDisableSandbox\":true,\"note\":\"<a&b>\",\"timeout\":5000}"; got[1].Target != want {
+		t.Errorf("several items: target = %q, want %q", got[1].Target, want)
+	}
+}
+
+// Bash の入力が command と description だけなら、確認の対象はコマンドの全文だけになる（「指定: 」が付かない）。
+func TestConversation_BashPromptTargetIsCommandOnlyWithoutOtherItems(t *testing.T) {
+	out := controlLine(t, "r1", "Bash", `{"command":"ls -la","description":"一覧"}`, false) +
+		controlLine(t, "r2", "Bash", `{"command":"pwd"}`, false)
+	conv, rec := startFake(t, fakeClaudeFixture{Script: []fakeStep{{Read: true, Out: out}}}, startInput(t))
+	send(t, conv, "x")
+	rec.waitPrompts(t, 2)
+	for i, want := range []string{"ls -la", "pwd"} {
+		if got := rec.prompts[i].Target; got != want || strings.Contains(got, "指定: ") {
+			t.Errorf("prompt %d: target = %q, want %q", i, got, want)
+		}
 	}
 }

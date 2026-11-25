@@ -68,7 +68,6 @@ test("許可の確認で「許可する」を押すと、確認への答えの�
         session_id: "s-1",
         started_at: at,
         state: state === "pending" ? "replying" : "idle",
-        tools: "restricted",
         messages: [
           {
             activity: [
@@ -208,8 +207,8 @@ test("答えを待つ確認がある間に「止める」を押すと、返事�
   await expect(panel.getByText("止めました。")).toBeVisible();
 });
 
-// 偽の API に無い形（実行中の行と終わった行の混在・複数を選べる問い・応答の tools が full）は、応答を差し込んで確かめる。
-test("道具の一覧の「実行中」は running の行だけに出て、複数を選べる問いはチェックと「送る」で答え、道具の範囲は出ない", async ({
+// 偽の API に無い形（実行中の行と終わった行の混在・複数を選べる問い）は、応答を差し込んで確かめる。
+test("道具の一覧の「実行中」は running の行だけに出て、複数を選べる問いはチェックと「送る」で答える", async ({
   page,
 }) => {
   const at = "2026-11-25T00:00:00.000Z";
@@ -228,7 +227,6 @@ test("道具の一覧の「実行中」は running の行だけに出て、複�
         session_id: "s-1",
         started_at: at,
         state: "replying",
-        tools: "full",
         messages: [
           {
             activity: [
@@ -279,8 +277,6 @@ test("道具の一覧の「実行中」は running の行だけに出て、複�
     "Bash make gate 失敗",
     "Grep 再送 実行中",
   ]);
-  await expect(panel.getByTestId("chat-tools")).toHaveCount(0);
-  await expect(panel).not.toContainText("すべての道具を許可しています");
 
   const prompt = panel.getByTestId("chat-prompt");
   await expect(prompt.getByRole("checkbox")).toHaveCount(2);

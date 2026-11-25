@@ -152,7 +152,7 @@ func defaultExecutable() (string, error) {
 		return "", err
 	}
 	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
-		exe = resolved // 欄の返事ごとの一時のシンボリックリンクを、サイクルの子（長く走り、次のサイクルも起動する）の実行ファイルにしない。
+		exe = resolved // 欄のプロセスごとの一時のシンボリックリンクを、サイクルの子（長く走り、次のサイクルも起動する）の実行ファイルにしない。
 	}
 	if strings.HasSuffix(filepath.Base(exe), ".test") {
 		return "", fmt.Errorf("テストのバイナリ（%s）はサイクルの子として起動できない", exe)

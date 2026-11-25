@@ -9,8 +9,6 @@ import (
 // 会話の単位の対話の実行のインターフェース（docs/features/chat-session.md「機能全体の設計」）。会話ごとに実行エンジンを
 // 起動したまま続ける。置き場は core で、internal/invoker が実装する。実行エンジンに固有の形（起動の引数・入出力の形・
 // 会話のファイルの置き場所と形）は invoker の中に閉じ、ここへは持ち込まない。
-// 返事 1 回の形のインターフェース（ChatInvoker。chat_invoker.go）とは別の型で、メソッドの名前は重ならない
-// （Available は同じ意味）。1 つの実装が両方を満たせる。
 
 // ErrChatEngineNotFound は実行エンジンが見つからず起動できないことを表す。
 var ErrChatEngineNotFound = errors.New("core: the chat engine is not found")
@@ -54,7 +52,8 @@ type ChatExit struct {
 }
 
 // ChatConversationEvents は途中の分を受ける呼び出し元の関数。nil の関数は呼ばない。実装は、実行エンジンの出力を
-// 読む順に、1 つずつ（重ねずに）呼ぶ。サブエージェントの中の発言と道具の使用は渡さない。道具の結果の中身は渡さない。
+// 読む順に、1 つずつ（重ねずに）呼ぶ。StartConversation が戻る前にも呼びうるが、StartConversation の中から
+// 同期では呼ばない。サブエージェントの中の発言と道具の使用は渡さない。道具の結果の中身は渡さない。
 // 関数の中から、同じ会話の ChatConversation.Stop を呼ばない。
 type ChatConversationEvents struct {
 	// Started は、出力に会話の始まりの行が現れたとき。
@@ -81,6 +80,7 @@ type ChatConversation interface {
 	// 以後も許す答えは返さない。送れなければ（プロセスが終わっていた・書き込めなかった）誤り。
 	Answer(ctx context.Context, requestID string, answer ChatPromptAnswer) error
 	// Stop はプロセスとその子を止める（返事だけを割り込みで止める形ではない）。終わった後に呼んでも誤りにしない。
+	// 誤りなしで返るのは、Exited を含む途中の分の関数がすべて返った後。
 	Stop(ctx context.Context) error
 }
 

@@ -966,7 +966,6 @@ export interface ChatResponse {
   session_id: string | null;
   started_at: string | null;
   state: string;
-  tools: string;
 }
 
 export interface ChatMessage {
@@ -1438,11 +1437,6 @@ export const CHAT_MESSAGE_STATE_CODES = [
   "rate_limited",
   "session_lost",
   "failed",
-] as const;
-
-export const CHAT_TOOLS_CODES = [
-  "restricted",
-  "full",
 ] as const;
 
 export const CHAT_ROLE_CODES = [
