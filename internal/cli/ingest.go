@@ -96,6 +96,7 @@ func runIngestSelected(a Args, decl *core.SourcesDeclaration, sourceID *string) 
 		SourceID: sourceID,
 		Specs:    a.Positional,
 		Upstream: client,
+		Chat:     a.Chat.coreMark(),
 	})
 	if err != nil {
 		return nil, mapCoreErr(err)

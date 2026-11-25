@@ -256,6 +256,8 @@ const gitignoreContents = "# flywheel が生成する。手で編集しない。
 // 新しければ、ストアのファイル・.gitignore のどちらも一切変えずに
 // ErrStoreTooNew を返す。
 //
+// ワークスペースの .claude/settings.json が無ければ作る（writeClaudeSettingsIfMissing）。
+//
 // 順序は「ストアを開いて版の検査に成功した後に .gitignore を書く」（レビュー
 // 指摘）: 版が新しすぎて開けない場合に .gitignore だけが書き換わる、という
 // 部分適用を避ける。.gitignore は不在のときだけ作り、既存の内容（利用者が
@@ -285,7 +287,12 @@ func Init(workspaceFlag string) (*InitResult, error) {
 		return nil, err
 	}
 
-	return &InitResult{Workspace: base, StorePath: dbPath, Created: created}, nil
+	settingsCreated, err := writeClaudeSettingsIfMissing(base)
+	if err != nil {
+		return nil, err
+	}
+
+	return &InitResult{Workspace: base, StorePath: dbPath, Created: created, ClaudeSettingsCreated: settingsCreated}, nil
 }
 
 // openAtForInit は openAt と同じくストアを開く（存在しなければ作る）が、

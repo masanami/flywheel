@@ -4,16 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strconv"
+	"fmt"
 	"strings"
 )
 
 // このファイルは経路 chat（画面の対話の欄から起動された flywheel のコマンド）の本人確認の層を持つ
 // （docs/features/core-redesign-s4d.md §欄から受ける承認・回答）。
 //
-//   - 印（会話の識別・発言の識別）の 2 値を持つ本人確認（NewChatMarkVerifier）。Verify は 2 値が空でないことだけを見る。
-//   - 操作を行う core の処理が、同じトランザクションの中で chatGate を呼び、印の検査をして、発言の文面を
+//   - 印（会話の識別だけ）を持つ本人確認（NewChatMarkVerifier）。Verify は印が空でないことだけを見る。
+//   - 操作を行う core の処理が、同じトランザクションの中で chatGate を呼び、印の検査をして、最後のオーナーの発言を
 //     ストアから引いて記録の手がかり（relay_session・relay_quote）を埋める。
+//   - 操作が成立したら、同じトランザクションの中で会話と課題を紐づける（chat_link.go）。
 //   - 不可逆操作の承認と、反映の承認を含む完了の承認は、宣言の chat_approvable_operations にある種類だけを受ける。
 
 // ErrChatMarkInvalid は経路 chat の印の検査に通らなかったことを表す。errors.Is(err, ErrVerificationRejected) も真。
@@ -44,31 +45,42 @@ func (chatNotApprovableError) Error() string {
 
 func (chatNotApprovableError) Unwrap() error { return ErrVerificationRejected }
 
-// chatMark は経路 chat の印。resolved は chatGate がトランザクションの中で埋める記録の手がかり
-// （Session＝会話の識別・Quote＝印の発言の body）。
+// ChatSessionMark は対話の欄の印（会話の識別＝FLYWHEEL_CHAT_SESSION の値）。本人確認を通らない記録の口
+// （作成・指定つきの取り込み）へ渡す。
+type ChatSessionMark struct {
+	Session string
+}
+
+// chatMark は経路 chat の本人確認が持つ印。resolved は chatGate がトランザクションの中で埋める。
 type chatMark struct {
-	session, message string
-	resolved         RelayEvidence
+	session  string
+	resolved resolvedChatMark
 }
 
-func (m *chatMark) complete() bool {
-	return strings.TrimSpace(m.session) != "" && strings.TrimSpace(m.message) != ""
+func (m *chatMark) complete() bool { return strings.TrimSpace(m.session) != "" }
+
+// resolvedChatMark は印の検査を通った結果。
+type resolvedChatMark struct {
+	// evidence は記録の手がかり（Session＝会話の識別・Quote＝記録の「発言」）。
+	evidence RelayEvidence
+	// sessionID は会話の行の ID。replyMessageID は進行中の返事の行の ID。
+	sessionID, replyMessageID int64
 }
 
-// chatMarkVerifier は経路 chat の Verifier。印の 2 値だけを持つ。
-type chatMarkVerifier struct{ session, message string }
+// chatMarkVerifier は経路 chat の Verifier。印だけを持つ。
+type chatMarkVerifier struct{ session string }
 
-// NewChatMarkVerifier は印（会話の識別＝FLYWHEEL_CHAT_SESSION・発言の識別＝FLYWHEEL_CHAT_MESSAGE）から、
-// 経路 chat の本人確認を作る。Verify(ChannelChat, …) だけがこれを受ける。
-func NewChatMarkVerifier(session, message string) Verifier {
-	return &chatMarkVerifier{session: session, message: message}
+// NewChatMarkVerifier は印（会話の識別＝FLYWHEEL_CHAT_SESSION）から、経路 chat の本人確認を作る。
+// Verify(ChannelChat, …) だけがこれを受ける。
+func NewChatMarkVerifier(session string) Verifier {
+	return &chatMarkVerifier{session: session}
 }
 
 func (*chatMarkVerifier) Method() Verification { return VerificationRelayed }
 
-// Evidence は印を返す（Session＝会話の識別・Quote＝発言の識別）。発言の文面ではない。
+// Evidence は印を返す（Session＝会話の識別）。発言の文面は持たない。
 func (v *chatMarkVerifier) Evidence() RelayEvidence {
-	return RelayEvidence{Session: v.session, Quote: v.message}
+	return RelayEvidence{Session: v.session}
 }
 
 // Confirm は端末を使わず、OS のログインユーザー名を actor として返す。
@@ -84,8 +96,8 @@ func (s *Store) chatGate(ctx context.Context, tx *sql.Tx, att Attestation, act a
 	if att.chat == nil || !att.chat.complete() {
 		return chatMarkError{reason: "印が空です"}
 	}
-	att.chat.resolved = RelayEvidence{}
-	ev, err := resolveChatMark(ctx, tx, att.chat)
+	att.chat.resolved = resolvedChatMark{}
+	resolved, err := resolveChatMark(ctx, tx, att.chat.session)
 	if err != nil {
 		return err
 	}
@@ -96,7 +108,7 @@ func (s *Store) chatGate(ctx context.Context, tx *sql.Tx, att Attestation, act a
 	case actionApproveCompletion:
 		need = OperationKindRelease
 	default:
-		att.chat.resolved = ev
+		att.chat.resolved = resolved
 		return nil
 	}
 	decl, err := LoadAgentDeclaration(s.workspace)
@@ -106,69 +118,93 @@ func (s *Store) chatGate(ctx context.Context, tx *sql.Tx, att Attestation, act a
 	if !decl.ChatCanApprove(need) {
 		return ErrChatNotApprovable
 	}
-	att.chat.resolved = ev
+	att.chat.resolved = resolved
 	return nil
 }
 
-// resolveChatMark は印を検査し、記録の手がかりを返す。会話が開いている・印の発言がその会話の最後のオーナーの発言
-// である・その発言への返事が進行中である・発言の識別がストアにある、のすべてを満たさなければ ErrChatMarkInvalid。
-func resolveChatMark(ctx context.Context, tx *sql.Tx, m *chatMark) (RelayEvidence, error) {
-	msgID, err := strconv.ParseInt(strings.TrimSpace(m.message), 10, 64)
-	if err != nil || msgID <= 0 {
-		return RelayEvidence{}, chatMarkError{reason: "発言の識別の形が誤りです"}
+// resolveChatMark は印を検査する。印の会話が開いていて、その会話の最後のオーナーの発言への返事が進行中で
+// なければ ErrChatMarkInvalid。発言は印からではなくストアで引く。
+func resolveChatMark(ctx context.Context, tx *sql.Tx, session string) (resolvedChatMark, error) {
+	var none resolvedChatMark
+	session = strings.TrimSpace(session)
+	if session == "" {
+		return none, chatMarkError{reason: "印が空です"}
 	}
 	var (
-		sessID    int64
-		engine    string
-		closed    sql.NullString
-		role, msg string
+		out    resolvedChatMark
+		closed sql.NullString
 	)
-	err = tx.QueryRowContext(ctx, `SELECT s.id, s.engine_session, s.closed_at, m.role, m.body
-		FROM chat_message m JOIN chat_session s ON s.id = m.session_id WHERE m.id = ?`, msgID).
-		Scan(&sessID, &engine, &closed, &role, &msg)
+	err := tx.QueryRowContext(ctx, `SELECT id, closed_at FROM chat_session WHERE engine_session = ?`, session).Scan(&out.sessionID, &closed)
 	if errors.Is(err, sql.ErrNoRows) {
-		return RelayEvidence{}, chatMarkError{reason: "印の発言がストアにありません"}
+		return none, chatMarkError{reason: "印の会話がストアにありません"}
 	}
 	if err != nil {
-		return RelayEvidence{}, err
-	}
-	if engine != strings.TrimSpace(m.session) {
-		return RelayEvidence{}, chatMarkError{reason: "印の発言が印の会話のものではありません"}
+		return none, err
 	}
 	if closed.Valid {
-		return RelayEvidence{}, chatMarkError{reason: "印の会話が閉じています"}
+		return none, chatMarkError{reason: "印の会話が閉じています"}
 	}
-	if role != string(ChatRoleOwner) {
-		return RelayEvidence{}, chatMarkError{reason: "印の発言がオーナーの発言ではありません"}
+	var (
+		ownerID int64
+		body    string
+	)
+	err = tx.QueryRowContext(ctx, `SELECT id, body FROM chat_message WHERE session_id = ? AND role = ? ORDER BY id DESC LIMIT 1`,
+		out.sessionID, string(ChatRoleOwner)).Scan(&ownerID, &body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return none, chatMarkError{reason: "印の会話にオーナーの発言がありません"}
 	}
-	var last int64
-	if err := tx.QueryRowContext(ctx, `SELECT MAX(id) FROM chat_message WHERE session_id = ? AND role = ?`, sessID, string(ChatRoleOwner)).Scan(&last); err != nil {
-		return RelayEvidence{}, err
+	if err != nil {
+		return none, err
 	}
-	if last != msgID {
-		return RelayEvidence{}, chatMarkError{reason: "印の発言が、その会話の最後のオーナーの発言ではありません"}
+	err = tx.QueryRowContext(ctx, `SELECT id FROM chat_message WHERE session_id = ? AND id > ? AND state = ? ORDER BY id LIMIT 1`,
+		out.sessionID, ownerID, string(ChatStateReplying)).Scan(&out.replyMessageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return none, chatMarkError{reason: "印の会話の最後のオーナーの発言への返事が進行中ではありません"}
 	}
-	var replying int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM chat_message WHERE session_id = ? AND id > ? AND state = ?`, sessID, msgID, string(ChatStateReplying)).Scan(&replying); err != nil {
-		return RelayEvidence{}, err
+	if err != nil {
+		return none, err
 	}
-	if replying == 0 {
-		return RelayEvidence{}, chatMarkError{reason: "印の発言への返事が進行中ではありません"}
+	quote, err := chatRelayQuote(ctx, tx, body, out.replyMessageID)
+	if err != nil {
+		return none, err
 	}
-	return RelayEvidence{Session: engine, Quote: msg}, nil
+	out.evidence = RelayEvidence{Session: session, Quote: quote}
+	return out, nil
 }
 
-// CheckChatMark は印（会話の識別・発言の識別）の検査だけを行う（何も書かない）。本人確認を通らないコマンド
-// （followup done・create・指定つきの ingest）が、経路を渡さずに印の検査だけをかけるための口。検査の内容は
-// 本人確認を通る操作の検査と同じ（resolveChatMark）。満たさなければ ErrChatMarkInvalid
-// （errors.Is(err, ErrVerificationRejected) も真）。
-func (s *Store) CheckChatMark(ctx context.Context, session, message string) error {
-	m := &chatMark{session: session, message: message}
-	if !m.complete() {
-		return chatMarkError{reason: "印が空です"}
+// chatRelayQuote は経路 chat の記録の「発言」を作る。オーナーの発言の文面に、その返事の中で答えた問いを答えた順に
+// つなげる（問いごとに空行を挟んで「問い: <問いの文>」「答え: <答えの文>」の 2 行）。1 つの確認が複数の問いを持つ
+// ときは、問われた順に並べる。
+func chatRelayQuote(ctx context.Context, tx *sql.Tx, body string, replyMessageID int64) (string, error) {
+	var quote strings.Builder
+	quote.WriteString(body)
+	err := forEachRow(ctx, tx, `SELECT `+chatPromptSelectColumns+` FROM chat_prompt p
+		WHERE p.message_id = ? AND p.kind = ? AND p.state = ? ORDER BY p.answered_at, p.id`,
+		[]any{replyMessageID, string(ChatPromptQuestion), string(ChatPromptAnswered)}, func(rows *sql.Rows) error {
+			p, err := scanChatPrompt(rows)
+			if err != nil {
+				return err
+			}
+			if p.Answer == nil {
+				return nil
+			}
+			for _, q := range p.Questions {
+				fmt.Fprintf(&quote, "\n\n問い: %s\n答え: %s", q.Question, p.Answer.Answers[q.Question])
+			}
+			return nil
+		})
+	if err != nil {
+		return "", err
 	}
+	return quote.String(), nil
+}
+
+// CheckChatMark は印の検査だけを行う（何も書かない）。呼び出し元が、操作の前（上流を読む前など）に印を確かめる
+// ための口。検査の内容は本人確認を通る操作の検査と同じ（resolveChatMark）。満たさなければ ErrChatMarkInvalid
+// （errors.Is(err, ErrVerificationRejected) も真）。
+func (s *Store) CheckChatMark(ctx context.Context, session string) error {
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		_, err := resolveChatMark(ctx, tx, m)
+		_, err := resolveChatMark(ctx, tx, session)
 		return err
 	})
 	return classifyReadWriteErr(err)

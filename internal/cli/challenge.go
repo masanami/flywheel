@@ -21,6 +21,7 @@ func runCreate(a Args) (any, error) {
 	if v, ok := a.Values["urgency"]; ok {
 		in.Urgency = &v
 	}
+	in.Chat = a.Chat.coreMark()
 	c, err := a.Store.CreateChallenge(context.Background(), core.ChannelCLI, in)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -194,6 +195,15 @@ func challengeListText(challenges []core.Challenge) string {
 	return b.String()
 }
 
+// writeChatSpec は仕様づくりの費用（課題の予算には数えない）と、紐づいた対話の欄の会話を書く。
+func writeChatSpec(b *strings.Builder, d *core.ChallengeDetail) {
+	fmt.Fprintf(b, "仕様づくりの費用: %s USD（予算には数えない）\n", formatUSD(d.SpecCostUSD))
+	fmt.Fprintf(b, "紐づいた会話:  %d 件\n", len(d.ChatSessions))
+	for _, s := range d.ChatSessions {
+		fmt.Fprintf(b, "  %s 費用: %s USD 最初の発言: %s\n", FormatTimestamp(s.StartedAt), formatUSD(s.CostUSD), escapeControl(s.FirstMessage))
+	}
+}
+
 // challengeDetailText は --json 無しの show の表示。
 func challengeDetailText(d *core.ChallengeDetail) string {
 	var b strings.Builder
@@ -226,6 +236,7 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 		fmt.Fprintf(&b, "統合先の識別:  %s\n", escapeControl(*d.IntegrationRef))
 	}
 	fmt.Fprintf(&b, "予算:          %s\n", budgetDetailText(d.Budget))
+	writeChatSpec(&b, d)
 	fmt.Fprintf(&b, "タスク:        %d 件\n", len(d.Tasks))
 	for _, t := range d.Tasks {
 		fmt.Fprintf(&b, "  %s %s [%s (%s)] 枠: 実装 %s USD・レビュー対応 %s USD / 使った額: %s USD\n", t.ID, escapeControl(t.Title), t.Status.Label(), t.Status,

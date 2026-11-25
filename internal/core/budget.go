@@ -597,6 +597,9 @@ func (s *Store) ExecuteBudget(ctx context.Context, req BudgetRequest, att Attest
 		if err := rec.record("challenge", cid, string(OpApprove), before, after); err != nil {
 			return err
 		}
+		if err := linkChatOperation(ctx, tx, att, cid, chatLinkBudget, formatTimestamp(rec.at)); err != nil {
+			return err
+		}
 		out = approvalOf(now, approvedVersion, att)
 		return nil
 	})
@@ -797,6 +800,9 @@ func (s *Store) executeBudgetLimit(ctx context.Context, req BudgetRequest, att A
 		}
 		now, err := raiseBudgetLimit(ctx, tx, rec, att, cid, plan.Version, before, limit)
 		if err != nil {
+			return err
+		}
+		if err := linkChatOperation(ctx, tx, att, cid, chatLinkBudget, formatTimestamp(rec.at)); err != nil {
 			return err
 		}
 		out = approvalOf(now, plan.Version, att)
