@@ -23,6 +23,7 @@ const msg = (o: Partial<ChatMessage> & { id: number }): ChatMessage => ({
   body: "",
   cost_usd: 0,
   created_at: "2026-11-22T00:00:00.000Z",
+  prompts: [],
   role: "orchestrator",
   state: "done",
   viewing: null,
@@ -41,7 +42,6 @@ const chatOf = (o: Partial<ChatResponse> = {}): ChatResponse => ({
   session_id: null,
   started_at: null,
   state: "idle",
-  tools: "restricted",
   ...o,
 });
 
@@ -181,6 +181,21 @@ it("AC-9: やりとりが 0 件の会話では、「オーケストレーター�
   ).toBeInTheDocument();
 });
 
+// 対話の欄の作り替え（docs/features/chat-session.md「許可の正本と宣言」）: 道具の範囲の宣言をやめたので、
+// 欄に道具の範囲の表示（やめた文言「すべての道具を許可しています」を含む）は出ない。
+it("欄に、道具の範囲の表示が出ない（会話が空のとき）", async () => {
+  await open();
+  await panel().findByText("オーケストレーターに、相談や指示を書けます。");
+  expect(panel().queryByText(/道具の範囲|すべての道具を許可/)).toBeNull();
+});
+
+it("欄に、道具の範囲の表示が出ない（返事があるとき）", async () => {
+  chatBody = chatOf({ messages: [msg({ id: 2, body: "返事です" })] });
+  await open();
+  await panel().findByText("返事です");
+  expect(panel().queryByText(/道具の範囲|すべての道具を許可/)).toBeNull();
+});
+
 it("AC-25/26: 返事の本文の見出しと箇条書きが、見出し・箇条書きの要素として描かれる", async () => {
   chatBody = chatOf({
     messages: [msg({ id: 2, body: "# 見出しです\n\n- 項目です" })],
@@ -259,30 +274,6 @@ it("state が done の返事には、状態の文は出ない", async () => {
   expect(screen.queryByTestId("chat-state")).toBeNull();
 });
 
-it("AC-40/41: 「実行したコマンド」は畳んで出て、開くとコマンドの行が見える", async () => {
-  chatBody = chatOf({
-    messages: [
-      msg({
-        id: 2,
-        body: "見ました",
-        activity: [
-          { command: "flywheel status", ok: true },
-          { command: "rm -rf /", ok: false },
-        ],
-      }),
-    ],
-  });
-  await open();
-  const d = await screen.findByTestId("chat-activity");
-  expect(d.tagName).toBe("DETAILS");
-  expect(d).not.toHaveAttribute("open");
-  expect(within(d).getByText("実行したコマンド")).toBeInTheDocument();
-  fireEvent.click(within(d).getByText("実行したコマンド"));
-  expect(d).toHaveAttribute("open");
-  expect(within(d).getByText("flywheel status")).toBeInTheDocument();
-  expect(within(d).getByText("rm -rf /")).toBeInTheDocument();
-});
-
 it("AC-46: 読み込み直すと、いまの会話の発言と返事が、古い順に出る", async () => {
   chatBody = chatOf({
     // 並びを崩して返しても、古い順（id の昇順）に出す
@@ -308,19 +299,6 @@ it("AC-59: 「新しい会話」を押すと、chat/new が呼ばれ、欄のや
   await waitFor(() => expect(calls).toEqual(["new"]));
   expect(await panel().findByText(/相談や指示/)).toBeInTheDocument();
   expect(panel().queryByText("前")).toBeNull();
-});
-
-it("AC-72/73: full のときだけ「すべての道具を許可しています」が出る", async () => {
-  chatBody = chatOf({ tools: "full" });
-  await open();
-  expect(
-    await panel().findByText("すべての道具を許可しています"),
-  ).toBeInTheDocument();
-});
-it("AC-73: restricted のときは、その文は出ない", async () => {
-  await open();
-  await panel().findByText(/相談や指示/);
-  expect(screen.queryByText("すべての道具を許可しています")).toBeNull();
 });
 
 it("AC-154: その会話の費用が $0.42 の形で出る（小数 2 桁）", async () => {

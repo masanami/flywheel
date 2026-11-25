@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -155,7 +153,7 @@ func TestChat_SessionLostClosesTheSession(t *testing.T) {
 	if err := s.MarkChatEngineStarted(ctx, first.SessionID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishChatReply(ctx, first.ReplyMessageID, ChatStateSessionLost, 0); err != nil {
+	if err := s.FinishChatReplyWithTotal(ctx, first.ReplyMessageID, ChatStateSessionLost, nil); err != nil {
 		t.Fatal(err)
 	}
 	if n := chatCount(t, s, `SELECT COUNT(*) FROM chat_session WHERE closed_at IS NOT NULL`); n != 1 {
@@ -175,7 +173,7 @@ func TestChat_EmptySpeechOnAFinishedReplyIsStillRefused(t *testing.T) {
 	if err := s.AppendChatSpeech(ctx, turn.ReplyMessageID, " "); err != nil {
 		t.Errorf("empty speech on a replying message = %v, want nil", err)
 	}
-	if err := s.FinishChatReply(ctx, turn.ReplyMessageID, ChatStateDone, 0); err != nil {
+	if err := s.FinishChatReplyWithTotal(ctx, turn.ReplyMessageID, ChatStateDone, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AppendChatSpeech(ctx, turn.ReplyMessageID, ""); !errors.Is(err, ErrValidation) {
@@ -211,7 +209,7 @@ func TestChat_PostWhileReplyingIsRefused(t *testing.T) {
 	if n := chatCount(t, s, `SELECT COUNT(*) FROM chat_message`); n != 2 {
 		t.Errorf("messages = %d, want 2 (the refused post wrote nothing)", n)
 	}
-	if err := s.FinishChatReply(ctx, turn.ReplyMessageID, ChatStateDone, 0.5); err != nil {
+	if err := s.FinishChatReplyWithTotal(ctx, turn.ReplyMessageID, ChatStateDone, usd(0.5)); err != nil {
 		t.Fatal(err)
 	}
 	second := mustPost(t, s, "2 通目", nil)
@@ -248,7 +246,7 @@ func TestChat_ResumeFollowsEngineStartedNotTheEnding(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := s.FinishChatReply(ctx, first.ReplyMessageID, c.end, 0); err != nil {
+			if err := s.FinishChatReplyWithTotal(ctx, first.ReplyMessageID, c.end, nil); err != nil {
 				t.Fatal(err)
 			}
 			if second := mustPost(t, s, "2", nil); second.Resume != c.resume {
@@ -274,8 +272,8 @@ func TestChat_SpeechesAndCommandsAccumulateInOrder(t *testing.T) {
 	id := turn.ReplyMessageID
 	steps := []func() error{
 		func() error { return s.AppendChatSpeech(ctx, id, "確かめます。") },
-		func() error { return s.AppendChatCommand(ctx, id, ChatCommand{Command: "flywheel status", OK: true}) },
-		func() error { return s.AppendChatCommand(ctx, id, ChatCommand{Command: "flywheel nosuch", OK: false}) },
+		func() error { return runChatTool(ctx, s, id, "a", "flywheel status", true) },
+		func() error { return runChatTool(ctx, s, id, "b", "flywheel nosuch", false) },
 		func() error { return s.AppendChatSpeech(ctx, id, "") }, // 空は足さない
 		func() error { return s.AppendChatSpeech(ctx, id, "1 件ありました。") },
 	}
@@ -289,7 +287,7 @@ func TestChat_SpeechesAndCommandsAccumulateInOrder(t *testing.T) {
 	if reply.Body != "確かめます。\n\n1 件ありました。" {
 		t.Errorf("body = %q", reply.Body)
 	}
-	if want := []ChatCommand{{"flywheel status", true}, {"flywheel nosuch", false}}; !reflect.DeepEqual(reply.Activity, want) {
+	if want := []ChatActivity{{ID: "a", Tool: "Bash", Target: "flywheel status", State: ChatActivityOK}, {ID: "b", Tool: "Bash", Target: "flywheel nosuch", State: ChatActivityError}}; !reflect.DeepEqual(reply.Activity, want) {
 		t.Errorf("activity = %+v, want %+v", reply.Activity, want)
 	}
 	if reply.State != ChatStateReplying {
@@ -304,7 +302,7 @@ func TestChat_FinishRecordsEndingCostAndTime(t *testing.T) {
 	fixed := time.Date(2026, 11, 22, 3, 4, 5, 0, time.UTC)
 	s.now = func() time.Time { return fixed }
 	turn := mustPost(t, s, "q", nil)
-	if err := s.FinishChatReply(ctx, turn.ReplyMessageID, ChatStateRateLimited, 1.234567); err != nil {
+	if err := s.FinishChatReplyWithTotal(ctx, turn.ReplyMessageID, ChatStateRateLimited, usd(1.234567)); err != nil {
 		t.Fatal(err)
 	}
 	chat, _ := s.ReadChat(ctx)
@@ -325,30 +323,30 @@ func TestChat_FinishAndAppendRefusals(t *testing.T) {
 	id := turn.ReplyMessageID
 
 	for _, bad := range []ChatMessageState{ChatStateReplying, "unknown", ""} {
-		if err := s.FinishChatReply(ctx, id, bad, 0); !errors.Is(err, ErrValidation) {
-			t.Errorf("FinishChatReply(%q) = %v, want ErrValidation", bad, err)
+		if err := s.FinishChatReplyWithTotal(ctx, id, bad, nil); !errors.Is(err, ErrValidation) {
+			t.Errorf("FinishChatReplyWithTotal(%q) = %v, want ErrValidation", bad, err)
 		}
 	}
-	if err := s.FinishChatReply(ctx, id, ChatStateDone, -1); !errors.Is(err, ErrValidation) {
+	if err := s.FinishChatReplyWithTotal(ctx, id, ChatStateDone, usd(-1)); !errors.Is(err, ErrValidation) {
 		t.Errorf("negative cost = %v, want ErrValidation", err)
 	}
-	if err := s.FinishChatReply(ctx, turn.OwnerMessageID, ChatStateDone, 0); !errors.Is(err, ErrNotFound) {
+	if err := s.FinishChatReplyWithTotal(ctx, turn.OwnerMessageID, ChatStateDone, nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("finishing an owner message = %v, want ErrNotFound", err)
 	}
-	if err := s.FinishChatReply(ctx, 999, ChatStateDone, 0); !errors.Is(err, ErrNotFound) {
+	if err := s.FinishChatReplyWithTotal(ctx, 999, ChatStateDone, nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("finishing a missing message = %v, want ErrNotFound", err)
 	}
-	if err := s.FinishChatReply(ctx, id, ChatStateStopped, 0.1); err != nil {
+	if err := s.FinishChatReplyWithTotal(ctx, id, ChatStateStopped, usd(0.1)); err != nil {
 		t.Fatal(err)
 	}
 	// 終えた後の足し込み・二重の終わりは断る（止めた後に遅れて届いた分で、止めた返事を書き換えない）。
-	if err := s.FinishChatReply(ctx, id, ChatStateDone, 9); !errors.Is(err, ErrValidation) {
+	if err := s.FinishChatReplyWithTotal(ctx, id, ChatStateDone, usd(9)); !errors.Is(err, ErrValidation) {
 		t.Errorf("finishing twice = %v, want ErrValidation", err)
 	}
 	if err := s.AppendChatSpeech(ctx, id, "遅れた発言"); !errors.Is(err, ErrValidation) {
 		t.Errorf("speech after finish = %v, want ErrValidation", err)
 	}
-	if err := s.AppendChatCommand(ctx, id, ChatCommand{Command: "x", OK: true}); !errors.Is(err, ErrValidation) {
+	if err := s.StartChatTool(ctx, id, ChatToolUse{ID: "x", Tool: "Bash"}); !errors.Is(err, ErrValidation) {
 		t.Errorf("command after finish = %v, want ErrValidation", err)
 	}
 	chat, _ := s.ReadChat(ctx)
@@ -368,7 +366,7 @@ func TestChat_CloseStartsANewSessionOnTheNextMessage(t *testing.T) {
 	if err := s.MarkChatEngineStarted(ctx, first.SessionID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishChatReply(ctx, first.ReplyMessageID, ChatStateDone, 1); err != nil {
+	if err := s.FinishChatReplyWithTotal(ctx, first.ReplyMessageID, ChatStateDone, usd(1)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CloseChat(ctx); err != nil {
@@ -424,7 +422,7 @@ func TestChat_StopInterruptedRepliesStopsOnlyTheReplying(t *testing.T) {
 		t.Fatalf("with nothing to stop = %d, %v", n, err)
 	}
 	first := mustPost(t, s, "1", nil)
-	if err := s.FinishChatReply(ctx, first.ReplyMessageID, ChatStateDone, 2); err != nil {
+	if err := s.FinishChatReplyWithTotal(ctx, first.ReplyMessageID, ChatStateDone, usd(2)); err != nil {
 		t.Fatal(err)
 	}
 	second := mustPost(t, s, "2", nil)
@@ -469,18 +467,6 @@ func TestChat_StatesAreTheSevenValues(t *testing.T) {
 	}
 }
 
-func TestChat_MarkEnvUsesTheNamesInOnePlace(t *testing.T) {
-	t.Parallel()
-	got := ChatMarkEnv("uuid-1", 42, ChatToolsFull)
-	want := []string{"FLYWHEEL_CHAT_SESSION=uuid-1", "FLYWHEEL_CHAT_MESSAGE=42", "FLYWHEEL_CHAT_TOOLS=full"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("ChatMarkEnv = %v, want %v", got, want)
-	}
-	if ChatEnvSession != "FLYWHEEL_CHAT_SESSION" || ChatEnvMessage != "FLYWHEEL_CHAT_MESSAGE" || ChatEnvTools != "FLYWHEEL_CHAT_TOOLS" {
-		t.Error("an environment variable name changed")
-	}
-}
-
 // AC-177・AC-178: 会話と発言の行は、書き出して読み込むと元と同じ（開いた会話・閉じた会話・費用・コマンドの記録を含む）。
 func TestChat_ExportImportRoundTripKeepsTheRows(t *testing.T) {
 	t.Parallel()
@@ -491,13 +477,13 @@ func TestChat_ExportImportRoundTripKeepsTheRows(t *testing.T) {
 	for _, err := range []error{
 		src.MarkChatEngineStarted(ctx, old.SessionID),
 		src.AppendChatSpeech(ctx, old.ReplyMessageID, "返事"),
-		src.AppendChatCommand(ctx, old.ReplyMessageID, ChatCommand{Command: "flywheel status", OK: true}),
+		runChatTool(ctx, src, old.ReplyMessageID, "a", "flywheel status", true),
 	} {
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := src.FinishChatReply(ctx, old.ReplyMessageID, ChatStateLimit, 0.75); err != nil {
+	if err := src.FinishChatReplyWithTotal(ctx, old.ReplyMessageID, ChatStateLimit, usd(0.75)); err != nil {
 		t.Fatal(err)
 	}
 	if err := src.CloseChat(ctx); err != nil {
@@ -538,39 +524,10 @@ func TestChat_ExportImportRoundTripKeepsTheRows(t *testing.T) {
 	}
 }
 
-func TestChatToolsFromWorkspace_ReadsTheDeclarationFailClosed(t *testing.T) {
-	t.Parallel()
-	write := func(t *testing.T, content string) string {
-		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, ".flywheel"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if content == "NOSTORE" {
-			content = `{"chat_tools":"full"}`
-		} else if err := os.WriteFile(filepath.Join(dir, ".flywheel", "flywheel.db"), nil, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if content != "" {
-			if err := os.WriteFile(filepath.Join(dir, ".flywheel", "agent.json"), []byte(content), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-		return dir
+// runChatTool は道具を 1 つ使い始めて、結果を入れる。
+func runChatTool(ctx context.Context, s *Store, messageID int64, id, command string, ok bool) error {
+	if err := s.StartChatTool(ctx, messageID, ChatToolUse{ID: id, Tool: "Bash", Target: command}); err != nil {
+		return err
 	}
-	for _, tc := range []struct {
-		name, content string
-		want          ChatTools
-	}{
-		{"full", `{"chat_tools":"full"}`, ChatToolsFull},
-		{"restricted", `{"chat_tools":"restricted"}`, ChatToolsRestricted},
-		{"missing key", `{}`, ChatToolsRestricted},
-		{"no file", "", ChatToolsRestricted},
-		{"no store", "NOSTORE", ChatToolsRestricted},
-		{"invalid", `{"chat_tools":"bogus"}`, ChatToolsRestricted},
-		{"broken json", `{`, ChatToolsRestricted},
-	} {
-		if got := ChatToolsFromWorkspace(write(t, tc.content)); got != tc.want {
-			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
-		}
-	}
+	return s.FinishChatTool(ctx, messageID, id, ok)
 }

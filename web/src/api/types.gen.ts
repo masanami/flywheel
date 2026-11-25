@@ -271,6 +271,7 @@ export interface Budget {
 }
 
 export interface ShowChallenge {
+  chat_sessions: ChallengeChatSession[];
   context: string | null;
   created_at: string;
   dependencies: Dependency[];
@@ -284,6 +285,7 @@ export interface ShowChallenge {
   integration_ref: string | null;
   priority: string | null;
   reporter: string;
+  spec_cost_usd: number;
   status: string;
   status_label: string;
   title: string;
@@ -291,6 +293,13 @@ export interface ShowChallenge {
   urgency: string | null;
   uses_integration: boolean | null;
   version: number;
+}
+
+export interface ChallengeChatSession {
+  cost_usd: number;
+  first_message: string;
+  id: string;
+  started_at: string;
 }
 
 export interface Dependency {
@@ -957,7 +966,6 @@ export interface ChatResponse {
   session_id: string | null;
   started_at: string | null;
   state: string;
-  tools: string;
 }
 
 export interface ChatMessage {
@@ -966,14 +974,46 @@ export interface ChatMessage {
   cost_usd: number;
   created_at: string;
   id: number;
+  prompts: ChatPrompt[];
   role: string;
   state: string;
   viewing: ChatViewing | null;
 }
 
 export interface ChatActivity {
-  command: string;
-  ok: boolean;
+  id: string;
+  state: string;
+  target: string;
+  tool: string;
+}
+
+export interface ChatPrompt {
+  answer: ChatPromptAnswer | null;
+  answered_at: string | null;
+  created_at: string;
+  id: number;
+  kind: string;
+  questions: ChatQuestion[];
+  state: string;
+  target: string | null;
+  tool: string;
+}
+
+export interface ChatPromptAnswer {
+  answers: Record<string, string> | null;
+  decision: string | null;
+  message: string | null;
+}
+
+export interface ChatQuestion {
+  multi_select: boolean;
+  options: ChatQuestionOption[];
+  question: string;
+}
+
+export interface ChatQuestionOption {
+  description: string;
+  label: string;
 }
 
 export interface ChatViewing {
@@ -994,6 +1034,51 @@ export interface ChatPostViewing {
 
 export interface ChatPostResponse {
   id: number;
+}
+
+export interface ChatPromptAnswerRequest {
+  answers?: Record<string, string>;
+  decision?: string;
+  message?: string;
+}
+
+export interface ChatSessionsResponse {
+  sessions: ChatSessionSummary[];
+}
+
+export interface ChatSessionSummary {
+  challenges: ChatSessionChallenge[];
+  closed_at: string | null;
+  cost_usd: number;
+  first_message: string;
+  id: string;
+  open: boolean;
+  started_at: string;
+  transcript_available: boolean;
+}
+
+export interface ChatSessionChallenge {
+  challenge_id: string;
+  title: string;
+}
+
+export interface ChatTranscriptResponse {
+  entries: ChatTranscriptEntry[];
+}
+
+export interface ChatTranscriptEntry {
+  at: string | null;
+  kind: string;
+  text: string;
+  tool: string | null;
+  truncated: boolean;
+}
+
+export interface InitResponse {
+  claude_settings_created: boolean;
+  created: boolean;
+  store_path: string;
+  workspace: string;
 }
 
 export interface SupervisePhase {
@@ -1354,11 +1439,6 @@ export const CHAT_MESSAGE_STATE_CODES = [
   "failed",
 ] as const;
 
-export const CHAT_TOOLS_CODES = [
-  "restricted",
-  "full",
-] as const;
-
 export const CHAT_ROLE_CODES = [
   "owner",
   "orchestrator",
@@ -1367,6 +1447,37 @@ export const CHAT_ROLE_CODES = [
 export const CHAT_PANEL_STATE_CODES = [
   "idle",
   "replying",
+] as const;
+
+export const CHAT_ACTIVITY_STATE_CODES = [
+  "running",
+  "ok",
+  "error",
+] as const;
+
+export const CHAT_PROMPT_KIND_CODES = [
+  "permission",
+  "question",
+] as const;
+
+export const CHAT_PROMPT_STATE_CODES = [
+  "pending",
+  "allowed",
+  "denied",
+  "answered",
+  "expired",
+] as const;
+
+export const CHAT_DECISION_CODES = [
+  "allow",
+  "deny",
+] as const;
+
+export const CHAT_TRANSCRIPT_KIND_CODES = [
+  "owner",
+  "assistant",
+  "tool_use",
+  "tool_result",
 ] as const;
 
 export const STOP_KIND_CODES = [

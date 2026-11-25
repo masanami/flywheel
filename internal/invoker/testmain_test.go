@@ -8,6 +8,7 @@ package invoker
 // 同じ方式。internal/adapters/github/testmain_test.go 参照）。
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,6 +79,64 @@ type fakeClaudeFixture struct {
 	PrintBeforeSleep bool `json:"print_before_sleep"`
 	// ChildPidPath が非空なら、孫のプロセス（sleep）を起動して、その pid をこのファイルへ書く。
 	ChildPidPath string `json:"child_pid_path"`
+	// Script が非空なら、会話の単位の起動の偽物として手順を順に行う（Stdout などは使わない）。手順を終えた後は、
+	// 実物と同じく標準入力が閉じるまで居座り、閉じたら ExitCode で終わる。受け取った標準入力の行は StdinLogPath へ足す。
+	Script []fakeStep `json:"script"`
+}
+
+// fakeStep は会話の偽物の手順 1 つ。書いた項目を上から順（Read・Out・Stderr・HoldPipes・Exit）に行う。
+type fakeStep struct {
+	// Read が真なら、標準入力を 1 行読む（閉じていたら ExitCode で終わる）。
+	Read   bool   `json:"read"`
+	Out    string `json:"out"`
+	Stderr string `json:"stderr"`
+	// HoldPipes が非空なら、標準出力と標準エラーを引き継いだ孫のプロセス（sleep）を起動し、その pid をこのファイルへ書く。
+	HoldPipes string `json:"hold_pipes"`
+	// Exit が真なら、すぐに ExitCode で終わる。
+	Exit bool `json:"exit"`
+}
+
+func runFakeScript(fx fakeClaudeFixture) int {
+	in := bufio.NewReader(os.Stdin)
+	logLine := func(line string) {
+		if fx.StdinLogPath == "" {
+			return
+		}
+		f, err := os.OpenFile(fx.StdinLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return
+		}
+		defer func() { _ = f.Close() }()
+		_, _ = f.WriteString(line)
+	}
+	for _, st := range fx.Script {
+		if st.Read {
+			line, err := in.ReadString('\n')
+			logLine(line)
+			if err != nil {
+				return fx.ExitCode
+			}
+		}
+		fmt.Print(st.Out)
+		fmt.Fprint(os.Stderr, st.Stderr)
+		if st.HoldPipes != "" {
+			child := exec.Command("/bin/sleep", "60")
+			child.Stdout, child.Stderr = os.Stdout, os.Stderr
+			if err := child.Start(); err == nil {
+				_ = os.WriteFile(st.HoldPipes, []byte(fmt.Sprint(child.Process.Pid)), 0o644)
+			}
+		}
+		if st.Exit {
+			return fx.ExitCode
+		}
+	}
+	for {
+		line, err := in.ReadString('\n')
+		logLine(line)
+		if err != nil {
+			return fx.ExitCode
+		}
+	}
 }
 
 func runFakeClaude() int {
@@ -116,6 +175,9 @@ func runFakeClaude() int {
 		if err := child.Start(); err == nil {
 			_ = os.WriteFile(fx.ChildPidPath, []byte(fmt.Sprint(child.Process.Pid)), 0o644)
 		}
+	}
+	if len(fx.Script) > 0 {
+		return runFakeScript(fx)
 	}
 	if fx.StdinLogPath != "" {
 		b, _ := io.ReadAll(os.Stdin)

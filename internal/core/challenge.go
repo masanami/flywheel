@@ -260,6 +260,21 @@ type ChallengeDetail struct {
 	SupervisorHandsTaken map[SupervisorHand]int
 	// SupervisorQuestions はスーパーバイザーが答えた子の問い（結果が executed の対処の記録の questions。古い順。無ければ空のスライス）。
 	SupervisorQuestions []SupervisorQuestion
+	// SpecCostUSD は仕様づくりの費用（対話の欄の返事のうち、この課題に数えた分の合計）。課題の予算には数えない。
+	SpecCostUSD float64
+	// ChatSessions は課題に紐づいた会話（無ければ空）。
+	ChatSessions []ChallengeChatSession
+}
+
+// ChallengeChatSession は課題に紐づいた対話の欄の会話。
+type ChallengeChatSession struct {
+	// EngineSession は会話の識別。
+	EngineSession string
+	StartedAt     time.Time
+	// FirstMessage は最初のオーナーの発言の先頭（ChatSessionSummary.FirstMessage と同じ形）。
+	FirstMessage string
+	// CostUSD はこの課題に数えた費用。
+	CostUSD float64
 }
 
 // ChallengeDetailBudget は課題の詳細の予算。EstimateUSD は見込み（取りやめでないタスクの枠の合計）、LimitUSD は上限
@@ -282,6 +297,9 @@ type CreateInput struct {
 	Description  string
 	DoneCriteria string
 	Urgency      *string // nil なら未指定
+	// Chat は対話の欄の印。nil でなければ、書き込みの中で印を検査し（通らなければ ErrChatMarkInvalid で何も書かない）、
+	// 作った課題を印の会話に紐づける。
+	Chat *ChatSessionMark
 }
 
 // EditInput は EditChallenge の入力。nil のフィールドは「指定なし（変更しない）」
@@ -814,6 +832,13 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 
 	var result *Challenge
 	err := s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
+		var chat resolvedChatMark
+		if in.Chat != nil {
+			var err error
+			if chat, err = resolveChatMark(ctx, tx, in.Chat.Session); err != nil {
+				return err
+			}
+		}
 		id, now, err := insertChallengeRow(ctx, tx, rec.at, in.Title, in.Description, in.DoneCriteria, urgency, rec.actor, ChallengeOriginManual, nil, nil)
 		if err != nil {
 			return err
@@ -822,6 +847,11 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 		after := createdChallengeAfter(in.Title, in.Description, in.DoneCriteria, urgency, rec.actor)
 		if err := rec.record("challenge", id, "create", nil, after); err != nil {
 			return err
+		}
+		if in.Chat != nil {
+			if err := linkChatChallenge(ctx, tx, chat, id, chatLinkCreate, formatTimestamp(rec.at)); err != nil {
+				return err
+			}
 		}
 
 		result = &Challenge{
@@ -980,6 +1010,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		if detail.SupervisorHandsTaken, err = countExecutedSupervisorHands(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.SpecCostUSD, detail.ChatSessions, err = loadChallengeSpec(ctx, tx, cid); err != nil {
 			return err
 		}
 		if detail.Followups, err = listFollowups(ctx, tx, FollowupFilter{ChallengeID: id}); err != nil {

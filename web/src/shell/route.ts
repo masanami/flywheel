@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 //   #/a/<名前>/challenges/<課題>/approve-plan  計画の承認
 //   #/a/<名前>/challenges/<課題>/approve-completion  完了の承認
 //   #/a/<名前>/challenges/<課題>/tasks/<タスクの ID>  タスクの詳細
+//   #/a/<名前>/chat/<会話の識別>           対話の会話の全文
 // `#` の後ろは最初の `?` で道と問い合わせに分ける（フォローアップの ?status=・?challenge=）。
 export const AGENT_SCREENS = [
   "now",
@@ -29,6 +30,7 @@ export type Route =
   | { kind: "approve_plan"; name: string; id: string }
   | { kind: "approve_completion"; name: string; id: string }
   | { kind: "task"; name: string; id: string; taskId: string }
+  | { kind: "transcript"; name: string; sessionId: string }
   | { kind: "unknown" };
 
 const dec = (s: string): string => {
@@ -66,6 +68,9 @@ export function parseHash(hash: string): Route | null {
     };
   }
   const id = parts[3];
+  if (screen === "chat" && parts.length === 4 && id) {
+    return { kind: "transcript", name, sessionId: id };
+  }
   if (screen === "challenges" && id !== undefined && id !== "") {
     if (parts.length === 4)
       return { kind: "challenge", name, id, view: "tree" };
@@ -107,6 +112,8 @@ export function hrefOf(r: Route): string {
       return `#/a/${enc(r.name)}/challenges/${enc(r.id)}/approve-completion`;
     case "task":
       return `#/a/${enc(r.name)}/challenges/${enc(r.id)}/tasks/${enc(r.taskId)}`;
+    case "transcript":
+      return `#/a/${enc(r.name)}/chat/${enc(r.sessionId)}`;
     case "unknown":
       return "#/";
   }

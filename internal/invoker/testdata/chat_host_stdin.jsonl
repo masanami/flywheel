@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"Reply with the single word ok."}}
+{"type":"control_response","response":{"subtype":"success","request_id":"<control_request の request_id>","response":{"behavior":"allow","updatedInput":{"command":"curl -s https://example.com | head -c 20"}}}}
+{"type":"control_response","response":{"subtype":"success","request_id":"<control_request の request_id>","response":{"behavior":"deny","message":"no"}}}
+{"type":"control_response","response":{"subtype":"success","request_id":"<control_request の request_id>","response":{"behavior":"allow","updatedInput":{"questions":[{"question":"Which color do you prefer?","header":"Color","options":[{"label":"Red","description":"Choose red"},{"label":"Blue","description":"Choose blue"}],"multiSelect":false}],"answers":{"Which color do you prefer?":"Red"}}}}}

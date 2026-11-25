@@ -1,4 +1,5 @@
 import type { ShowCardResponse } from "../api/types.gen.ts";
+import { chatCost } from "../chat/texts.ts";
 import { safeHref } from "../safeHref.ts";
 import { usd } from "../usd.ts";
 
@@ -50,6 +51,10 @@ export function Items({ show }: { show: ShowCardResponse }) {
         <dt>費用</dt>
         <dd>
           <b data-testid="cost">{usd(tree.cost_usd)}</b> USD
+          <div data-testid="spec-cost">
+            仕様づくり <b>{chatCost(show.challenge.spec_cost_usd)}</b>
+            （実装の予算には数えません）
+          </div>
         </dd>
       </div>
       {tree.budget_usd !== null ? (

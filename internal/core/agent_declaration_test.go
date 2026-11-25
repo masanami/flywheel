@@ -108,9 +108,6 @@ const allKeysAgentJSON = `{
 	"supervisor": true,
 	"memory_dir": "memory",
 	"memory_write_limit": {"files": 5, "bytes": 8192},
-	"chat_tools": "restricted",
-	"chat_max_turns": 30,
-	"chat_timeout_sec": 600,
 	"chat_approvable_operations": ["release"]
 }`
 

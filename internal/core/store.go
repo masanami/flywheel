@@ -234,6 +234,8 @@ type InitResult struct {
 	Workspace string // ワークスペースの絶対パス
 	StorePath string // ストアファイルの絶対パス
 	Created   bool   // この呼び出しでストアを新規作成したか（false なら冪等な再実行）
+	// ClaudeSettingsCreated はこの呼び出しでワークスペースの Claude Code の設定のファイルを作ったか。
+	ClaudeSettingsCreated bool
 }
 
 // gitignoreContents は .flywheel/.gitignore の内容（D10: ストアを Git で追跡
@@ -253,6 +255,8 @@ const gitignoreContents = "# flywheel が生成する。手で編集しない。
 // 何も変えずに成功する（冪等）。スキーマ版がこのバイナリの知る最新版より
 // 新しければ、ストアのファイル・.gitignore のどちらも一切変えずに
 // ErrStoreTooNew を返す。
+//
+// ワークスペースの .claude/settings.json が無ければ作る（writeClaudeSettingsIfMissing）。
 //
 // 順序は「ストアを開いて版の検査に成功した後に .gitignore を書く」（レビュー
 // 指摘）: 版が新しすぎて開けない場合に .gitignore だけが書き換わる、という
@@ -283,7 +287,12 @@ func Init(workspaceFlag string) (*InitResult, error) {
 		return nil, err
 	}
 
-	return &InitResult{Workspace: base, StorePath: dbPath, Created: created}, nil
+	settingsCreated, err := writeClaudeSettingsIfMissing(base)
+	if err != nil {
+		return nil, err
+	}
+
+	return &InitResult{Workspace: base, StorePath: dbPath, Created: created, ClaudeSettingsCreated: settingsCreated}, nil
 }
 
 // openAtForInit は openAt と同じくストアを開く（存在しなければ作る）が、

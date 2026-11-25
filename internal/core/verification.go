@@ -62,7 +62,7 @@ type Attestation struct {
 	// （Verify が載せるのは relayed のときだけ）。Execute* は空でないときだけ
 	// approval・hold の relay_* と作業ログの after に書く。
 	evidence RelayEvidence
-	// chat は経路 chat の印（会話の識別・発言の識別）。経路 chat のときだけ非 nil。印の検査と手がかりの
+	// chat は経路 chat の印（会話の識別）。経路 chat のときだけ非 nil。印の検査と手がかりの
 	// 解決は、操作を行う core の処理がトランザクションの中で行う（chat_approval.go）。
 	chat *chatMark
 }
@@ -71,7 +71,7 @@ type Attestation struct {
 // （発言の文面・会話の識別）で、解決前は空。それ以外は Verify が載せた値。
 func (a Attestation) currentEvidence() RelayEvidence {
 	if a.chat != nil {
-		return a.chat.resolved
+		return a.chat.resolved.evidence
 	}
 	return a.evidence
 }
@@ -215,7 +215,7 @@ func registryPermits(ch Channel, v Verification, act attestedAction) bool {
 // まず (ch, verifier.Method()) が登録簿に無ければ ErrVerificationRejected を
 // 返し、verifier.Confirm を一切呼ばない（状態を変えない・端末にも触れない）。
 // 経路が chat のときは、verifier が NewChatMarkVerifier の返した値でなければ拒否する（逆に、その値は
-// chat 以外の経路では拒否する）。印の 2 値が空でないことだけを見て、印の中身の検査は操作を行う core の処理が
+// chat 以外の経路では拒否する）。印（会話の識別）が空でないことだけを見て、印の中身の検査は操作を行う core の処理が
 // トランザクションの中で行う。
 //
 // 登録簿にあれば verifier.Confirm(summary, expectedID) を呼び、エラーは
@@ -234,20 +234,21 @@ func Verify(ch Channel, verifier Verifier, summary, expectedID string) (Attestat
 	}
 
 	// 手がかりは relayed のときだけ載せる。手がかりの無い relayed は
-	// Confirm にも触れず何も書かずに拒否する。
+	// Confirm にも触れず何も書かずに拒否する。経路 chat の記録の手がかりは、操作を行う core の処理が
+	// 印の検査の後にストアから作るので、ここでは印が空でないことだけを見る。
 	var evidence RelayEvidence
-	if method == VerificationRelayed {
+	var chat *chatMark
+	switch {
+	case ch == ChannelChat:
+		chat = &chatMark{session: verifier.Evidence().Session}
+		if !chat.complete() {
+			return Attestation{}, ErrRelayEvidenceMissing
+		}
+	case method == VerificationRelayed:
 		evidence = verifier.Evidence()
 		if !evidence.complete() {
 			return Attestation{}, ErrRelayEvidenceMissing
 		}
-	}
-	var chat *chatMark
-	if ch == ChannelChat {
-		// 経路 chat の Evidence は印（Session＝会話の識別・Quote＝発言の識別）。記録へ書く手がかりは、
-		// 検査の後に core が発言の文面を引いて埋める。
-		chat = &chatMark{session: evidence.Session, message: evidence.Quote}
-		evidence = RelayEvidence{}
 	}
 
 	actor, err := verifier.Confirm(summary, expectedID)

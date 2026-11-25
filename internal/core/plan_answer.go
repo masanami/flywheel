@@ -368,6 +368,9 @@ func (s *Store) ExecutePlanAnswer(ctx context.Context, req PlanAnswerRequest, at
 		if err := rec.record("challenge", cid, string(OpAnswerPlan), nil, after); err != nil {
 			return err
 		}
+		if err := linkChatOperation(ctx, tx, att, cid, chatLinkAnswer, nowStr); err != nil {
+			return err
+		}
 		written = rows
 		current.Version, current.UpdatedAt = newVersion, now
 		result = current

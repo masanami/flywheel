@@ -478,14 +478,16 @@ func FromSlot(s *core.Slot) SlotResponse {
 
 // InitResponse は `init` の成功の形。
 type InitResponse struct {
-	Created   bool   `json:"created"`
-	StorePath string `json:"store_path"`
-	Workspace string `json:"workspace"`
+	// ClaudeSettingsCreated はワークスペースの Claude Code の設定のファイルを作ったか。
+	ClaudeSettingsCreated bool   `json:"claude_settings_created"`
+	Created               bool   `json:"created"`
+	StorePath             string `json:"store_path"`
+	Workspace             string `json:"workspace"`
 }
 
 // FromInitResult は core.InitResult を InitResponse へ変換する。
 func FromInitResult(r *core.InitResult) InitResponse {
-	return InitResponse{Created: r.Created, StorePath: r.StorePath, Workspace: r.Workspace}
+	return InitResponse{ClaudeSettingsCreated: r.ClaudeSettingsCreated, Created: r.Created, StorePath: r.StorePath, Workspace: r.Workspace}
 }
 
 // MarkReadResponse は `mark-read` の成功の形。

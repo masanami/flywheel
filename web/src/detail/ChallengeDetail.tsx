@@ -8,6 +8,7 @@ import { NotFound } from "../shell/NotFound.tsx";
 import { CHALLENGE_VIEWS, type ChallengeView, hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
 import { Additions } from "./Additions.tsx";
+import { ChatSessions } from "./ChatSessions.tsx";
 import { History } from "./History.tsx";
 import { Items } from "./Items.tsx";
 import { PlanView } from "./PlanView.tsx";
@@ -72,6 +73,10 @@ export function ChallengeDetail({
         </button>
       </p>
       <Items show={show} />
+      <ChatSessions
+        agentName={agentName}
+        sessions={show.challenge.chat_sessions}
+      />
       <Waiting
         show={show}
         agentName={agentName}

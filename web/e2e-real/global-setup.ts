@@ -1,13 +1,21 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 // 本物の serve の E2E の準備の段。
-//   1. 一時ディレクトリに HOME・XDG_CONFIG_HOME・作業ディレクトリ・ワークスペース（seed）を作る
+//   1. 一時ディレクトリに HOME・XDG_CONFIG_HOME・CLAUDE_CONFIG_DIR・作業ディレクトリ・ワークスペース（seed）を作る
 //   2. Go のテスト TestE2ESeed（internal/core/e2e_seed_test.go）で、ワークスペースへ種のストアを毎回作る
 //   3. ビルド済みの build/flywheel を `serve --port 0 --workspace <ワークスペース>` で起動し、
 //      標準エラーの `listening on <addr>` から番地を読んで、試験へ環境変数で渡す
+//      serve の PATH の先頭には、テスト用の実行エンジン（fake-claude.sh）を claude の名前で置く
 // 一時の HOME・XDG_CONFIG_HOME は serve にだけ渡す（Go のキャッシュと Playwright のブラウザの置き場は
 // 元の場所のまま）。委譲の目印（FLYWHEEL_DELEGATED_RUN）は外さない。目印のある環境では serve が拒否され、
 // ここで失敗する（想定どおり）。返す関数が終了時の片づけ（serve を止め、一時ディレクトリを消す）。
@@ -15,6 +23,7 @@ import { join, resolve } from "node:path";
 const repoRoot = resolve(import.meta.dirname, "..", "..");
 const binary = join(repoRoot, "build", "flywheel");
 export const BASE_URL_ENV = "FLYWHEEL_E2E_REAL_BASE_URL";
+export const FAKE_LOG_ENV = "FAKE_CLAUDE_LOG";
 const SEED_ENV = "FLYWHEEL_E2E_SEED_WORKSPACE";
 
 function waitForListening(serve: ChildProcess): Promise<string> {
@@ -86,7 +95,16 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const xdg = join(root, "xdg-config");
   const cwd = join(root, "cwd");
   const workspace = join(root, "seed");
-  for (const d of [home, xdg, cwd]) mkdirSync(d, { recursive: true });
+  const bin = join(root, "bin");
+  const fakeLog = join(root, "fake-claude");
+  // 対話の欄の会話のファイルの置き場。手元の CLAUDE_CONFIG_DIR を引き継がないように、ここで必ず置き換える。
+  const claudeConfig = join(root, "claude-config");
+  for (const d of [home, xdg, cwd, bin, fakeLog])
+    mkdirSync(d, { recursive: true });
+  const fake = join(bin, "claude");
+  copyFileSync(join(import.meta.dirname, "fake-claude.sh"), fake);
+  chmodSync(fake, 0o755);
+  process.env[FAKE_LOG_ENV] = fakeLog;
 
   let serve: ChildProcess | undefined;
   try {
@@ -101,7 +119,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     );
     serve = spawn(binary, ["serve", "--port", "0", "--workspace", workspace], {
       cwd,
-      env: { ...process.env, HOME: home, XDG_CONFIG_HOME: xdg },
+      env: {
+        ...process.env,
+        HOME: home,
+        XDG_CONFIG_HOME: xdg,
+        CLAUDE_CONFIG_DIR: claudeConfig,
+        PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+      },
       stdio: ["ignore", "inherit", "pipe"],
     });
     const addr = await waitForListening(serve);

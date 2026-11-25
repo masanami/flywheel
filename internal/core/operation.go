@@ -466,6 +466,13 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 		if err := bumpChallengeVersionForOperation(ctx, tx, rec, row.ChallengeID, challenge.Version, oid, challengeAction, nowStr, att); err != nil {
 			return err
 		}
+		linkAction := chatLinkReject
+		if req.Decision == ApprovalDecisionApproved {
+			linkAction = chatLinkApprove
+		}
+		if err := linkChatOperation(ctx, tx, att, row.ChallengeID, linkAction, nowStr); err != nil {
+			return err
+		}
 
 		createdAt, err := parseTimestamp(row.CreatedAt)
 		if err != nil {

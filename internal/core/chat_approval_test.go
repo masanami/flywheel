@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,12 +34,12 @@ func newChatFix(t *testing.T, s *Store) *chatFix {
 // mark はこの会話・この発言の印から経路 chat の Attestation を作る。
 func (f *chatFix) mark(t *testing.T, id string) Attestation {
 	t.Helper()
-	return f.markOf(t, f.turn.EngineSession, strconv.FormatInt(f.turn.OwnerMessageID, 10), id)
+	return f.markOf(t, f.turn.EngineSession, id)
 }
 
-func (f *chatFix) markOf(t *testing.T, session, message, id string) Attestation {
+func (f *chatFix) markOf(t *testing.T, session, id string) Attestation {
 	t.Helper()
-	att, err := Verify(ChannelChat, NewChatMarkVerifier(session, message), "s", id)
+	att, err := Verify(ChannelChat, NewChatMarkVerifier(session), "s", id)
 	if err != nil {
 		t.Fatalf("Verify(chat, relayed) error = %v", err)
 	}
@@ -166,7 +165,7 @@ func rejectedAndUnchanged(t *testing.T, s *Store, id string, err error, wantIs e
 	}
 }
 
-// 印の検査（AC-112〜116）。断るときは課題の状態を変えない（AC-113）。
+// 印の検査（AC-112・115 と、会話の識別だけの印の検査）。断るときは課題の状態を変えない（AC-113）。
 func TestChatApproval_MarkChecksRejectAndChangeNothing(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -182,32 +181,23 @@ func TestChatApproval_MarkChecksRejectAndChangeNothing(t *testing.T) {
 			}
 			return f.mark(t, "")
 		}},
-		{"AC-114 最後のオーナーの発言でない", func(t *testing.T, f *chatFix) Attestation {
-			if err := f.s.FinishChatReply(context.Background(), f.turn.ReplyMessageID, ChatStateDone, 0); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := f.s.PostChatMessage(context.Background(), "次の発言", nil); err != nil {
-				t.Fatal(err)
-			}
-			return f.mark(t, "") // 返事は進行中だが、印は前の発言
-		}},
 		{"AC-115 返事が進行中でない", func(t *testing.T, f *chatFix) Attestation {
-			if err := f.s.FinishChatReply(context.Background(), f.turn.ReplyMessageID, ChatStateDone, 0); err != nil {
+			if err := f.s.FinishChatReplyWithTotal(context.Background(), f.turn.ReplyMessageID, ChatStateDone, nil); err != nil {
 				t.Fatal(err)
 			}
 			return f.mark(t, "")
 		}},
-		{"AC-116 発言の識別がストアに無い", func(t *testing.T, f *chatFix) Attestation {
-			return f.markOf(t, f.turn.EngineSession, strconv.FormatInt(f.turn.OwnerMessageID+100, 10), "")
+		{"最後のオーナーの発言への返事が進行中でない（前の返事だけが進行中）", func(t *testing.T, f *chatFix) Attestation {
+			if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
+				_, err := tx.Exec(`INSERT INTO chat_message (session_id, role, body, state, created_at) VALUES (?, 'owner', '次の発言', 'done', '2026-11-22T00:00:00.000Z')`, f.turn.SessionID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			return f.mark(t, "")
 		}},
-		{"発言の識別が数でない", func(t *testing.T, f *chatFix) Attestation {
-			return f.markOf(t, f.turn.EngineSession, "abc", "")
-		}},
-		{"会話の識別が発言の会話と違う", func(t *testing.T, f *chatFix) Attestation {
-			return f.markOf(t, "00000000-0000-4000-8000-000000000000", strconv.FormatInt(f.turn.OwnerMessageID, 10), "")
-		}},
-		{"印の発言がオーナーの発言でない（返事の行）", func(t *testing.T, f *chatFix) Attestation {
-			return f.markOf(t, f.turn.EngineSession, strconv.FormatInt(f.turn.ReplyMessageID, 10), "")
+		{"印の会話がストアに無い", func(t *testing.T, f *chatFix) Attestation {
+			return f.markOf(t, "00000000-0000-4000-8000-000000000000", "")
 		}},
 	}
 	for _, tt := range tests {
@@ -227,13 +217,13 @@ func TestChatApproval_MarkChecksRejectAndChangeNothing(t *testing.T) {
 	}
 }
 
-// AC-117: FLYWHEEL_CHAT_SESSION だけがあり FLYWHEEL_CHAT_MESSAGE が無い（その逆も）印は、Verify が断る。
-func TestChatApproval_HalfMarkIsRejectedByVerify(t *testing.T) {
+// 空の印（FLYWHEEL_CHAT_SESSION が空）は、Verify が断る。
+func TestChatApproval_BlankMarkIsRejectedByVerify(t *testing.T) {
 	t.Parallel()
-	for _, m := range [][2]string{{"sess", ""}, {"", "1"}, {"", ""}, {"sess", "  "}} {
-		_, err := Verify(ChannelChat, NewChatMarkVerifier(m[0], m[1]), "s", "C-1")
+	for _, session := range []string{"", "  "} {
+		_, err := Verify(ChannelChat, NewChatMarkVerifier(session), "s", "C-1")
 		if !errors.Is(err, ErrRelayEvidenceMissing) || !errors.Is(err, ErrVerificationRejected) {
-			t.Errorf("Verify(%q, %q) error = %v, want ErrRelayEvidenceMissing", m[0], m[1], err)
+			t.Errorf("Verify(%q) error = %v, want ErrRelayEvidenceMissing", session, err)
 		}
 	}
 }
@@ -241,7 +231,7 @@ func TestChatApproval_HalfMarkIsRejectedByVerify(t *testing.T) {
 // 印の Verifier は経路 chat だけに使え、chat の経路は印の Verifier だけを受ける（手がかりを偽れない）。
 func TestChatApproval_MarkVerifierAndChannelArePairedOnly(t *testing.T) {
 	t.Parallel()
-	if _, err := Verify(ChannelCLI, NewChatMarkVerifier("s", "1"), "s", "C-1"); !errors.Is(err, ErrVerificationRejected) {
+	if _, err := Verify(ChannelCLI, NewChatMarkVerifier("s"), "s", "C-1"); !errors.Is(err, ErrVerificationRejected) {
 		t.Errorf("mark verifier on cli: error = %v, want ErrVerificationRejected", err)
 	}
 	fv := &fakeVerifier{method: VerificationRelayed, actor: "alice", evidence: RelayEvidence{Session: "s", Quote: "偽の発言"}}
@@ -438,7 +428,7 @@ func TestChatApproval_MarkCheckAppliesToWithdrawAndFollowups(t *testing.T) {
 	fixedActor(t, "alice")
 	c := createAndAdvance(t, s, StatusUnclassified)
 	f := newChatFix(t, s)
-	if err := s.FinishChatReply(context.Background(), f.turn.ReplyMessageID, ChatStateDone, 0); err != nil {
+	if err := s.FinishChatReplyWithTotal(context.Background(), f.turn.ReplyMessageID, ChatStateDone, nil); err != nil {
 		t.Fatal(err)
 	}
 	prev, err := s.PrepareWithdraw(context.Background(), c.ID, "やめる")
@@ -474,6 +464,8 @@ func TestChatApproval_MarkCheckIsUnchangedWhileNoticesExist(t *testing.T) {
 			f := newChatFix(t, s)
 			// 発言の後に、知らせの元の記録を作る: 走っているサイクルを、本番の口で、理由つきで終える（終わりの時刻は発言より後）。
 			cycle := seedCycle(t, s, time.Now().Add(-time.Minute), nil, "")
+			// 記録する時刻はミリ秒の精度なので、終わりの時刻が発言と同じ値にならないように間を空ける。
+			time.Sleep(2 * time.Millisecond)
 			if _, err := s.EndCycleWithReason(context.Background(), formatCycleID(cycle), CycleResultCompleted, CycleEndBudget); err != nil {
 				t.Fatal(err)
 			}
@@ -486,7 +478,7 @@ func TestChatApproval_MarkCheckIsUnchangedWhileNoticesExist(t *testing.T) {
 				t.Fatalf("the notice (%v) must come after the owner's message (%+v, %v)", notices[0].At, chat, err)
 			}
 			if !inProgress {
-				if err := s.FinishChatReply(context.Background(), f.turn.ReplyMessageID, ChatStateDone, 0); err != nil {
+				if err := s.FinishChatReplyWithTotal(context.Background(), f.turn.ReplyMessageID, ChatStateDone, nil); err != nil {
 					t.Fatal(err)
 				}
 			}

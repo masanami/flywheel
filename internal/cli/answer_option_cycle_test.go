@@ -97,18 +97,17 @@ func TestAnswerOption_IdentityFailureCallsNoStarter(t *testing.T) {
 	}
 }
 
-// 対話の欄の印がある経路（restricted）: `answer <課題> --option <識別>` は一覧の検査を通り、記録の経路は chat になる。
+// 対話の欄の印がある経路: `answer <課題> --option <識別>` は成立し、記録の経路は chat になる。
 // 成立した後にサイクルを始める処理も、印の無い経路と同じに働く。
-func TestChatMark_AnswerOptionPassesTheListCheckRecordsChatAndStartsTheCycle(t *testing.T) {
+func TestChatMark_AnswerOptionRecordsChatAndStartsTheCycle(t *testing.T) {
 	ws := initializedWorkspace(t)
 	id := openOptionHold(t, ws)
 	f := openChat(t, ws)
-	f.set(t, "restricted")
+	f.set(t)
 	st := &fakeStarter{launch: server.CycleLaunch{Started: true}}
 
 	code, stdout, stderr := chatRunWithStarter(t, st, ws, "answer", id, "--option", "add")
 
-	requireNotRefused(t, stderr)
 	if code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
@@ -131,12 +130,11 @@ func TestChatMark_AnswerOptionWithNoCycleStartsNothing(t *testing.T) {
 	ws := initializedWorkspace(t)
 	id := openOptionHold(t, ws)
 	f := openChat(t, ws)
-	f.set(t, "restricted")
+	f.set(t)
 	st := &fakeStarter{launch: server.CycleLaunch{Started: true}}
 
 	code, stdout, stderr := chatRunWithStarter(t, st, ws, "answer", id, "--option", "add", "--no-cycle")
 
-	requireNotRefused(t, stderr)
 	if code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}

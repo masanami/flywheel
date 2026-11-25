@@ -101,6 +101,18 @@ describe("画面のボタンの口", () => {
     ],
     ["サイクルを止める", () => api.cycleStop("w"), "/cycle/stop", undefined],
     [
+      "許可の確認への答え",
+      () => api.chatAnswer("w", 7, { decision: "allow" }),
+      "/chat/prompts/7/answer",
+      { decision: "allow" },
+    ],
+    [
+      "閉じた会話の続き",
+      () => api.chatResume("w", "s/1"),
+      "/chat/sessions/s%2F1/resume",
+      undefined,
+    ],
+    [
       "済みにする",
       () => api.followupsDone("w", { ids: ["F-1"], note: "確かめた" }),
       "/followups/done",
@@ -122,6 +134,19 @@ describe("画面のボタンの口", () => {
     expect((init.headers as Record<string, string>)["X-Flywheel-CSRF"]).toBe(
       "tok",
     );
+  });
+
+  it.each([
+    ["会話の一覧", () => api.chatSessions("w"), "/chat/sessions"],
+    [
+      "会話の全文",
+      () => api.chatTranscript("w", "s/1"),
+      "/chat/sessions/s%2F1/transcript",
+    ],
+  ])("%s は GET", async (_n, run, path) => {
+    const { url, init } = await called(run);
+    expect(url).toBe(`/api/v1/workspaces/w${path}`);
+    expect(init.method).toBe("GET");
   });
 
   it("知らせは GET", async () => {

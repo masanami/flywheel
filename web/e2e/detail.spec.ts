@@ -138,3 +138,26 @@ test("AC-129 #964: 確かめ待ちの中身がある実行を持つタスクの�
   await expect(page.getByTestId("task-detail")).toBeVisible();
   await expect(page.getByTestId("task-fix-pending")).toHaveCount(0);
 });
+
+test("#1288: 課題の詳細の費用の欄に仕様づくりの額が出て、紐づいた会話の「全文」から全文の画面が開く", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/challenges/C-3");
+  await expect(page.getByTestId("spec-cost")).toContainText(
+    "仕様づくり $0.42（実装の予算には数えません）",
+  );
+  const box = page.getByTestId("detail-chat-sessions");
+  await expect(box).toContainText("この課題に数えた費用 $0.42");
+  await box.getByRole("link", { name: "全文" }).click();
+  await expect(page.getByTestId("chat-transcript")).toBeVisible();
+  await expect(page.getByTestId("transcript-entry").first()).toBeVisible();
+});
+
+test("#1288: 全文が無くなった会話の全文の画面は、欄の記録で読めることを案内する", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/chat/mock-alpha-gone");
+  await expect(page.getByTestId("chat-transcript-unavailable")).toContainText(
+    "発言と返事は、欄の記録で読めます。",
+  );
+});
