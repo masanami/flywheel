@@ -1,6 +1,6 @@
 package invoker
 
-// このファイルは core.ChatInvoker（対話の欄の実行の IF。internal/core/chat_invoker.go）の実装を持つ。
+// このファイルは core.ChatInvoker（対話の欄の、返事ごとに起動する実行の IF。internal/core/chat_invoker.go）の実装を持つ。
 // 実行エンジンに固有の形（引数・stream-json の形）はここと chat_args.go に閉じ、規則（枠超過の判定・
 // 費用の記録・発言の保存）は持たない。1 回の返事ごとにプロセスを 1 つ起動し、常駐させない。
 
