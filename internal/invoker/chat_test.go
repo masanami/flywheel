@@ -215,8 +215,8 @@ func TestInvokeChat_FullArgs(t *testing.T) {
 	if got := argsAfter(argv, "--permission-mode"); !slices.Equal(got, []string{"bypassPermissions"}) {
 		t.Errorf("--permission-mode = %q", got)
 	}
-	if !strings.Contains(stdin, "道具の範囲: full") {
-		t.Errorf("stdin = %q, want the tools range", stdin)
+	if strings.Contains(stdin, "道具の範囲") {
+		t.Errorf("stdin = %q, want no tool range line", stdin)
 	}
 }
 
@@ -243,10 +243,13 @@ func TestInvokeChat_InstructionsAndStdin(t *testing.T) {
 	if i < 0 || i+1 >= len(argv) || argv[i+1] != want {
 		t.Errorf("--append-system-prompt does not carry chat.md: %q", argv)
 	}
-	for _, s := range []string{"状況を教えて", "C-7", "題名X", "T-3", "タスクY", "道具の範囲: restricted"} {
+	for _, s := range []string{"状況を教えて", "C-7", "題名X", "T-3", "タスクY"} {
 		if !strings.Contains(stdin, s) {
 			t.Errorf("stdin lacks %q:\n%s", s, stdin)
 		}
+	}
+	if strings.Contains(stdin, "道具の範囲") {
+		t.Errorf("stdin has the tool range line:\n%s", stdin)
 	}
 	begin := strings.Index(stdin, "----- BEGIN DATA: いま見ているもの -----")
 	end := strings.Index(stdin, dataSectionEnd)
