@@ -22,7 +22,7 @@ func chatRunWithStarter(t *testing.T, st *fakeStarter, ws string, args ...string
 func TestChatMark_ApproveStartsTheCycleAndPrintsCycle(t *testing.T) {
 	ws, id := planAwaitingApproval(t)
 	f := openChat(t, ws)
-	f.set(t, "restricted")
+	f.set(t)
 	st := &fakeStarter{launch: server.CycleLaunch{Started: true}}
 
 	code, stdout, stderr := chatRunWithStarter(t, st, ws, "approve", id)
@@ -44,7 +44,7 @@ func TestChatMark_ApproveStartsTheCycleAndPrintsCycle(t *testing.T) {
 func TestChatMark_ApproveWithNoCycleStartsNothing(t *testing.T) {
 	ws, id := planAwaitingApproval(t)
 	f := openChat(t, ws)
-	f.set(t, "restricted")
+	f.set(t)
 	st := &fakeStarter{launch: server.CycleLaunch{Started: true}}
 
 	code, stdout, stderr := chatRunWithStarter(t, st, ws, "approve", id, "--no-cycle")

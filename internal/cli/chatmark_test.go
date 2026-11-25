@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -12,14 +11,13 @@ import (
 	"github.com/masanami/flywheel/internal/core/coretest"
 )
 
-// docs/features/core-redesign-s4d.md S4d-1「欄から受けるコマンドの一覧」「欄から受ける承認・回答」の CLI の口
-// （AC-68〜71・84〜96・105・106・108・110・111・119〜129・141）。実ストアで、欄の印の環境変数を付けて同じプロセスで実行する。
+// docs/features/chat-session.md「印の検査と記録の「発言」」と core-redesign-s4d.md S4d-1「欄から受ける承認・回答」の
+// CLI の口（AC-95・96・105・106・108・110・111・119〜129・141）。実ストアで、欄の印の環境変数を付けて同じプロセスで実行する。
 
 const chatOwnerBody = "計画で進めてください。予算も上げて"
 
 type chatEnvFix struct {
 	session string
-	message int64
 	ws      string
 }
 
@@ -35,7 +33,7 @@ func openChat(t *testing.T, ws string) *chatEnvFix {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &chatEnvFix{session: turn.EngineSession, message: turn.OwnerMessageID, ws: ws}
+	return &chatEnvFix{session: turn.EngineSession, ws: ws}
 }
 
 // closeReply は返事を終え、会話を閉じる（印の会話が閉じている状態）。
@@ -62,18 +60,30 @@ func (f *chatEnvFix) close(t *testing.T) {
 	}
 }
 
-// set は印の環境変数を付ける（tools が空なら FLYWHEEL_CHAT_TOOLS は付けない）。道具の範囲は宣言から読むので、
-// tools が full のときは宣言（chat_tools: full）も書く（restricted は既定）。
-func (f *chatEnvFix) set(t *testing.T, tools string) {
+// set は印の環境変数（会話の識別だけ）を付ける。
+func (f *chatEnvFix) set(t *testing.T) {
 	t.Helper()
-	if tools == "full" {
-		writeAgentJSONForTest(t, f.ws, `{"chat_tools": "full"}`)
-		t.Setenv(core.WorkspaceEnvVar, f.ws) // 実行エンジンの作業ディレクトリ相当
-	}
 	t.Setenv(core.ChatEnvSession, f.session)
-	t.Setenv(core.ChatEnvMessage, strconv.FormatInt(f.message, 10))
-	if tools != "" {
-		t.Setenv(core.ChatEnvTools, tools)
+}
+
+// finishReply は進行中の返事を費用の累計 totalUSD で終える（会話は開いたまま）。
+func (f *chatEnvFix) finishReply(t *testing.T, totalUSD float64) {
+	t.Helper()
+	s, err := core.OpenWorkspace(f.ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	chat, err := s.ReadChat(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range chat.Messages {
+		if m.State == core.ChatStateReplying {
+			if err := s.FinishChatReplyWithTotal(context.Background(), m.ID, core.ChatStateDone, &totalUSD); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }
 
@@ -85,136 +95,119 @@ func chatRun(t *testing.T, ws string, args ...string) (code int, stdout, stderr 
 	return code, out.String(), errb.String()
 }
 
-func requireRefused(t *testing.T, code int, stderr string) {
-	t.Helper()
-	if code == 0 || !strings.Contains(stderr, chatCommandRefusal) {
-		t.Fatalf("exit=%d stderr=%s, want refused with %q", code, stderr, chatCommandRefusal)
+// 受入基準: 印がある環境で、見直し前の一覧に無かったコマンド（bind など）が、一覧の検査で断られない。宣言に
+// chat_tools が無くても同じ。
+func TestChatMark_NoCommandListCheck(t *testing.T) {
+	ws := initializedWorkspace(t)
+	createForCase(t, ws)
+	openChat(t, ws).set(t)
+	for _, c := range [][]string{
+		{"bind", "C-1", "--source", "s"}, {"run", "C-1"}, {"export"}, {"ingest"}, {"edit", "C-1", "--title", "x"},
+		{"classify", "C-1", "--priority", "P0"}, {"op", "add", "C-1", "--kind", "release", "--summary", "s"},
+	} {
+		_, _, stderr := chatRun(t, ws, c...)
+		if strings.Contains(stderr, "対話の欄からは、このコマンドを受けません") || strings.Contains(stderr, "verification_rejected") {
+			t.Errorf("%v: stderr=%s, want not refused by a list check", c, stderr)
+		}
 	}
 }
 
-func requireNotRefused(t *testing.T, stderr string) {
-	t.Helper()
-	if strings.Contains(stderr, chatCommandRefusal) {
-		t.Fatalf("stderr=%s, want not refused by the list check", stderr)
-	}
-}
-
-// AC-84・AC-85: 一覧の「読む」「記録する」「サイクル」のコマンドを表にして全部回し、一覧の検査を通ることを確かめる
-// （S4a が足すコマンドは、名前が一覧にあることだけ）。
-func TestChatList_EveryListedCommandPassesTheListCheck(t *testing.T) {
-	read := [][]string{
-		{"status"}, {"show", "C-1"}, {"list"}, {"log"}, {"runs"}, {"metrics"}, {"followup", "list"}, {"version"}, {"help"},
-		{"cycle", "status"},
-	}
-	record := [][]string{
+// 記録するコマンドは、返事が進行中でなければ印の検査で断られる。読むコマンドには印の検査をかけない。
+func TestChatMark_RecordCommandsAreCheckedAgainstTheReply(t *testing.T) {
+	ws := initializedWorkspace(t)
+	createForCase(t, ws)
+	f := openChat(t, ws)
+	f.set(t)
+	f.finishReply(t, 0)
+	for _, c := range [][]string{
 		{"approve", "C-1"}, {"reject", "C-1", "--reason", "x"}, {"answer", "C-1", "--answer", "x"}, {"withdraw", "C-1", "--reason", "x"},
 		{"budget", "C-1", "--impl-usd", "1"}, {"followup", "drop", "F-1", "--reason", "x"}, {"followup", "promote", "F-1"},
-		{"followup", "done", "F-1", "--note", "x"}, {"create", "--title", "t"},
-		{"cycle", "stop"},
-	}
-	for _, tools := range []core.ChatTools{core.ChatToolsRestricted, core.ChatToolsFull} {
-		mark := &chatMark{Tools: tools}
-		for _, c := range read {
-			if need, _, err := chatGate(mark, c); err != nil || need {
-				t.Errorf("%v: %v: needMark=%v err=%v, want passed without the mark check", tools, c, need, err)
-			}
-		}
-		for _, c := range record {
-			if need, _, err := chatGate(mark, c); err != nil || !need {
-				t.Errorf("%v: %v: needMark=%v err=%v, want passed with the mark check", tools, c, need, err)
-			}
-		}
-		// cycle は解析の後に --detach の有無で決める。
-		if need, err := chatGateCycle(mark, true); err != nil || !need {
-			t.Errorf("%v: cycle --detach: needMark=%v err=%v", tools, need, err)
-		}
-	}
-	if got := classifyChatCommand([]string{"cycle", "--detach"}); got != chatKindCycle {
-		t.Errorf("kind of cycle --detach = %v, want cycle", got)
-	}
-	// --detach が別のフラグの値のとき（解析の後は --detach が立たない）、restricted は断り、full は通す。
-	if _, err := chatGateCycle(&chatMark{Tools: core.ChatToolsRestricted}, false); err == nil {
-		t.Error("restricted: cycle without --detach must be refused")
-	}
-	if _, err := chatGateCycle(&chatMark{Tools: core.ChatToolsFull}, false); err != nil {
-		t.Errorf("full: cycle without --detach: %v", err)
-	}
-	// 全体のフラグを除いて名前を照合する（フラグが前後どちらにあっても同じ）。
-	for _, c := range [][]string{
-		{"--json", "status"}, {"--workspace", "/w", "followup", "list"}, {"followup", "--json", "list"}, {"status", "--workspace=/w"},
-	} {
-		if got := classifyChatCommand(c); got != chatKindRead {
-			t.Errorf("kind of %v = %v, want read", c, got)
-		}
-	}
-	if got := classifyChatCommand([]string{"ingest", "o/r#1"}); got != chatKindIngest {
-		t.Errorf("ingest kind = %v", got)
-	}
-
-	// 実際に回す（一覧の検査を通ること。コマンド自体の成否は問わない）。印の会話は開いている。
-	ws := initializedWorkspace(t)
-	createForCase(t, ws)
-	f := openChat(t, ws)
-	f.set(t, "restricted")
-	for _, c := range read {
-		if c[0] == "cycle" || c[0] == "help" {
-			continue // cycle status は S4a が足す。help は引数の最初で返る。
-		}
-		code, _, stderr := chatRun(t, ws, c...)
-		requireNotRefused(t, stderr)
-		if (c[0] == "status" || c[0] == "list" || c[0] == "log" || c[0] == "runs" || c[0] == "metrics" || c[0] == "version") && code != 0 {
-			t.Errorf("%v exit=%d stderr=%s", c, code, stderr)
-		}
-	}
-	for _, c := range record {
-		if c[0] == "cycle" {
-			continue
-		}
-		_, _, stderr := chatRun(t, ws, c...)
-		requireNotRefused(t, stderr)
-	}
-}
-
-// AC-86〜AC-93・AC-94: 一覧に無いコマンドは、印があり restricted のとき断られる。文言が出て、終了コードは 0 でない。
-func TestChatList_UnlistedCommandsAreRefused(t *testing.T) {
-	ws := initializedWorkspace(t)
-	createForCase(t, ws)
-	f := openChat(t, ws)
-	f.set(t, "restricted")
-	for _, c := range [][]string{
-		{"serve"}, {"export"}, {"import"}, {"cycle"}, {"run", "C-1"}, {"op", "exec", "OP-1"}, {"op", "add", "C-1", "--kind", "release", "--summary", "s"},
-		{"ingest"}, {"edit", "C-1", "--title", "x"}, {"bind", "C-1", "--source", "s"}, {"classify", "C-1", "--priority", "P0"},
+		{"followup", "done", "F-1", "--note", "x"}, {"create", "--title", "t"}, {"ingest", "o/r#1"}, {"cycle", "stop"}, {"cycle", "--detach"},
 	} {
 		code, _, stderr := chatRun(t, ws, c...)
-		requireRefused(t, code, stderr)
-	}
-}
-
-// AC-71: 道具の範囲は宣言から読む。宣言が無い・restricted なら、環境変数が full でも run を断る。
-func TestChatList_DeclarationDecidesTheToolsRange(t *testing.T) {
-	ws := initializedWorkspace(t)
-	createForCase(t, ws)
-	f := openChat(t, ws)
-	for _, decl := range []string{"", `{"chat_tools": "restricted"}`, `{"chat_tools": "bogus"}`} {
-		if decl != "" {
-			writeAgentJSONForTest(t, ws, decl)
+		if code == 0 || !strings.Contains(stderr, "verification_rejected") || !strings.Contains(stderr, "chat mark") {
+			t.Errorf("%v: exit=%d stderr=%s, want refused by the mark check", c, code, stderr)
 		}
-		f.set(t, "")
-		t.Setenv(core.ChatEnvTools, "full") // 環境変数は読まない
-		code, _, stderr := chatRun(t, ws, "run", "C-1")
-		requireRefused(t, code, stderr)
+	}
+	for _, c := range [][]string{{"status"}, {"show", "C-1"}, {"list"}} {
+		if code, _, stderr := chatRun(t, ws, c...); code != 0 {
+			t.Errorf("%v: exit=%d stderr=%s", c, code, stderr)
+		}
 	}
 }
 
-// AC-68: full では一覧の検査をかけない（run が、一覧の検査で断られない）。
-func TestChatList_FullSkipsTheListCheck(t *testing.T) {
+// 印は会話の識別だけで読む。空の印は断る側に倒し、発言の識別・道具の範囲の環境変数は読まない。
+func TestChatMark_ReadsOnlyTheSession(t *testing.T) {
 	ws := initializedWorkspace(t)
-	createForCase(t, ws)
+	id := planPendingChallenge(t, ws)
 	f := openChat(t, ws)
-	f.set(t, "full")
-	for _, c := range [][]string{{"run", "C-1"}, {"export"}, {"ingest"}, {"cycle"}} {
-		_, _, stderr := chatRun(t, ws, c...)
-		requireNotRefused(t, stderr)
+
+	t.Setenv(core.ChatEnvSession, "")
+	if code, _, stderr := chatRun(t, ws, "approve", id); code == 0 || !strings.Contains(stderr, "verification_rejected") {
+		t.Fatalf("blank mark: exit=%d stderr=%s", code, stderr)
+	}
+	f.set(t)
+	t.Setenv(core.ChatEnvMessage, "999999")
+	t.Setenv(core.ChatEnvTools, "restricted")
+	if code, _, stderr := chatRun(t, ws, "approve", id); code != 0 {
+		t.Fatalf("approve: exit=%d stderr=%s", code, stderr)
+	}
+}
+
+// 受入基準: 印の会話の最後のオーナーの発言への返事が進行中でないとき、印のある approve は断られ、何も書かない。
+func TestChatMark_ApproveWithoutAReplyInProgressChangesNothing(t *testing.T) {
+	ws := initializedWorkspace(t)
+	id := planPendingChallenge(t, ws)
+	f := openChat(t, ws)
+	f.set(t)
+	f.finishReply(t, 0)
+	before := len(coretest.QueryRows(t, ws, `SELECT id FROM approval`))
+	code, _, stderr := chatRun(t, ws, "approve", id)
+	if code == 0 || !strings.Contains(stderr, "verification_rejected") {
+		t.Fatalf("exit=%d stderr=%s", code, stderr)
+	}
+	if got := workStatus(t, ws, id); got != "awaiting_plan_approval" {
+		t.Errorf("status = %q, want unchanged", got)
+	}
+	if after := len(coretest.QueryRows(t, ws, `SELECT id FROM approval`)); after != before {
+		t.Errorf("approval rows = %d, want %d", after, before)
+	}
+	if n := len(coretest.QueryRows(t, ws, `SELECT id FROM chat_link`)); n != 0 {
+		t.Errorf("chat_link rows = %d, want 0", n)
+	}
+}
+
+// 受入基準: 欄からの create は会話と紐づき、show --json の課題に spec_cost_usd と chat_sessions[] が入る。show の文にも出る。
+func TestChatMark_CreateLinksAndShowHasTheSpecCost(t *testing.T) {
+	ws := initializedWorkspace(t)
+	f := openChat(t, ws)
+	f.set(t)
+	if code, _, stderr := chatRun(t, ws, "create", "--title", "欄から", "--done-criteria", "ok"); code != 0 {
+		t.Fatalf("create: exit=%d stderr=%s", code, stderr)
+	}
+	f.finishReply(t, 0.42)
+	unsetEnv(t, core.ChatEnvSession)
+
+	c := runJSON(t, ws, "show", "C-1")["challenge"].(map[string]any)
+	if c["spec_cost_usd"] != 0.42 {
+		t.Errorf("spec_cost_usd = %v, want 0.42", c["spec_cost_usd"])
+	}
+	sessions, _ := c["chat_sessions"].([]any)
+	if len(sessions) != 1 {
+		t.Fatalf("chat_sessions = %v, want 1", c["chat_sessions"])
+	}
+	got := sessions[0].(map[string]any)
+	if got["id"] != f.session || got["cost_usd"] != 0.42 || got["first_message"] != chatOwnerBody || got["started_at"] == "" {
+		t.Errorf("chat session = %v", got)
+	}
+	var out, errb bytes.Buffer
+	if code := runWithLookPath([]string{"show", "C-1", "--workspace", ws}, strings.NewReader(""), &out, &errb, defaultCommands(), lookPathFor(t)); code != 0 {
+		t.Fatalf("show: %s", errb.String())
+	}
+	for _, want := range []string{"仕様づくりの費用: 0.42 USD", "紐づいた会話:  1 件", "費用: 0.42 USD 最初の発言: " + chatOwnerBody} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("show text lacks %q: %s", want, out.String())
+		}
 	}
 }
 
@@ -223,7 +216,7 @@ func TestChatMark_DelegatedMarkWinsAndReadsSkipTheMarkCheck(t *testing.T) {
 	ws := initializedWorkspace(t)
 	createForCase(t, ws)
 	f := openChat(t, ws)
-	f.set(t, "restricted")
+	f.set(t)
 	t.Setenv(core.DelegatedRunEnvVar, "R-1")
 	if code, _, stderr := chatRun(t, ws, "status"); code == 0 || !strings.Contains(stderr, core.DelegatedRunEnvVar) {
 		t.Fatalf("status with both marks: exit=%d stderr=%s", code, stderr)
@@ -243,7 +236,7 @@ func TestChatMark_DelegatedMarkWinsAndReadsSkipTheMarkCheck(t *testing.T) {
 func TestChatMark_UnattestedRecordCommandsCheckTheMarkOnly(t *testing.T) {
 	ws := fuWorkspace(t)
 	f := openChat(t, ws)
-	f.set(t, "restricted")
+	f.set(t)
 
 	before := len(runJSON(t, ws, "list")["challenges"].([]any))
 	if code, _, stderr := chatRun(t, ws, "create", "--title", "欄から", "--done-criteria", "ok"); code != 0 {
@@ -276,26 +269,26 @@ func TestChatMark_UnattestedRecordCommandsCheckTheMarkOnly(t *testing.T) {
 		t.Error("create on a closed chat must be refused")
 	}
 	unsetEnv(t, core.ChatEnvSession)
-	unsetEnv(t, core.ChatEnvMessage)
 	if after := len(runJSON(t, ws, "list")["challenges"].([]any)); after != n {
 		t.Errorf("challenges = %d, want %d (何も書かない)", after, n)
 	}
 }
 
-// AC-128: 取り込み元を 1 つ指定した取り込みが成立する。引数の無い形は restricted で断られる。
+// AC-128 と受入基準: 取り込み元を 1 つ指定した取り込みが成立し、作った課題が会話と紐づく。
 func TestChatMark_IngestWithSpecPassesAndWithoutIsRefused(t *testing.T) {
 	parallelTools(t, true) // t.Setenv を使うので並列にしない
 	ws := selectSetup(t)
 	f := openChat(t, ws)
-	f.set(t, "restricted")
+	f.set(t)
 
-	code, _, stderr := chatRun(t, ws, "ingest")
-	requireRefused(t, code, stderr)
 	if code, _, stderr := chatRun(t, ws, "ingest", "OWNER/select-repo#2"); code != 0 {
 		t.Fatalf("ingest <指定>: exit=%d stderr=%s", code, stderr)
 	}
 	if n := len(runJSON(t, ws, "list")["challenges"].([]any)); n != 1 {
 		t.Errorf("challenges = %d, want 1", n)
+	}
+	if r := coretest.QueryRows(t, ws, `SELECT action FROM chat_link`); len(r) != 1 || r[0][0] != "ingest" {
+		t.Errorf("chat_link = %v, want one ingest", r)
 	}
 	// 印の検査: 会話が閉じていれば、指定つきでも断る。
 	f.close(t)
@@ -317,22 +310,20 @@ func lastApproval(t *testing.T, ws string) approvalRow {
 
 // AC-69・AC-105・AC-106・AC-108・AC-110・AC-111: 印があれば、計画の承認の記録は経路 chat・方式 relayed になり、
 // 発言は印の発言の body、会話の識別は印の会話の識別になる（--session・--quote に別の値を渡しても使わない）。
-// full でも同じ。--relayed・--session・--quote は要らない。
+// --relayed・--session・--quote は要らない。
 func TestChatMark_ApproveRecordsChatChannelAndTheMarkedMessage(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		tools string
 		extra []string
 	}{
-		{"restricted・フラグ無し（AC-111）", "restricted", nil},
-		{"restricted・別の値を渡す（AC-108・AC-110）", "restricted", []string{"--relayed", "--session", "OTHER-SESSION", "--quote", "別の文"}},
-		{"full（AC-69）", "full", nil},
+		{"フラグ無し（AC-111）", nil},
+		{"別の値を渡す（AC-108・AC-110）", []string{"--relayed", "--session", "OTHER-SESSION", "--quote", "別の文"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ws := initializedWorkspace(t)
 			id := planPendingChallenge(t, ws)
 			f := openChat(t, ws)
-			f.set(t, tc.tools)
+			f.set(t)
 			if code, _, stderr := chatRun(t, ws, append([]string{"approve", id}, tc.extra...)...); code != 0 {
 				t.Fatalf("approve: exit=%d stderr=%s", code, stderr)
 			}
@@ -365,7 +356,7 @@ func TestChatMark_ApproveOnAClosedChatChangesNothing(t *testing.T) {
 	ws := initializedWorkspace(t)
 	id := planPendingChallenge(t, ws)
 	f := openChat(t, ws)
-	f.set(t, "restricted")
+	f.set(t)
 	f.close(t)
 	code, _, stderr := chatRun(t, ws, "approve", id)
 	if code == 0 || !strings.Contains(stderr, "verification_rejected") {
@@ -385,7 +376,7 @@ func lastActivityChannel(t *testing.T, ws string) string {
 func TestChatMark_RejectRecordsChat(t *testing.T) {
 	ws := initializedWorkspace(t)
 	id := planPendingChallenge(t, ws)
-	openChat(t, ws).set(t, "restricted")
+	openChat(t, ws).set(t)
 	if code, _, stderr := chatRun(t, ws, "reject", id, "--reason", "no"); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr)
 	}
@@ -401,7 +392,7 @@ func TestChatMark_AnswerHoldRecordsChat(t *testing.T) {
 	coretest.SetChallengeStatus(t, ws, challengeIDToInternalID(t, id), "verifying")
 	runJSON(t, ws, "verify", id, "--result", "uncertain", "--question", "why?")
 	f := openChat(t, ws)
-	f.set(t, "restricted")
+	f.set(t)
 	if code, _, stderr := chatRun(t, ws, "answer", id, "--answer", "because"); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr)
 	}
@@ -414,7 +405,7 @@ func TestChatMark_AnswerHoldRecordsChat(t *testing.T) {
 // AC-121: 計画の問いへの回答の記録の経路は chat になる。
 func TestChatMark_AnswerPlanQuestionRecordsChat(t *testing.T) {
 	ws, id := planAnswerWorkspace(t)
-	openChat(t, ws).set(t, "restricted")
+	openChat(t, ws).set(t)
 	if code, _, stderr := chatRun(t, ws, "answer", id, "--choice", "Q1=1", "--choice", "Q2=1"); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr)
 	}
@@ -433,7 +424,7 @@ func TestChatMark_AnswerPlanQuestionRecordsChat(t *testing.T) {
 func TestChatMark_WithdrawRecordsChat(t *testing.T) {
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
-	openChat(t, ws).set(t, "restricted")
+	openChat(t, ws).set(t)
 	if code, _, stderr := chatRun(t, ws, "withdraw", id, "--reason", "採らない"); code != 0 {
 		t.Fatalf("withdraw: exit=%d stderr=%s", code, stderr)
 	}
@@ -447,7 +438,7 @@ func TestChatMark_WithdrawRecordsChat(t *testing.T) {
 func TestChatMark_BudgetRecordsChat(t *testing.T) {
 	ws2 := initializedWorkspace(t)
 	bid := createBudgetTargetForCase(t, ws2)
-	openChat(t, ws2).set(t, "restricted")
+	openChat(t, ws2).set(t)
 	if code, _, stderr := chatRun(t, ws2, "budget", bid, "--impl-usd", "80"); code != 0 {
 		t.Fatalf("budget: exit=%d stderr=%s", code, stderr)
 	}
@@ -459,7 +450,7 @@ func TestChatMark_BudgetRecordsChat(t *testing.T) {
 // AC-124・AC-125: フォローアップを捨てる・上げる記録の経路は chat になる。
 func TestChatMark_FollowupDropAndPromoteRecordChat(t *testing.T) {
 	ws := fuWorkspace(t)
-	openChat(t, ws).set(t, "restricted")
+	openChat(t, ws).set(t)
 	if code, _, stderr := chatRun(t, ws, "followup", "drop", "F-1", "--reason", "不要"); code != 0 {
 		t.Fatalf("drop: exit=%d stderr=%s", code, stderr)
 	}
@@ -474,13 +465,13 @@ func TestChatMark_FollowupDropAndPromoteRecordChat(t *testing.T) {
 	}
 }
 
-// AC-70: full でも、既定の宣言の external_send の不可逆操作の承認は断られる。差し戻しは受ける。
-func TestChatMark_ExternalSendApprovalIsRefusedEvenWithFull(t *testing.T) {
+// 受入基準: 印がある環境の、既定の宣言の external_send の不可逆操作の承認は断られる。差し戻しは受ける。
+func TestChatMark_ExternalSendApprovalIsRefused(t *testing.T) {
 	ws := initializedWorkspace(t)
 	id := createForCase(t, ws)
 	op := runJSON(t, ws, "op", "add", id, "--kind", "external_send", "--summary", "notify partner")["operation"].(map[string]any)["id"].(string)
 	op2 := runJSON(t, ws, "op", "add", id, "--kind", "external_send", "--summary", "notify other")["operation"].(map[string]any)["id"].(string)
-	openChat(t, ws).set(t, "full")
+	openChat(t, ws).set(t)
 	code, _, stderr := chatRun(t, ws, "approve", op)
 	if code == 0 || !strings.Contains(stderr, "ターミナルで行ってください") {
 		t.Fatalf("approve external_send: exit=%d stderr=%s", code, stderr)
@@ -510,46 +501,6 @@ func TestOperationHeadLines_UndeterminableGuidanceDependsOnTheChatMark(t *testin
 	if strings.Contains(got, "--reopen") || !strings.Contains(got, "ターミナルで行ってください") {
 		t.Errorf("chat: %q, want the terminal guidance without --reopen", got)
 	}
-}
-
-// 宣言が full なら、環境変数の FLYWHEEL_CHAT_TOOLS が無くても一覧の検査をかけない。
-func TestChatList_FullDeclarationSkipsTheListCheckWithoutTheEnv(t *testing.T) {
-	ws := initializedWorkspace(t)
-	createForCase(t, ws)
-	f := openChat(t, ws)
-	f.set(t, "")
-	writeAgentJSONForTest(t, ws, `{"chat_tools": "full"}`)
-	t.Setenv(core.WorkspaceEnvVar, ws)
-	_, _, stderr := chatRun(t, ws, "run", "C-1")
-	requireNotRefused(t, stderr)
-}
-
-// 実行エンジン自身のワークスペースが restricted なら、full の宣言の別のワークスペースを指しても一覧の検査は外れない。
-func TestChatList_OtherFullWorkspaceDoesNotLiftTheListCheck(t *testing.T) {
-	ws := initializedWorkspace(t)
-	other := initializedWorkspace(t)
-	writeAgentJSONForTest(t, other, `{"chat_tools": "full"}`)
-	createForCase(t, other)
-	openChat(t, other).set(t, "")
-	t.Setenv(core.WorkspaceEnvVar, ws) // 実行エンジン自身は restricted の ws
-	code, _, stderr := chatRun(t, other, "run", "C-1")
-	requireRefused(t, code, stderr)
-}
-
-// 事前の走査と解析で --workspace の読み方が食い違っても、コマンドが開く restricted のワークスペースの検査は外れない。
-func TestChatList_WorkspaceFlagTrickDoesNotLiftTheListCheck(t *testing.T) {
-	ws := initializedWorkspace(t)
-	createForCase(t, ws)
-	other := initializedWorkspace(t)
-	writeAgentJSONForTest(t, other, `{"chat_tools": "full"}`)
-	openChat(t, ws).set(t, "")
-	var out, errb bytes.Buffer
-	code := runWithLookPath([]string{"run", "C-1", "--workspace=" + other, "-workspace=" + ws, "--json"}, strings.NewReader(""), &out, &errb, defaultCommands(), lookPathFor(t))
-	requireRefused(t, code, errb.String())
-	// 値として消費される形（edit は一覧に無い）。
-	errb.Reset()
-	code = runWithLookPath([]string{"edit", "C-1", "--title", "--workspace=" + other, "-workspace=" + ws, "--json"}, strings.NewReader(""), &out, &errb, defaultCommands(), lookPathFor(t))
-	requireRefused(t, code, errb.String())
 }
 
 // op exec の人間待ちの行の案内は、欄の印があるときは --reopen の実行を求めない。

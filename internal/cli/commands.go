@@ -133,7 +133,11 @@ func initText(res *core.InitResult) string {
 	if res.Created {
 		created = "はい"
 	}
-	return fmt.Sprintf("ワークスペース: %s\nストア:         %s\n新規作成:       %s\n", res.Workspace, res.StorePath, created)
+	settings := "作っていない（既にある .claude/settings.json は読まず、そのままにします）"
+	if res.ClaudeSettingsCreated {
+		settings = "作った（.claude/settings.json）"
+	}
+	return fmt.Sprintf("ワークスペース: %s\nストア:         %s\n新規作成:       %s\nClaude Code の設定: %s\n", res.Workspace, res.StorePath, created, settings)
 }
 
 // defaultCommands は docs/features/m1-core.md §IF / API の全コマンドを登録する。

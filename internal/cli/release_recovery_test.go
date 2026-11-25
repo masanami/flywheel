@@ -652,7 +652,7 @@ func TestUndeterminable_ReopenFromTheChatPanelIsRefused(t *testing.T) {
 	v, h := releaseHead(1, 0), releaseHead(1, 1)
 	f, _, _ := newMergeInFixture(t, concatRoutes(miRoutes(1, h, "", "true"), miTruncatedRoutes(v, h)))
 	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
-	openChat(t, f.ws).set(t, "restricted")
+	openChat(t, f.ws).set(t)
 	code, _, stderr := runCLIRaw(t, []string{"approve", f.ops[0], "--reopen", "--workspace", f.ws, "--json"}...)
 	if code == 0 || !strings.Contains(stderr, "対話の欄からは行えません") || !strings.Contains(stderr, "verification_rejected") {
 		t.Fatalf("exit=%d stderr=%s, want refused with verification_rejected", code, stderr)
@@ -675,7 +675,7 @@ func TestMergeIn_ContentChangeFromTheChatPanelDoesNotReopenTheChallenge(t *testi
 	})
 	f, _, _ := newMergeInFixture(t, routes)
 	coretest.SetChallengeStatus(t, f.ws, challengeIDToInternalID(t, f.id), "done")
-	openChat(t, f.ws).set(t, "restricted")
+	openChat(t, f.ws).set(t)
 
 	code, _, stderr := runCLIRaw(t, []string{"approve", f.ops[0], "--workspace", f.ws, "--json"}...)
 	if code == 0 || !strings.Contains(stderr, "ターミナルで同じ承認を実行してください") {

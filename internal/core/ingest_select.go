@@ -132,6 +132,9 @@ type IngestSelectedInput struct {
 	// Specs は `<owner>/<repo>#<番号>` か番号だけ（利用者が打ったまま）。
 	Specs    []string
 	Upstream UpstreamIssueSource
+	// Chat は対話の欄の印。nil でなければ、作成の書き込みの中で印を検査し（通らなければ ErrChatMarkInvalid で何も
+	// 作らない）、作った課題を指定の順に印の会話へ紐づける。
+	Chat *ChatSessionMark
 }
 
 // IngestedChallenge は IngestSelected が作った課題 1 件。
@@ -290,6 +293,13 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 
 	out := &IngestSelectedResult{Ingested: make([]IngestedChallenge, 0, len(chosen))}
 	err = s.mutateAs(ctx, actor, ch, VerificationNone, func(tx *sql.Tx, rec *activityRecorder) error {
+		var chat resolvedChatMark
+		if in.Chat != nil {
+			var err error
+			if chat, err = resolveChatMark(ctx, tx, in.Chat.Session); err != nil {
+				return err
+			}
+		}
 		// 上流を読んだ後に課題になっていないことを、このトランザクションの中で読み直す。
 		taken, err := loadTakenExternalKeys(ctx, tx)
 		if err != nil {
@@ -316,6 +326,11 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 					return err
 				}
 				taken[kid.cand.Issue.ExternalKey] = true
+			}
+			if in.Chat != nil {
+				if err := linkChatChallenge(ctx, tx, chat, cid, chatLinkIngest, formatTimestamp(rec.at)); err != nil {
+					return err
+				}
 			}
 			out.Ingested = append(out.Ingested, IngestedChallenge{ChallengeID: sb.ChallengeID, ExternalKey: sb.ExternalKey, Children: len(planned[i])})
 		}

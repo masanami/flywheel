@@ -62,14 +62,6 @@ func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, co
 		return failUsage(stderr, jsonMode, "コマンドを指定してください")
 	}
 
-	// 対話の欄の印がある環境からは、道具の範囲が full でなければ、欄から受けるコマンドの一覧にあるコマンドだけを受ける
-	// （委譲の子の印の検査の後。名前の照合は全体のフラグを除いた後）。
-	chat := chatMarkFromEnv(rawArgs)
-	needChatMark, chatKnd, gateErr := chatGate(chat, rawArgs)
-	if gateErr != nil {
-		return failErr(stderr, jsonMode, gateErr)
-	}
-
 	cmd, rest, ok := matchCommand(rawArgs, commands)
 	if !ok {
 		// flow は内部向けのコマンドで、M1 の IF/API の表（commands）には載せない（flow.go）。
@@ -87,37 +79,12 @@ func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, co
 	parsed.Stderr = stderr
 	parsed.Stdout = stdout
 	parsed.LookPath = lookPath
-	parsed.Chat = chat
-	// 道具の範囲は、解析が決めたワークスペース（コマンドが実際に開くもの）の宣言で決め直し、一覧の検査をかけ直す
-	// （事前の走査と解析で読み方が食い違っても、restricted の宣言の検査を外せないようにする）。
-	if chat != nil {
-		chat.Tools = chatToolsForWorkspace(parsed.Values["workspace"])
-		need, kind, regateErr := chatGate(chat, rawArgs)
-		if regateErr != nil {
-			return failErr(stderr, jsonMode, regateErr)
-		}
-		needChatMark, chatKnd = need, kind
-	}
+	parsed.Chat = chatMarkFromEnv()
 	parsed.CycleStart = deps.CycleStart
 
 	// 解析が成功した後は解析結果を正とする（事前走査はフラグの値としての
 	// "--json" も拾うため、解析に失敗したときの出力形式の判定にだけ使う）。
 	jsonMode = parsed.Bools["json"]
-
-	if chat != nil && chatKnd == chatKindCycle {
-		need, cycleErr := chatGateCycle(chat, parsed.Bools["detach"])
-		if cycleErr != nil {
-			return failErr(stderr, jsonMode, cycleErr)
-		}
-		needChatMark = need
-	}
-	if chat != nil && chatKnd == chatKindIngest {
-		need, ingestErr := chatGateIngest(chat, len(parsed.Positional))
-		if ingestErr != nil {
-			return failErr(stderr, jsonMode, ingestErr)
-		}
-		needChatMark = need
-	}
 
 	// RequiresStore なコマンドは、Run を呼ぶ前にワークスペースのストアを開く。
 	// これにより init を含む全コマンドが store_not_found・store_too_new・
@@ -134,9 +101,9 @@ func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, co
 			store.SetFlowExecutable(exe)
 		}
 		parsed.Store = store
-		// 記録するコマンドには、印の検査をかける（印の会話が開いている・最後のオーナーの発言・返事が進行中）。
-		// 本人確認を通る操作は、core が操作の中でも同じ検査を行う。
-		if needChatMark {
+		// 記録するコマンドには、印の検査をかける（印の会話が開いている・最後のオーナーの発言への返事が進行中）。
+		// 本人確認を通る操作・create・指定つきの ingest は、core が操作の書き込みの中でも同じ検査を行う。
+		if parsed.Chat != nil && needsChatMarkCheck(cmd, parsed) {
 			if err := checkChatMark(parsed); err != nil {
 				var asErr *Error
 				if errors.As(err, &asErr) && asErr != nil {

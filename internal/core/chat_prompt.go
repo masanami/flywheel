@@ -332,8 +332,12 @@ func (s *Store) AnswerChatPrompt(ctx context.Context, promptID int64, answer Cha
 		if err != nil {
 			return err
 		}
+		answeredAt, err := s.nextChatAnsweredAt(ctx, tx, p.MessageID)
+		if err != nil {
+			return err
+		}
 		if err := requireOneRow(tx.ExecContext(ctx, `UPDATE chat_prompt SET state = ?, answer = ?, answered_at = ? WHERE id = ? AND state = ?`,
-			string(state), raw, formatTimestamp(s.currentTime()), promptID, string(ChatPromptPending))); err != nil {
+			string(state), raw, answeredAt, promptID, string(ChatPromptPending))); err != nil {
 			return err
 		}
 		recorded, err := scanChatPrompt(tx.QueryRowContext(ctx, `SELECT `+chatPromptSelectColumns+` FROM chat_prompt p WHERE p.id = ?`, promptID))
@@ -347,6 +351,24 @@ func (s *Store) AnswerChatPrompt(ctx context.Context, promptID int64, answer Cha
 		return nil, err
 	}
 	return out, nil
+}
+
+// nextChatAnsweredAt は返事 messageID の確認の答えに記録する時刻を返す。記録の「発言」は答えた順に問いを
+// 並べるので、同じ返事のこれまでの答えより後の時刻にする（時刻の刻みの中で続けて答えても順が崩れない）。
+func (s *Store) nextChatAnsweredAt(ctx context.Context, tx *sql.Tx, messageID int64) (string, error) {
+	var latest sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(answered_at) FROM chat_prompt WHERE message_id = ?`, messageID).Scan(&latest); err != nil {
+		return "", err
+	}
+	at := formatTimestamp(s.currentTime())
+	if !latest.Valid || at > latest.String {
+		return at, nil
+	}
+	prev, err := parseTimestamp(latest.String)
+	if err != nil {
+		return "", err
+	}
+	return formatTimestamp(prev.Add(time.Millisecond)), nil
 }
 
 // ExpireChatReplyPrompts は返事 1 つの、答えを待っている確認を「答えられなかった」（expired）にし、件数を返す。

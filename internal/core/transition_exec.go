@@ -340,6 +340,18 @@ func (s *Store) transitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRec
 	if err := rec.record("challenge", cid, string(p.op), tc.before, tc.after); err != nil {
 		return nil, err
 	}
+	// 経路 chat の本人確認つきの操作は、成立した同じ書き込みの中で会話と課題を紐づける。
+	if p.attested && p.att.chat != nil {
+		act, ok := actionForTransition(tr)
+		if !ok {
+			return nil, fmt.Errorf("core: transition %s: no attested action for the chat link", tr.ID)
+		}
+		if action, ok := chatLinkActionOfTransition(act); ok {
+			if err := linkChatOperation(ctx, tx, p.att, cid, action, nowStr); err != nil {
+				return nil, err
+			}
+		}
+	}
 	// 完了（T13・T14 の両方）になる課題へ上げてある未のフォローアップを、同じトランザクションで済みにする。
 	if target == StatusDone {
 		if err := completeFollowupsPromotedTo(ctx, tx, rec, cid); err != nil {
