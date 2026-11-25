@@ -192,6 +192,10 @@ func (c *fakeConv) prompt(req core.ChatPromptRequest) {
 	c.emit(func(ev core.ChatConversationEvents) { ev.Prompt(req) })
 }
 
+func (c *fakeConv) cancelPrompt(requestID string) {
+	c.emit(func(ev core.ChatConversationEvents) { ev.PromptCancelled(requestID) })
+}
+
 func (c *fakeConv) reply(state core.ChatMessageState, total *float64) {
 	c.emit(func(ev core.ChatConversationEvents) {
 		ev.ReplyEnded(core.ChatReplyEnd{State: state, CostTotalUSD: total})

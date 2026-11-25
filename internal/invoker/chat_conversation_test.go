@@ -56,6 +56,7 @@ func (r *convRecord) events() core.ChatConversationEvents {
 		Prompt: func(p core.ChatPromptRequest) {
 			r.add("prompt "+p.RequestID, func() { r.prompts = append(r.prompts, p) })
 		},
+		PromptCancelled: func(id string) { r.add("cancelled "+id, nil) },
 		ReplyEnded: func(e core.ChatReplyEnd) {
 			r.add("end "+string(e.State), func() { r.ends = append(r.ends, e) })
 		},
@@ -724,6 +725,28 @@ func TestConversation_AnswerRejectsUnknownAndCanceledRequests(t *testing.T) {
 		if err := conv.Answer(context.Background(), id, core.ChatPromptAnswer{Decision: core.ChatDecisionAllow}); err == nil {
 			t.Errorf("Answer(%s) succeeded", id)
 		}
+	}
+}
+
+// 実行エンジンが確認を取り下げたら、呼び出し元へ取り下げを渡す（確認の後・返事の終わりの前の順で）。
+func TestConversation_CancelledPromptIsPassedToTheCaller(t *testing.T) {
+	out := controlLine(t, "r1", "Bash", `{"command":"ls"}`, false) + `{"type":"control_cancel_request","request_id":"r1"}` + "\n" + resultLine("success", false, "", "0", "completed")
+	conv, rec := startFake(t, fakeClaudeFixture{Script: []fakeStep{{Read: true, Out: out}}}, startInput(t))
+	send(t, conv, "x")
+	rec.waitEnds(t, 1)
+	if got, want := rec.snapshot(), []string{"prompt r1", "cancelled r1", "end done"}; !slices.Equal(got, want) {
+		t.Errorf("log = %q, want %q", got, want)
+	}
+}
+
+// 知らない識別の取り下げは、呼び出し元へ渡さない。
+func TestConversation_CancelOfAnUnknownRequestIsNotPassed(t *testing.T) {
+	out := `{"type":"control_cancel_request","request_id":"nope"}` + "\n" + resultLine("success", false, "", "0", "completed")
+	conv, rec := startFake(t, fakeClaudeFixture{Script: []fakeStep{{Read: true, Out: out}}}, startInput(t))
+	send(t, conv, "x")
+	rec.waitEnds(t, 1)
+	if got, want := rec.snapshot(), []string{"end done"}; !slices.Equal(got, want) {
+		t.Errorf("log = %q, want %q", got, want)
 	}
 }
 

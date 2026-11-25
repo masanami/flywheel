@@ -382,6 +382,20 @@ func (s *Store) ExpireChatReplyPrompts(ctx context.Context, messageID int64) (in
 	return n, err
 }
 
+// ExpireChatPromptByRequest は返事 messageID の、識別 requestID の確認が答えを待っていれば「答えられなかった」
+// （expired）にし、件数（0 か 1）を返す。同じ返事のほかの確認と、答えた確認・ほかの返事の確認は変えない。
+// 実行エンジンが確認を取り下げたときと、答えを実行エンジンへ送れなかったときに使う。
+func (s *Store) ExpireChatPromptByRequest(ctx context.Context, messageID int64, requestID string) (int, error) {
+	var n int
+	err := s.chatWrite(ctx, func(tx *sql.Tx) error {
+		var err error
+		n, err = affectedRows(tx.ExecContext(ctx, `UPDATE chat_prompt SET state = ? WHERE message_id = ? AND request_id = ? AND state = ?`,
+			string(ChatPromptExpired), messageID, requestID, string(ChatPromptPending)))
+		return err
+	})
+	return n, err
+}
+
 // ExpireAllChatPrompts は答えを待っているすべての確認を「答えられなかった」（expired）にし、件数を返す。
 func (s *Store) ExpireAllChatPrompts(ctx context.Context) (int, error) {
 	var n int

@@ -125,7 +125,10 @@ func (s *conversationStream) handle(l conversationLine, raw string) {
 	case "control_request":
 		s.control(l)
 	case "control_cancel_request":
-		s.c.dropRequest(l.RequestID)
+		// 答えを待っていない確認（知らない識別・答え済み）の取り下げは、呼び出し元へ渡さない。
+		if s.c.dropRequest(l.RequestID) && s.ev.PromptCancelled != nil {
+			s.ev.PromptCancelled(l.RequestID)
+		}
 	case "result":
 		s.replyEnded(s.classify(l, raw))
 	}

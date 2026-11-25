@@ -66,6 +66,9 @@ type ChatConversationEvents struct {
 	ToolFinished func(toolUseID string, ok bool)
 	// Prompt は、許可の確認か問いを求められたとき。答えは ChatConversation.Answer で返す。
 	Prompt func(req ChatPromptRequest)
+	// PromptCancelled は、実行エンジンが確認を取り下げたとき（requestID は ChatPromptRequest.RequestID）。
+	// Prompt で渡した確認のうち、答えを待っている 1 件が対象で、以後その確認へ Answer は送れない。
+	PromptCancelled func(requestID string)
 	// ReplyEnded は、返事の終わりの行が届いたとき（プロセスは動いたまま次の発言を待てる）。
 	ReplyEnded func(end ChatReplyEnd)
 	// Exited は、プロセスが終わったとき。起動した会話につき 1 回で、その後はどの関数も呼ばない。

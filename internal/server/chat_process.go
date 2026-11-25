@@ -269,7 +269,8 @@ func (c *chatRunner) events(a *chatAgent, p *chatProcess) core.ChatConversationE
 		ToolFinished: func(toolUseID string, ok bool) {
 			write(func(st *core.Store, id int64) { _ = st.FinishChatTool(bg, id, toolUseID, ok) })
 		},
-		Prompt: func(req core.ChatPromptRequest) { c.prompt(a, p, req) },
+		Prompt:          func(req core.ChatPromptRequest) { c.prompt(a, p, req) },
+		PromptCancelled: func(requestID string) { c.promptCancelled(a, p, requestID) },
 		ReplyEnded: func(end core.ChatReplyEnd) {
 			c.replyEnded(a, p, end)
 		},
@@ -297,6 +298,21 @@ func (c *chatRunner) prompt(a *chatAgent, p *chatProcess, req core.ChatPromptReq
 	}
 	c.withStore(p.name, func(st *core.Store) {
 		_ = st.RecordDeniedChatPrompt(context.Background(), p.sessionID, req, chatBetweenRepliesDenyMessage)
+	})
+}
+
+// promptCancelled は、実行エンジンが取り下げた確認 1 件だけを expired にする（ほかの確認は答えを待ったまま）。
+// 返事の合間に届いた確認は断って記録済みなので、何も変えない。
+func (c *chatRunner) promptCancelled(a *chatAgent, p *chatProcess, requestID string) {
+	a.mu.Lock()
+	replyID := p.replyID
+	a.mu.Unlock()
+	if replyID == 0 {
+		return
+	}
+	_ = c.writeWithRetry(p.name, func(st *core.Store) error {
+		_, err := st.ExpireChatPromptByRequest(context.Background(), replyID, requestID)
+		return err
 	})
 }
 
@@ -332,20 +348,31 @@ func (c *chatRunner) answerPrompt(ctx context.Context, a *chatAgent, name string
 		return err
 	}
 
+	var (
+		// expire は答えを送れなかったときに expired にする確認を選ぶ。プロセスが動いていなければ、その返事の
+		// どの確認も答えられないので返事の分すべて。動いていて送れなかっただけなら、その 1 件だけ（ほかの確認は、
+		// プロセスが動いている間は答えられる。プロセスが終わっていれば、返事の終わりの処理が残りを expired にする）。
+		expire  func(st *core.Store) error
+		sendErr error
+	)
 	p, replyID := a.replying()
 	if p == nil || replyID != prompt.MessageID {
-		err = errors.New("確認を求めたプロセスが動いていない")
-	} else {
-		err = answerEngine(p, prompt.RequestID, answer)
-	}
-	if err != nil {
-		if werr := c.writeWithRetry(name, func(st *core.Store) error {
+		sendErr = errors.New("確認を求めたプロセスが動いていない")
+		expire = func(st *core.Store) error {
 			_, err := st.ExpireChatReplyPrompts(context.Background(), prompt.MessageID)
 			return err
-		}); werr != nil {
+		}
+	} else if sendErr = answerEngine(p, prompt.RequestID, answer); sendErr != nil {
+		expire = func(st *core.Store) error {
+			_, err := st.ExpireChatPromptByRequest(context.Background(), prompt.MessageID, prompt.RequestID)
+			return err
+		}
+	}
+	if sendErr != nil {
+		if werr := c.writeWithRetry(name, expire); werr != nil {
 			return werr
 		}
-		return fmt.Errorf("%w: %s", errChatAnswerNotSent, err.Error())
+		return fmt.Errorf("%w: %s", errChatAnswerNotSent, sendErr.Error())
 	}
 	return c.writeWithRetry(name, func(st *core.Store) error {
 		_, err := st.AnswerChatPrompt(context.Background(), promptID, answer)
