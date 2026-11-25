@@ -603,7 +603,7 @@ func TestChatSessions_ResumeChecksInOrder(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s, _ := newWorkspaceStore(t)
-	yes, no := func(string) bool { return true }, func(string) bool { return false }
+	yes, no := true, false
 	old := mustPost(t, s, "a", nil)
 	must(t, s.MarkChatEngineStarted(ctx, old.SessionID))
 	must(t, s.FinishChatReplyWithTotal(ctx, old.ReplyMessageID, ChatStateDone, usd(0.25)))
@@ -628,9 +628,6 @@ func TestChatSessions_ResumeChecksInOrder(t *testing.T) {
 	before = dump()
 	if err := s.ResumeChatSession(ctx, old.EngineSession, no); !errors.Is(err, ErrChatTranscriptUnavailable) {
 		t.Errorf("no transcript: err = %v", err)
-	}
-	if err := s.ResumeChatSession(ctx, old.EngineSession, nil); !errors.Is(err, ErrChatTranscriptUnavailable) {
-		t.Errorf("no checker: err = %v", err)
 	}
 	if string(dump()) != string(before) {
 		t.Fatal("a refused resume changed the store")
@@ -657,7 +654,7 @@ func TestChatSessions_ResumeWithNoOpenSession(t *testing.T) {
 	old := mustPost(t, s, "a", nil)
 	must(t, s.FinishChatReplyWithTotal(ctx, old.ReplyMessageID, ChatStateDone, nil))
 	must(t, s.CloseChat(ctx))
-	must(t, s.ResumeChatSession(ctx, old.EngineSession, func(string) bool { return true }))
+	must(t, s.ResumeChatSession(ctx, old.EngineSession, true))
 	if got := openEngineSession(t, s); got != old.EngineSession {
 		t.Errorf("open session = %q", got)
 	}

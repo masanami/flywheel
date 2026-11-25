@@ -37,8 +37,9 @@ type fakeChat struct {
 	// transcripts は全文のファイルがある会話（会話の識別 → 項目の並び）。refs は全文を指す入力の記録。
 	transcripts map[string][]core.ChatTranscriptEntry
 	refs        []core.ChatTranscriptRef
-	// onStart は起動のたびに呼ぶ。
-	onStart func(core.ChatStartInput)
+	// onStart は起動のたびに呼ぶ。onHasTranscript は全文のファイルの有無を調べるたびに呼ぶ。
+	onStart         func(core.ChatStartInput)
+	onHasTranscript func()
 }
 
 func newFakeChat() *fakeChat { return &fakeChat{} }
@@ -57,6 +58,12 @@ func (f *fakeChat) ReadTranscript(_ context.Context, ref core.ChatTranscriptRef)
 }
 
 func (f *fakeChat) HasTranscript(_ context.Context, ref core.ChatTranscriptRef) bool {
+	f.mu.Lock()
+	hook := f.onHasTranscript
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refs = append(f.refs, ref)

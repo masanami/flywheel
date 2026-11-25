@@ -415,6 +415,46 @@ func TestChat_SessionsListsClosedSessionsNewestFirst(t *testing.T) {
 	}
 }
 
+// 全文のファイルの有無を調べている間は、ストアを借りず、書き込みのロックも握らない（ファイルの調べは遅いことがあり、
+// 握ったままだと同じワークスペースのほかの書き込みが待たされる）。
+func TestChat_TranscriptCheckHoldsNeitherTheStoreNorTheWriteLock(t *testing.T) {
+	for name, call := range map[string]func(t *testing.T, e *chatEnvT, id string){
+		"list":   func(t *testing.T, e *chatEnvT, _ string) { getSessions(t, e.port) },
+		"resume": func(t *testing.T, e *chatEnvT, id string) { e.post(t, "/sessions/"+id+"/resume", http.StatusNoContent) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newChatEnv(t)
+			old, _ := e.twoSessions(t)
+			e.inv.setTranscript(old.in.SessionID)
+			entry := e.s.chat.fleet.byName["w"]
+			checks := 0
+			e.inv.onHasTranscript = func() {
+				checks++
+				// 借りたままなら、ストアの状態を変える側（Lock）は入れない。
+				if !entry.mu.TryLock() {
+					t.Error("the store is still leased while the transcript is checked")
+				} else {
+					entry.mu.Unlock()
+				}
+				// 書き込みのロックを握ったままなら、別の接続の書き込みは待たされて ErrStoreBusy になる。
+				st, err := core.OpenWorkspace(e.ws)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer func() { _ = st.Close() }()
+				if _, err := st.ExpireAllChatPrompts(context.Background()); err != nil {
+					t.Errorf("a write during the transcript check failed: %v", err)
+				}
+			}
+			call(t, e, old.in.SessionID)
+			if checks == 0 {
+				t.Fatal("the transcript was never checked")
+			}
+		})
+	}
+}
+
 // 続けると、いまの会話を閉じてそのプロセスを止め、選んだ会話を開く。次の発言は --resume で起動する。
 func TestChat_ResumeOpensTheSessionAndStopsTheCurrentProcess(t *testing.T) {
 	e := newChatEnv(t)

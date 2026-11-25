@@ -123,9 +123,9 @@ func forEachRow(ctx context.Context, tx *sql.Tx, query string, args []any, fn fu
 // ErrNotFound、すでに開いている会話は何もせず成功（返事が進行中でも）、それ以外でいまの会話の返事が進行中なら
 // ErrChatReplying、それ以外で全文のファイルが見つからなければ ErrChatTranscriptUnavailable。断るときは何も変えない。
 //
-// transcriptAvailable は全文のファイルが見つかるかを返す関数で、書き込みの中で呼ぶ。ストアを触らず、すぐ返すこと。
-// nil は「見つからない」として扱う。
-func (s *Store) ResumeChatSession(ctx context.Context, engineSession string, transcriptAvailable func(engineSession string) bool) error {
+// transcriptAvailable は、engineSession の全文のファイルが見つかるか。ファイルを調べるのは遅いことがあり、書き込みの
+// ロックを握ったまま調べないよう、呼び出し元が書き込みの前に調べた結果を渡す（上の判定の順のうち、使うのは最後だけ）。
+func (s *Store) ResumeChatSession(ctx context.Context, engineSession string, transcriptAvailable bool) error {
 	return s.chatWrite(ctx, func(tx *sql.Tx) error {
 		var (
 			targetID int64
@@ -150,7 +150,7 @@ func (s *Store) ResumeChatSession(ctx context.Context, engineSession string, tra
 				return err
 			}
 		}
-		if transcriptAvailable == nil || !transcriptAvailable(engineSession) {
+		if !transcriptAvailable {
 			return ErrChatTranscriptUnavailable
 		}
 		if current != nil {
