@@ -171,7 +171,30 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM45OperationShape(t, &doc)
 	addM45DependencyKeysShape(t, &doc)
 	addCoreRedesignS2aShowShape(t, &doc)
+	addChatSessionShape(t, &doc)
 	return doc
+}
+
+// addChatSessionShape は対話の欄の作り替え（chat-session.md の画面・API設計）が `show --json` の challenge と
+// `init --json` に足したキーを doc へ合成する。文書の記述が消えたらここで落ちる。
+func addChatSessionShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "chat-session.md"))
+	if err != nil {
+		t.Fatalf("read chat-session spec: %v", err)
+	}
+	if !strings.Contains(string(data), "仕様づくりの費用（`spec_cost_usd`）と、紐づいた会話の一覧（`chat_sessions[]`。") ||
+		!strings.Contains(string(data), "`flywheel init --json` に足す値: 設定のファイルを作ったか（`claude_settings_created`）") {
+		t.Fatal("chat-session spec does not document spec_cost_usd / chat_sessions / claude_settings_created")
+	}
+	if len(doc.entity["show_challenge"]) == 0 || len(doc.topLevel["init"]) == 0 {
+		t.Fatal("documented shapes of show_challenge / init not found")
+	}
+	doc.entity["show_challenge"]["spec_cost_usd"] = true
+	doc.entity["show_challenge"]["chat_sessions"] = true
+	for _, shape := range doc.topLevel["init"] {
+		shape["claude_settings_created"] = true
+	}
 }
 
 // addM3RunsShape は `runs` コマンドの成功時のJSON形を doc へ足す。m1-core.md の

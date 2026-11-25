@@ -474,6 +474,8 @@ func TestChatApproval_MarkCheckIsUnchangedWhileNoticesExist(t *testing.T) {
 			f := newChatFix(t, s)
 			// 発言の後に、知らせの元の記録を作る: 走っているサイクルを、本番の口で、理由つきで終える（終わりの時刻は発言より後）。
 			cycle := seedCycle(t, s, time.Now().Add(-time.Minute), nil, "")
+			// 記録する時刻はミリ秒の精度なので、終わりの時刻が発言と同じ値にならないように間を空ける。
+			time.Sleep(2 * time.Millisecond)
 			if _, err := s.EndCycleWithReason(context.Background(), formatCycleID(cycle), CycleResultCompleted, CycleEndBudget); err != nil {
 				t.Fatal(err)
 			}

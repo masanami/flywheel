@@ -113,7 +113,12 @@ function MessageView({ m }: { m: ChatMessage }) {
                   // 同じコマンドが続きうるので、並びの位置を key にする（並びは増えるだけ）
                   // biome-ignore lint/suspicious/noArrayIndexKey: 上の理由
                   <li key={i}>
-                    <code>{a.command}</code> {a.ok ? "（成功）" : "（失敗）"}
+                    <code>{a.target}</code>{" "}
+                    {a.state === "ok"
+                      ? "（成功）"
+                      : a.state === "error"
+                        ? "（失敗）"
+                        : null}
                   </li>
                 ))}
               </ul>

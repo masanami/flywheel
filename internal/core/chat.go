@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -29,7 +28,13 @@ const (
 	ChatEnvTools = "FLYWHEEL_CHAT_TOOLS"
 )
 
-// ChatMarkEnv は欄から起動した実行エンジンの環境に足す印（KEY=VALUE の一覧）を返す。
+// ChatSessionMarkEnv は会話ごとに起動する実行エンジンの環境に足す印を返す。印は会話の識別だけ
+// （起動したまま続けるプロセスの環境は起動のときに決まり、発言ごとに変えられないため）。
+func ChatSessionMarkEnv(engineSession string) []string {
+	return []string{ChatEnvSession + "=" + engineSession}
+}
+
+// ChatMarkEnv は返事ごとに起動する実行エンジンの環境に足す印（KEY=VALUE の一覧）を返す。
 func ChatMarkEnv(engineSession string, ownerMessageID int64, tools ChatTools) []string {
 	return []string{
 		ChatEnvSession + "=" + engineSession,
@@ -99,7 +104,7 @@ func (v *ChatViewing) empty() bool {
 	return v == nil || (v.ChallengeID == "" && v.TaskID == "" && v.Title == "")
 }
 
-// ChatCommand は返事の途中で実行したコマンド 1 つ（実行した行と、成功したか）。
+// ChatCommand は返事 1 回の形の対話の実行（ChatInvoker）が渡す、実行したコマンド 1 つ（実行した行と、成功したか）。
 type ChatCommand struct {
 	Command string `json:"command"`
 	OK      bool   `json:"ok"`
@@ -125,7 +130,9 @@ type ChatMessage struct {
 	State     ChatMessageState
 	CostUSD   float64
 	Viewing   *ChatViewing
-	Activity  []ChatCommand
+	// Activity は道具の一覧（使い始めた順）。Prompts は返事に結び付いた確認（記録した順）。どちらも無ければ空のスライス。
+	Activity  []ChatActivity
+	Prompts   []ChatPrompt
 	CreatedAt time.Time
 	EndedAt   *time.Time
 }
@@ -179,6 +186,10 @@ func readChat(ctx context.Context, tx *sql.Tx) (*Chat, error) {
 		return chat, nil
 	}
 	chat.Session = sess
+	prompts, err := sessionChatPrompts(ctx, tx, sess.ID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT id, session_id, role, body, state, cost_usd, viewing_challenge_id, viewing_task_id, viewing_title, activity, created_at, ended_at
 		FROM chat_message WHERE session_id = ? ORDER BY id`, sess.ID)
 	if err != nil {
@@ -203,9 +214,11 @@ func readChat(ctx context.Context, tx *sql.Tx) (*Chat, error) {
 		if vc.Valid || vt.Valid || vtitle.Valid {
 			m.Viewing = &ChatViewing{ChallengeID: vc.String, TaskID: vt.String, Title: vtitle.String}
 		}
-		m.Activity = []ChatCommand{}
-		if err := json.Unmarshal([]byte(activity), &m.Activity); err != nil {
-			return nil, fmt.Errorf("chat_message %d: activity is not a JSON array: %w", m.ID, err)
+		if m.Activity, err = parseChatActivity(m.ID, activity); err != nil {
+			return nil, err
+		}
+		if m.Prompts = prompts[m.ID]; m.Prompts == nil {
+			m.Prompts = []ChatPrompt{}
 		}
 		if m.CreatedAt, err = parseTimestamp(created); err != nil {
 			return nil, err
@@ -287,12 +300,8 @@ func (s *Store) PostChatMessage(ctx context.Context, text string, viewing *ChatV
 			sess = &ChatSession{ID: sid, EngineSession: id}
 			t.NewSession = true
 		} else {
-			var n int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM chat_message WHERE session_id = ? AND state = ?`, sess.ID, string(ChatStateReplying)).Scan(&n); err != nil {
+			if err := requireNoReply(ctx, tx, sess.ID); err != nil {
 				return err
-			}
-			if n > 0 {
-				return ErrChatReplying
 			}
 		}
 		var vc, vt, vtitle any
@@ -405,34 +414,76 @@ func (s *Store) AppendChatSpeech(ctx context.Context, messageID int64, text stri
 	})
 }
 
-// AppendChatCommand は返事の行へ、実行したコマンドを 1 つ足す。返事が進行中でなければ ErrValidation。
+// AppendChatCommand は返事の行の道具の一覧へ、終わったコマンドを 1 つ足す（返事 1 回の形の対話の実行が使う。
+// 道具の使用の識別は持たない）。返事が進行中でなければ ErrValidation。
 func (s *Store) AppendChatCommand(ctx context.Context, messageID int64, cmd ChatCommand) error {
 	return s.chatWrite(ctx, func(tx *sql.Tx) error {
 		if err := requireReplying(ctx, tx, messageID); err != nil {
 			return err
 		}
-		var raw string
-		if err := tx.QueryRowContext(ctx, `SELECT activity FROM chat_message WHERE id = ?`, messageID).Scan(&raw); err != nil {
-			return err
-		}
-		var list []ChatCommand
-		if err := json.Unmarshal([]byte(raw), &list); err != nil {
-			return fmt.Errorf("chat_message %d: activity is not a JSON array: %w", messageID, err)
-		}
-		b, err := json.Marshal(append(list, cmd))
-		if err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE chat_message SET activity = ? WHERE id = ?`, string(b), messageID)
-		return err
+		return updateChatActivity(ctx, tx, messageID, func(list []ChatActivity) ([]ChatActivity, error) {
+			return append(list, ChatActivity{Tool: chatLegacyTool, Target: cutRunes(cmd.Command, ChatToolTargetLimit), State: chatActivityResult(cmd.OK)}), nil
+		})
 	})
 }
 
-// FinishChatReply は返事を終える（終わり方と費用を記録し、終わった時刻を入れる）。終わり方は replying 以外の 6 値
-// （ほかは ErrValidation）。返事が進行中でなければ ErrValidation（二重に終えない）。費用は 0 以上（負は ErrValidation）。
-// 終わり方が session_lost のときは、同じトランザクションで会話も閉じる。
+func validChatCost(v float64) bool { return v >= 0 && !math.IsNaN(v) && !math.IsInf(v, 0) }
+
+// FinishChatReply は返事を終える（返事 1 回の形の対話の実行が使う）。costUSD は実行エンジンが返した費用で、そのまま
+// この返事の費用にする。0 より大きければ会話の費用の累計にも残す（この会話を会話の単位の形で続けたときに、同じ分を
+// 二重に数えないため）。ほかの規則は FinishChatReplyWithTotal と同じ。
 func (s *Store) FinishChatReply(ctx context.Context, messageID int64, state ChatMessageState, costUSD float64) error {
-	if !isChatEndState(state) || costUSD < 0 || math.IsNaN(costUSD) || math.IsInf(costUSD, 0) {
+	if !validChatCost(costUSD) {
+		return ErrValidation
+	}
+	return s.finishChatReply(ctx, messageID, state, func(tx *sql.Tx, sessionID int64) (int64, error) {
+		micros := usdToMicros(costUSD)
+		if micros == 0 {
+			return 0, nil
+		}
+		return micros, setChatCostTotal(ctx, tx, sessionID, micros)
+	})
+}
+
+func setChatCostTotal(ctx context.Context, tx *sql.Tx, sessionID, micros int64) error {
+	_, err := tx.ExecContext(ctx, `UPDATE chat_session SET engine_cost_total = ? WHERE id = ?`, micros, sessionID)
+	return err
+}
+
+// FinishChatReplyWithTotal は返事を終える。totalUSD は実行エンジンが返した費用の累計で、返事の費用は会話に記録した
+// 前の累計との差（累計が前より小さくなったら、返った値そのもの）。会話の累計は返った値にする。終わりの行が届かず
+// 累計が分からないときは nil を渡す（返事の費用は 0 で、会話の累計は変えない。その分は次の返事の差に入る）。
+//
+// 終わり方は replying 以外の 6 値（ほかは ErrValidation）。返事が進行中でなければ ErrValidation（二重に終えない）。
+// 累計は 0 以上（負は ErrValidation）。終わり方が stopped・failed のときは、道具の一覧で running のまま残った要素を
+// error に締める。答えを待っていた確認は、終わり方によらず expired にする（終わった返事の確認には答えられない）。
+// 終わり方が session_lost のときは会話も閉じる。すべて同じトランザクションで行う。
+func (s *Store) FinishChatReplyWithTotal(ctx context.Context, messageID int64, state ChatMessageState, totalUSD *float64) error {
+	if totalUSD != nil && !validChatCost(*totalUSD) {
+		return ErrValidation
+	}
+	return s.finishChatReply(ctx, messageID, state, func(tx *sql.Tx, sessionID int64) (int64, error) {
+		if totalUSD == nil {
+			return 0, nil
+		}
+		var prev int64
+		if err := tx.QueryRowContext(ctx, `SELECT engine_cost_total FROM chat_session WHERE id = ?`, sessionID).Scan(&prev); err != nil {
+			return 0, err
+		}
+		total := usdToMicros(*totalUSD)
+		if err := setChatCostTotal(ctx, tx, sessionID, total); err != nil {
+			return 0, err
+		}
+		if total < prev {
+			return total, nil
+		}
+		return total - prev, nil
+	})
+}
+
+// finishChatReply は返事を終える共通の書き込み。cost は同じトランザクションの中で返事の費用（100 万分の 1 USD）を決める。
+func (s *Store) finishChatReply(ctx context.Context, messageID int64, state ChatMessageState, cost func(tx *sql.Tx, sessionID int64) (int64, error)) error {
+	if !isChatEndState(state) {
 		return ErrValidation
 	}
 	return s.chatWrite(ctx, func(tx *sql.Tx) error {
@@ -444,14 +495,25 @@ func (s *Store) FinishChatReply(ctx context.Context, messageID int64, state Chat
 		if err := tx.QueryRowContext(ctx, `SELECT session_id FROM chat_message WHERE id = ?`, messageID).Scan(&sessionID); err != nil {
 			return err
 		}
+		micros, err := cost(tx, sessionID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE chat_message SET state = ?, cost_usd = ?, ended_at = ? WHERE id = ?`,
-			string(state), usdToMicros(costUSD), now, messageID); err != nil {
+			string(state), micros, now, messageID); err != nil {
+			return err
+		}
+		if state == ChatStateStopped || state == ChatStateFailed {
+			if err := closeRunningChatTools(ctx, tx, messageID); err != nil {
+				return err
+			}
+		}
+		if _, err := expireChatReplyPrompts(ctx, tx, messageID); err != nil {
 			return err
 		}
 		if state == ChatStateSessionLost {
 			// 続けられなかった会話は、同じトランザクションで閉じる（次の発言は新しい会話になる）。
-			_, err := tx.ExecContext(ctx, `UPDATE chat_session SET closed_at = ? WHERE id = ? AND closed_at IS NULL`, now, sessionID)
-			return err
+			return closeChatSession(ctx, tx, sessionID, now)
 		}
 		return nil
 	})
@@ -465,30 +527,41 @@ func (s *Store) CloseChat(ctx context.Context) error {
 		if err != nil || sess == nil {
 			return err
 		}
-		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM chat_message WHERE session_id = ? AND state = ?`, sess.ID, string(ChatStateReplying)).Scan(&n); err != nil {
+		if err := requireNoReply(ctx, tx, sess.ID); err != nil {
 			return err
 		}
-		if n > 0 {
-			return ErrChatReplying
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE chat_session SET closed_at = ? WHERE id = ?`, formatTimestamp(s.currentTime()), sess.ID)
-		return err
+		return closeChatSession(ctx, tx, sess.ID, formatTimestamp(s.currentTime()))
 	})
 }
 
 // StopInterruptedChatReplies は進行中のまま残った返事（サーバの停止などで終わりを記録できなかったもの）を
-// すべて stopped にして、終わった時刻を入れる。止めた件数を返す。
+// すべて stopped にして終わった時刻を入れる起動の片付け。止めた返事の道具の一覧で running のまま残った要素は
+// error に締め、答えを待っているすべての確認は expired にする。止めた返事の件数を返す。
 func (s *Store) StopInterruptedChatReplies(ctx context.Context) (int, error) {
 	var n int
 	err := s.chatWrite(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE chat_message SET state = ?, ended_at = ? WHERE state = ?`,
-			string(ChatStateStopped), formatTimestamp(s.currentTime()), string(ChatStateReplying))
-		if err != nil {
+		var ids []int64
+		if err := forEachRow(ctx, tx, `SELECT id FROM chat_message WHERE state = ? ORDER BY id`, []any{string(ChatStateReplying)}, func(rows *sql.Rows) error {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+			return nil
+		}); err != nil {
 			return err
 		}
-		c, err := res.RowsAffected()
-		n = int(c)
+		for _, id := range ids {
+			if err := closeRunningChatTools(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		if _, err := expireAllChatPrompts(ctx, tx); err != nil {
+			return err
+		}
+		var err error
+		n, err = affectedRows(tx.ExecContext(ctx, `UPDATE chat_message SET state = ?, ended_at = ? WHERE state = ?`,
+			string(ChatStateStopped), formatTimestamp(s.currentTime()), string(ChatStateReplying)))
 		return err
 	})
 	return n, err

@@ -28,25 +28,29 @@ type UnmetDependency struct {
 
 // ShowChallenge は show（UI の詳細の API を含む）の challenge。Challenge の各キーに dependencies・dependents を足した形。
 type ShowChallenge struct {
-	Context      *string         `json:"context"`
-	CreatedAt    string          `json:"created_at"`
-	Dependencies []Dependency    `json:"dependencies"`
-	Dependents   []string        `json:"dependents"`
-	Description  string          `json:"description"`
-	DoneCriteria string          `json:"done_criteria"`
-	FollowupOf   *string         `json:"followup_of"`
-	Headline     *string         `json:"headline"`
-	ID           string          `json:"id"`
-	Improvement  *ImprovementKey `json:"improvement"`
+	// ChatSessions は課題に紐づいた対話の欄の会話（無ければ []）。
+	ChatSessions []ChallengeChatSession `json:"chat_sessions"`
+	Context      *string                `json:"context"`
+	CreatedAt    string                 `json:"created_at"`
+	Dependencies []Dependency           `json:"dependencies"`
+	Dependents   []string               `json:"dependents"`
+	Description  string                 `json:"description"`
+	DoneCriteria string                 `json:"done_criteria"`
+	FollowupOf   *string                `json:"followup_of"`
+	Headline     *string                `json:"headline"`
+	ID           string                 `json:"id"`
+	Improvement  *ImprovementKey        `json:"improvement"`
 	// IntegrationRef は課題に記録した統合先の識別。記録が無ければ null。
 	IntegrationRef *string `json:"integration_ref"`
 	Priority       *string `json:"priority"`
 	Reporter       string  `json:"reporter"`
-	Status         string  `json:"status"`
-	StatusLabel    string  `json:"status_label"`
-	Title          string  `json:"title"`
-	UpdatedAt      string  `json:"updated_at"`
-	Urgency        *string `json:"urgency"`
+	// SpecCostUSD は仕様づくりの費用（課題の予算には数えない）。
+	SpecCostUSD float64 `json:"spec_cost_usd"`
+	Status      string  `json:"status"`
+	StatusLabel string  `json:"status_label"`
+	Title       string  `json:"title"`
+	UpdatedAt   string  `json:"updated_at"`
+	Urgency     *string `json:"urgency"`
 	// UsesIntegration は課題が統合先を使うか（計画の承認で決まる）。未決か過去の課題は null。
 	UsesIntegration *bool `json:"uses_integration"`
 	Version         int   `json:"version"`
@@ -104,6 +108,7 @@ func FromShowChallenge(d *core.ChallengeDetail) ShowChallenge {
 		imp = &ImprovementKey{Layer: d.Improvement.Layer, Target: d.Improvement.Target}
 	}
 	return ShowChallenge{
+		ChatSessions: fromChallengeChatSessions(d.ChatSessions), SpecCostUSD: d.SpecCostUSD,
 		Context: c.Context, CreatedAt: c.CreatedAt, Dependencies: FromDependencies(d.Dependencies), Dependents: dependents,
 		Description: c.Description, DoneCriteria: c.DoneCriteria, FollowupOf: d.FollowupOf, Headline: c.Headline, ID: c.ID, Improvement: imp, IntegrationRef: d.IntegrationRef, Priority: c.Priority,
 		Reporter: c.Reporter, Status: c.Status, StatusLabel: c.StatusLabel, Title: c.Title, UpdatedAt: c.UpdatedAt,
