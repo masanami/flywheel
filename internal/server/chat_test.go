@@ -860,7 +860,7 @@ func TestChat_WriteWithRetryRetriesOnlyStoreBusy(t *testing.T) {
 	c := newChatEnv(t).s.chat
 	boom := errors.New("boom")
 	calls := 0
-	if err := c.writeWithRetry("w", func(*core.Store) error { calls++; return boom }); err != boom || calls != 1 {
+	if err := c.writeWithRetry("w", func(*core.Store) error { calls++; return boom }); !errors.Is(err, boom) || calls != 1 {
 		t.Errorf("other error: err = %v, calls = %d, want 1 call", err, calls)
 	}
 	calls = 0
