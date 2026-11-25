@@ -90,7 +90,8 @@ var judgmentPromptLimit = map[string]int{
 	"j8.md": 8192,
 	"sv.md": 6144,
 	// chat.md は対話の欄の実行エンジンの追加の指示（判断点ではない）。
-	"chat.md": 4096,
+	// flywheel#1303 で、chat.md へ足した節「コマンドの形」（586 バイト）を足した 4682 へ引き上げた（足した節の分だけ）。
+	"chat.md": 4682,
 }
 
 // briefFixedSectionsTotalLimit は J3 ブリーフの固定の節の雛形の合計の上限

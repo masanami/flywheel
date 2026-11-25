@@ -704,3 +704,118 @@ it("紐づいた会話が無い課題の詳細には、会話の区画を出さ�
   await screen.findByTestId("spec-cost");
   expect(screen.queryByTestId("detail-chat-sessions")).toBeNull();
 });
+
+// ---- 新しい確認を見える位置へ送る（flywheel#1303） ----
+
+const changed = () =>
+  act(() =>
+    FakeEventSource.latest.send({
+      type: "workspace_changed",
+      workspace: "alpha",
+    }),
+  );
+
+function spyScroll() {
+  const scrolled: (string | undefined)[] = [];
+  const proto = Element.prototype as { scrollIntoView?: unknown };
+  const before = Object.getOwnPropertyDescriptor(proto, "scrollIntoView");
+  proto.scrollIntoView = function (this: HTMLElement) {
+    scrolled.push(this.dataset.promptId);
+  };
+  return {
+    scrolled,
+    restore: () => {
+      if (before) Object.defineProperty(proto, "scrollIntoView", before);
+      else Reflect.deleteProperty(proto, "scrollIntoView");
+    },
+  };
+}
+
+it("答えを待つ確認が新しく出ると、その確認を欄の見える位置へ送る。読み直しただけでは送り直さない", async () => {
+  const spy = spyScroll();
+  try {
+    chatBody = replyingWith({ body: "調べています" });
+    await open();
+    await panel().findByText("調べています");
+    expect(spy.scrolled).toEqual([]);
+
+    chatBody = replyingWith({ prompts: [permission({ id: 7 })] });
+    changed();
+    await findPrompt();
+    await waitFor(() => expect(spy.scrolled).toEqual(["7"]));
+
+    // 同じ確認のまま読み直しても、送り直さない
+    chatBody = replyingWith({
+      body: "追記",
+      prompts: [permission({ id: 7 })],
+    });
+    changed();
+    await panel().findByText("追記");
+    expect(spy.scrolled).toEqual(["7"]);
+
+    // 答え終えた確認へは送らず、次に出た確認へ送る
+    chatBody = replyingWith({
+      prompts: [permission({ id: 7, state: "denied" }), permission({ id: 9 })],
+    });
+    changed();
+    await waitFor(() => expect(spy.scrolled).toEqual(["7", "9"]));
+  } finally {
+    spy.restore();
+  }
+});
+
+it("答えを待つ確認が同時に 2 件出たら古いほうへ送り、それに答え終えたら次の確認へ送る", async () => {
+  const spy = spyScroll();
+  try {
+    chatBody = replyingWith({
+      prompts: [permission({ id: 9 }), permission({ id: 7 })],
+    });
+    await open();
+    await waitFor(() => expect(spy.scrolled).toEqual(["7"]));
+
+    chatBody = replyingWith({
+      prompts: [permission({ id: 9 }), permission({ id: 7, state: "allowed" })],
+    });
+    changed();
+    await waitFor(() => expect(spy.scrolled).toEqual(["7", "9"]));
+  } finally {
+    spy.restore();
+  }
+});
+
+it("欄を開いたときに答えを待つ確認があれば、その確認を見える位置へ送る", async () => {
+  const spy = spyScroll();
+  try {
+    chatBody = replyingWith({ prompts: [permission({ id: 7 })] });
+    await open();
+    await findPrompt();
+    await waitFor(() => expect(spy.scrolled).toEqual(["7"]));
+  } finally {
+    spy.restore();
+  }
+});
+
+it("会話の一覧を開いている間に出た確認は、一覧を閉じたときに見える位置へ送る", async () => {
+  const spy = spyScroll();
+  try {
+    chatBody = replyingWith({ body: "調べています" });
+    await open();
+    await panel().findByText("調べています");
+    fireEvent.click(button("会話の一覧"));
+    chatBody = replyingWith({
+      body: "確認します",
+      prompts: [permission({ id: 7 })],
+    });
+    changed();
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("chat-panel").querySelector('[data-prompt-id="7"]'),
+      ).not.toBeNull(),
+    );
+    expect(spy.scrolled).toEqual([]);
+    fireEvent.click(button("会話の一覧を閉じる"));
+    await waitFor(() => expect(spy.scrolled).toEqual(["7"]));
+  } finally {
+    spy.restore();
+  }
+});
