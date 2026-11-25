@@ -135,6 +135,9 @@ test("問いに選択肢のボタンで答えると、答えが欄に出て返�
   const panel = await send(page, "選択肢の問い を出して");
   const prompt = panel.getByTestId("chat-prompt");
   await expect(panel.getByRole("button", { name: "止める" })).toBeEnabled();
+  await expect(
+    prompt.getByRole("textbox", { name: /^選択肢に無い答え/ }),
+  ).toBeVisible();
   await prompt.getByRole("button", { name: "再送だけ" }).click();
   await expect(prompt).toContainText("回答: 再送だけ");
   await expect(prompt.getByRole("button")).toHaveCount(0);
@@ -169,4 +172,127 @@ test("会話の一覧で、閉じた会話の全文を開き、続けられる�
   await panel.getByRole("button", { name: "会話の一覧" }).click();
   await expect(kept).toContainText("いまの会話");
   await expect(kept.getByRole("button", { name: "続ける" })).toHaveCount(0);
+});
+
+test("許可の確認は理由の欄つきの「許可する」「断る」を出し、理由を添えて断ると結果だけになる", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const panel = await send(page, "許可の確認 を出して");
+  const prompt = panel.getByTestId("chat-prompt");
+  await expect(prompt.getByTestId("chat-prompt-target")).toContainText(
+    "末尾の印",
+  );
+  await expect(prompt.getByRole("button")).toHaveText(["許可する", "断る"]);
+  await prompt
+    .getByRole("textbox", { name: "断る理由（任意）" })
+    .fill("題名を直してから");
+  await prompt.getByRole("button", { name: "断る" }).click();
+  await expect(prompt).toContainText(
+    "断りました（伝えた文: 題名を直してから）",
+  );
+  await expect(prompt.getByRole("button")).toHaveCount(0);
+  await expect(prompt.getByRole("textbox")).toHaveCount(0);
+});
+
+test("答えを待つ確認がある間に「止める」を押すと、返事が止まり、確認は答えられなかったになる", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const panel = await send(page, "許可の確認 を出して");
+  const prompt = panel.getByTestId("chat-prompt");
+  await expect(prompt.getByRole("button", { name: "許可する" })).toBeVisible();
+  await panel.getByRole("button", { name: "止める" }).click();
+  await expect(prompt).toContainText("答えられませんでした");
+  await expect(prompt.getByRole("button")).toHaveCount(0);
+  await expect(panel.getByText("止めました。")).toBeVisible();
+});
+
+// 偽の API に無い形（実行中の行と終わった行の混在・複数を選べる問い・応答の tools が full）は、応答を差し込んで確かめる。
+test("道具の一覧の「実行中」は running の行だけに出て、複数を選べる問いはチェックと「送る」で答え、道具の範囲は出ない", async ({
+  page,
+}) => {
+  const at = "2026-11-25T00:00:00.000Z";
+  const question = "どれを直しますか？";
+  const posted: unknown[] = [];
+  await page.route("**/api/v1/workspaces/alpha/chat**", async (route) => {
+    const req = route.request();
+    if (req.method() === "POST") {
+      posted.push(req.postDataJSON());
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    await route.fulfill({
+      json: {
+        cost_usd: 0,
+        session_id: "s-1",
+        started_at: at,
+        state: "replying",
+        tools: "full",
+        messages: [
+          {
+            activity: [
+              { id: "a", tool: "Read", target: "docs/a.md", state: "ok" },
+              { id: "b", tool: "Bash", target: "make gate", state: "error" },
+              { id: "c", tool: "Grep", target: "再送", state: "running" },
+            ],
+            body: "選んでください。",
+            cost_usd: 0,
+            created_at: at,
+            id: 2,
+            role: "orchestrator",
+            state: "replying",
+            viewing: null,
+            prompts: [
+              {
+                id: 52,
+                kind: "question",
+                state: "pending",
+                tool: "AskUserQuestion",
+                target: null,
+                questions: [
+                  {
+                    question,
+                    multi_select: true,
+                    options: [
+                      { label: "試験", description: "" },
+                      { label: "文書", description: "" },
+                    ],
+                  },
+                ],
+                answer: null,
+                created_at: at,
+                answered_at: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+  await page.goto("/?mock=chat-http");
+  const panel = page.getByTestId("chat-panel");
+  const activity = panel.getByTestId("chat-activity");
+  await activity.getByText("使った道具（3 件）").click();
+  await expect(activity.getByRole("listitem")).toHaveText([
+    "Read docs/a.md 成功",
+    "Bash make gate 失敗",
+    "Grep 再送 実行中",
+  ]);
+  await expect(panel.getByTestId("chat-tools")).toHaveCount(0);
+  await expect(panel).not.toContainText("すべての道具を許可しています");
+
+  const prompt = panel.getByTestId("chat-prompt");
+  await expect(prompt.getByRole("checkbox")).toHaveCount(2);
+  await expect(
+    prompt.getByRole("textbox", { name: `選択肢に無い答え: ${question}` }),
+  ).toBeVisible();
+  const submit = prompt.getByRole("button", { name: "送る" });
+  await expect(submit).toBeDisabled();
+  await prompt.getByRole("checkbox", { name: "文書" }).check();
+  await prompt.getByRole("checkbox", { name: "試験" }).check();
+  await submit.click();
+  await expect
+    .poll(() => posted)
+    .toEqual([{ answers: { [question]: "試験, 文書" } }]);
 });
