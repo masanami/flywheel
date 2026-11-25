@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -739,6 +740,27 @@ func TestChat_EngineUnavailableIs503WithoutRows(t *testing.T) {
 	if chatCount(t, ws, "sessions") != 0 || inv.starts() != 0 {
 		t.Error("the refused message left a session or started the engine")
 	}
+}
+
+// Available の後・起動の前に実行エンジンが使えなくなったときも、503 で engine_unavailable を返す。行は作った後なので、
+// 返事は failed で終わる（次の発言は受けられ、一時のディレクトリは残らない）。
+func TestChat_EngineLostBeforeStartIs503AndTheReplyFailed(t *testing.T) {
+	e := newChatEnv(t)
+	var dir string
+	e.inv.startErr = fmt.Errorf("launch: %w", core.ErrChatEngineNotFound)
+	e.inv.onStart = func(in core.ChatStartInput) { dir = pathHead(in.Env) }
+	code, body := sendChat(t, e.port, "x")
+	if code != 503 || !strings.Contains(body, CodeEngineUnavailable) {
+		t.Fatalf("%d %s", code, body)
+	}
+	if r := lastReply(waitReply(t, e.port)); r.State != "failed" {
+		t.Errorf("reply = %+v", r)
+	}
+	if _, err := os.Stat(dir); dir == "" || !os.IsNotExist(err) {
+		t.Errorf("PATH directory %q remains: %v", dir, err)
+	}
+	e.inv.startErr = nil
+	e.send(t, 0, "again")
 }
 
 // 無くした項目が残る宣言では、起動したままのプロセスがあっても発言を受けない。

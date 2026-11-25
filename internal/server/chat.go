@@ -135,6 +135,12 @@ func chatMessagesHandler(c *chatRunner) http.HandlerFunc {
 		if err := c.deliver(a, name, workDir, inv, turn, core.ChatUtterance{Text: req.Text, Viewing: turn.Viewing}); err != nil {
 			// 発言は記録した後なので、返事を失敗として終える。
 			c.finishReply(a, name, turn.ReplyMessageID, core.ChatStateFailed, nil)
+			// Available の後・起動の前に実行エンジンが使えなくなったときは、使えない旨を伝える（行は作った後で、
+			// 取り消す口は無いので、返事の行は failed で残る）。
+			if errors.Is(err, core.ErrChatEngineNotFound) {
+				writeError(w, http.StatusServiceUnavailable, CodeEngineUnavailable, err.Error())
+				return
+			}
 		}
 		writeJSON(w, http.StatusOK, view.ChatPostResponse{ID: turn.OwnerMessageID})
 	}
