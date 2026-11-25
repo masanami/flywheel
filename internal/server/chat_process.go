@@ -246,28 +246,30 @@ func (c *chatRunner) stopProcess(ctx context.Context, a *chatAgent, p *chatProce
 // 返事の合間に届いた発言と道具の使用は、結び付ける返事が無いので書かない。
 func (c *chatRunner) events(a *chatAgent, p *chatProcess) core.ChatConversationEvents {
 	bg := context.Background()
-	// write は進行中の返事があるときだけ書く。
-	write := func(fn func(st *core.Store, replyID int64)) {
+	// write は進行中の返事があるときだけ書く。ストアが混んでいる（ErrStoreBusy）ときだけ、短く間を置いてやり直す
+	// （ほかの誤りはやり直さない）。実行エンジンは途中の分を 1 つずつ呼ぶので、やり直しの間に次の分は書かれず、
+	// 順は崩れない。
+	write := func(fn func(st *core.Store, replyID int64) error) {
 		a.mu.Lock()
 		replyID := p.replyID
 		a.mu.Unlock()
 		if replyID == 0 {
 			return
 		}
-		c.withStore(p.name, func(st *core.Store) { fn(st, replyID) })
+		_ = c.writeWithRetry(p.name, func(st *core.Store) error { return fn(st, replyID) })
 	}
 	return core.ChatConversationEvents{
 		Started: func() {
-			c.withStore(p.name, func(st *core.Store) { _ = st.MarkChatEngineStarted(bg, p.sessionID) })
+			_ = c.writeWithRetry(p.name, func(st *core.Store) error { return st.MarkChatEngineStarted(bg, p.sessionID) })
 		},
 		Speech: func(text string) {
-			write(func(st *core.Store, id int64) { _ = st.AppendChatSpeech(bg, id, text) })
+			write(func(st *core.Store, id int64) error { return st.AppendChatSpeech(bg, id, text) })
 		},
 		ToolStarted: func(use core.ChatToolUse) {
-			write(func(st *core.Store, id int64) { _ = st.StartChatTool(bg, id, use) })
+			write(func(st *core.Store, id int64) error { return st.StartChatTool(bg, id, use) })
 		},
 		ToolFinished: func(toolUseID string, ok bool) {
-			write(func(st *core.Store, id int64) { _ = st.FinishChatTool(bg, id, toolUseID, ok) })
+			write(func(st *core.Store, id int64) error { return st.FinishChatTool(bg, id, toolUseID, ok) })
 		},
 		Prompt:          func(req core.ChatPromptRequest) { c.prompt(a, p, req) },
 		PromptCancelled: func(requestID string) { c.promptCancelled(a, p, requestID) },
@@ -285,19 +287,21 @@ func (c *chatRunner) prompt(a *chatAgent, p *chatProcess, req core.ChatPromptReq
 	replyID := p.replyID
 	a.mu.Unlock()
 	if replyID != 0 {
-		c.withStore(p.name, func(st *core.Store) {
-			if _, err := st.RecordChatPrompt(context.Background(), replyID, req); err != nil {
-				// 記録できない確認には画面から答えられないので、断って実行エンジンを待たせない。
-				_ = deny(p, req)
-			}
+		err := c.writeWithRetry(p.name, func(st *core.Store) error {
+			_, err := st.RecordChatPrompt(context.Background(), replyID, req)
+			return err
 		})
+		if err != nil {
+			// 記録できない確認には画面から答えられないので、断って実行エンジンを待たせない。
+			_ = deny(p, req)
+		}
 		return
 	}
 	if err := deny(p, req); err != nil {
 		return // 送れなかった答えは記録しない
 	}
-	c.withStore(p.name, func(st *core.Store) {
-		_ = st.RecordDeniedChatPrompt(context.Background(), p.sessionID, req, chatBetweenRepliesDenyMessage)
+	_ = c.writeWithRetry(p.name, func(st *core.Store) error {
+		return st.RecordDeniedChatPrompt(context.Background(), p.sessionID, req, chatBetweenRepliesDenyMessage)
 	})
 }
 
@@ -380,21 +384,23 @@ func (c *chatRunner) answerPrompt(ctx context.Context, a *chatAgent, name string
 	})
 }
 
-// writeWithRetry はストアを借りて書く。ほかの書き込みとぶつかったときは、短く間を置いて数回やり直す。
+// writeWithRetry はストアを借りて書く。ほかの書き込みとぶつかったとき（ErrStoreBusy）だけ、短く間を置いて数回
+// やり直す。ほかの誤りと、ストアを借りられない誤りは、やり直さずに返す。
 func (c *chatRunner) writeWithRetry(name string, fn func(st *core.Store) error) error {
 	var err error
 	for attempt := 0; attempt < chatWriteAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(chatWriteRetryWait)
+		}
 		st, release, le := c.fleet.Acquire(context.Background(), name)
 		if le != nil {
-			err = le
-		} else {
-			err = fn(st)
-			release()
-			if !errors.Is(err, core.ErrStoreBusy) {
-				return err
-			}
+			return le
 		}
-		time.Sleep(chatWriteRetryWait)
+		err = fn(st)
+		release()
+		if !errors.Is(err, core.ErrStoreBusy) {
+			return err
+		}
 	}
 	return err
 }

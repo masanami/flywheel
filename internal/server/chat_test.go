@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -761,6 +763,117 @@ func TestChat_EngineLostBeforeStartIs503AndTheReplyFailed(t *testing.T) {
 	}
 	e.inv.startErr = nil
 	e.send(t, 0, "again")
+}
+
+// holdStoreBusy は、ストアの書き込みのロックを、書き込みの待ちの上限（5 秒）を超える間だけ別の接続で握り、
+// その間に fn（途中の分を流す）を呼ぶ。fn が戻るのは、握りを離した後。
+func holdStoreBusy(t *testing.T, ws string, fn func()) {
+	t.Helper()
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+	held := make(chan int, 1)
+	go func() {
+		code := coretest.HoldRawWriteLock(filepath.Join(ws, ".flywheel", "flywheel.db"), stdinR, stdoutW, io.Discard)
+		_ = stdoutW.Close()
+		held <- code
+	}()
+	if line, err := bufio.NewReader(stdoutR).ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("the write lock was not taken: %q %v", line, err)
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); fn() }()
+	time.Sleep(5500 * time.Millisecond) // busy_timeout（5 秒）を超える
+	_ = stdinW.Close()
+	<-done
+	if code := <-held; code != 0 {
+		t.Fatalf("holding the write lock failed: %d", code)
+	}
+}
+
+// ストアが一時的に混んでいて最初の書き込みが ErrStoreBusy で失敗しても、途中の分（会話の始まり・発言・道具・確認）は
+// 失われず、順も崩れない。
+func TestChat_BusyStoreDoesNotLoseTheMiddleOfAReply(t *testing.T) {
+	t.Run("started", func(t *testing.T) {
+		t.Parallel()
+		e := newChatEnv(t)
+		conv := e.send(t, 0, "x")
+		holdStoreBusy(t, e.ws, conv.started)
+		e.post(t, "/stop", 204)
+		if next := e.send(t, 1, "y"); !next.in.Resume {
+			t.Errorf("restart input = %+v, want resume (the started line was lost)", next.in)
+		}
+	})
+	t.Run("speech in order", func(t *testing.T) {
+		t.Parallel()
+		e := newChatEnv(t)
+		conv := e.send(t, 0, "x")
+		holdStoreBusy(t, e.ws, func() { conv.speech("一つ目"); conv.speech("二つ目") })
+		if r := lastReply(getChat(t, e.port)); r.Body != "一つ目\n\n二つ目" {
+			t.Errorf("body = %q", r.Body)
+		}
+	})
+	t.Run("tool start and finish", func(t *testing.T) {
+		t.Parallel()
+		e := newChatEnv(t)
+		conv := e.send(t, 0, "x")
+		holdStoreBusy(t, e.ws, func() {
+			conv.emit(func(ev core.ChatConversationEvents) {
+				ev.ToolStarted(core.ChatToolUse{ID: "t1", Tool: "Bash", Target: "ls"})
+			})
+			conv.emit(func(ev core.ChatConversationEvents) { ev.ToolFinished("t1", true) })
+		})
+		if r := lastReply(getChat(t, e.port)); len(r.Activity) != 1 || r.Activity[0].State != "ok" {
+			t.Errorf("activity = %+v", r.Activity)
+		}
+	})
+	t.Run("prompt in a reply", func(t *testing.T) {
+		t.Parallel()
+		e := newChatEnv(t)
+		conv := e.send(t, 0, "x")
+		holdStoreBusy(t, e.ws, func() { conv.prompt(permissionPrompt("r1")) })
+		if p := onlyPrompt(t, e.port); p.State != "pending" {
+			t.Errorf("prompt = %+v", p)
+		}
+		noEngineAnswer(t, conv)
+	})
+	t.Run("denied prompt between replies", func(t *testing.T) {
+		t.Parallel()
+		e := newChatEnv(t)
+		conv := e.send(t, 0, "x")
+		conv.reply(core.ChatStateDone, nil)
+		holdStoreBusy(t, e.ws, func() { conv.prompt(permissionPrompt("r1")) })
+		if p := onlyPrompt(t, e.port); p.State != "denied" {
+			t.Errorf("prompt = %+v", p)
+		}
+	})
+}
+
+// 書き込みのやり直しは ErrStoreBusy のときだけ。ほかの誤りと、ストアを借りられない誤りはやり直さない。
+func TestChat_WriteWithRetryRetriesOnlyStoreBusy(t *testing.T) {
+	c := newChatEnv(t).s.chat
+	boom := errors.New("boom")
+	calls := 0
+	if err := c.writeWithRetry("w", func(*core.Store) error { calls++; return boom }); err != boom || calls != 1 {
+		t.Errorf("other error: err = %v, calls = %d, want 1 call", err, calls)
+	}
+	calls = 0
+	if err := c.writeWithRetry("w", func(*core.Store) error {
+		calls++
+		if calls < 3 {
+			return core.ErrStoreBusy
+		}
+		return nil
+	}); err != nil || calls != 3 {
+		t.Errorf("busy then ok: err = %v, calls = %d, want 3 calls", err, calls)
+	}
+	calls = 0
+	if err := c.writeWithRetry("w", func(*core.Store) error { calls++; return core.ErrStoreBusy }); !errors.Is(err, core.ErrStoreBusy) || calls != chatWriteAttempts {
+		t.Errorf("always busy: err = %v, calls = %d, want %d calls", err, calls, chatWriteAttempts)
+	}
+	start := time.Now()
+	if err := c.writeWithRetry("nope", func(*core.Store) error { calls = -1; return nil }); err == nil || calls == -1 || time.Since(start) > chatWriteRetryWait {
+		t.Errorf("unknown workspace: err = %v, calls = %d, took %v, want an immediate error", err, calls, time.Since(start))
+	}
 }
 
 // 無くした項目が残る宣言では、起動したままのプロセスがあっても発言を受けない。
