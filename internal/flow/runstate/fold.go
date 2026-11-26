@@ -1,6 +1,7 @@
 package runstate
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -79,7 +80,8 @@ type Unit struct {
 	// Workspace は unit の作業ツリー（§4.1。workspace 種類の acquire で入り、release で Released になる）と PR。
 	Workspace *Workspace `json:"workspace,omitempty"`
 	// Facts は facts の名前ごとの値: 並べた段のうち最後に成功して終わり、その欄を返した段の値（接続契約の facts の元）。
-	// 欄を返さなかった段は値を置き換えない。
+	// 文字列の欄は、欄を返さなかった段は値を置き換えない。配列の欄は、並べた段が成功して終わったのに配列を返さなければ
+	// 値なしにする（updateFacts）。
 	Facts map[string]string `json:"facts,omitempty"`
 }
 
@@ -776,38 +778,68 @@ func applyIntegrationOutside(s *State, u *Unit, p *WorkspaceEvent, seq int) erro
 	return nil
 }
 
-// updateFacts は、成功して終わった段 step の出力が、facts の宣言にある欄（文字列）を返していれば、その名前の値を置き換える。
-// 欄が無い・文字列でない出力は何も変えない（前の値のまま）。
+// updateFacts は、成功して終わった段 step の出力で、facts の宣言にある名前の値を更新する。
+// 文字列の欄は、出力がその欄を文字列で返していれば値を置き換え、無い・文字列でなければ何も変えない（前の値のまま）。
+// 配列の欄は、出力がその欄を配列で返していれば JSON の文字列にして置き換え、null・欠けている・配列でなければ
+// 値なしにする（前の値も残さない）。
 func (u *Unit) updateFacts(decl map[string][]FactSource, step string, output json.RawMessage) {
-	if len(decl) == 0 {
-		return
-	}
-	var doc any
 	for name, sources := range decl {
+		var value *string
+		drop := false
 		for _, src := range sources {
 			if src.Step != step {
 				continue
 			}
-			if doc == nil {
-				if err := json.Unmarshal(output, &doc); err != nil {
-					return
+			raw := outputField(output, src.Field)
+			if src.Array {
+				if str, ok := arrayFact(raw); ok {
+					value = &str
+				} else {
+					drop = true
 				}
+				continue
 			}
-			cur := doc
-			for _, k := range src.Field {
-				m, ok := cur.(map[string]any)
-				if !ok {
-					cur = nil
-					break
+			var v any
+			if json.Unmarshal(raw, &v) == nil {
+				if str, ok := v.(string); ok {
+					value = &str
 				}
-				cur = m[k]
-			}
-			if str, ok := cur.(string); ok {
-				if u.Facts == nil {
-					u.Facts = map[string]string{}
-				}
-				u.Facts[name] = str
 			}
 		}
+		switch {
+		case value != nil:
+			if u.Facts == nil {
+				u.Facts = map[string]string{}
+			}
+			u.Facts[name] = *value
+		case drop:
+			delete(u.Facts, name)
+		}
 	}
+}
+
+// outputField は出力の入れ子のパス path の値を、出力に書かれた順のまま返す。無ければ nil。
+func outputField(output json.RawMessage, path []string) json.RawMessage {
+	cur := output
+	for _, k := range path {
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(cur, &m); err != nil {
+			return nil
+		}
+		cur = m[k]
+	}
+	return cur
+}
+
+// arrayFact は配列の値を encoding/json の既定の直列化（空白なし・要素とキーは出力の順）の文字列にする。
+// 配列でなければ偽。
+func arrayFact(raw json.RawMessage) (string, bool) {
+	if t := bytes.TrimSpace(raw); len(t) == 0 || t[0] != '[' {
+		return "", false
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return "", false
+	}
+	return string(b), true
 }

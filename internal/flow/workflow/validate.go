@@ -118,8 +118,8 @@ func (v *validator) stepKind(s *Step) {
 	}
 }
 
-// factDecls は最上位の facts の参照を検査する: 段が在ること、その欄が段の出力スキーマにある文字列であること。
-// 値は「並べた段のうち最後に成功し、その欄を返した段」なので、段が必ず通る経路上に在る必要は無い（検査しない）。
+// factDecls は最上位の facts の参照を検査する: 段が在ること、その欄が段の出力スキーマにある文字列か配列であること。
+// 値は並べた段のうち後から成功して終わった段が決める（欄を返さないときの扱いは runstate の updateFacts）ので、段が必ず通る経路上に在る必要は無い（検査しない）。
 func (v *validator) factDecls() {
 	for _, d := range v.wf.Facts {
 		for _, r := range d.Refs {
@@ -133,13 +133,13 @@ func (v *validator) factDecls() {
 				v.errf(d.Line, "%s: step %q has no output schema", what, src.ID)
 				continue
 			}
-			t, err := src.OutputSchema.FieldType(r.Path)
+			t, err := src.OutputSchema.FieldTypeName(r.Path)
 			if err != nil {
 				v.errf(d.Line, "%s: %v", what, err)
 				continue
 			}
-			if t == nil || t.Name != "string" {
-				v.errf(d.Line, "%s is %s; a fact value must be a string field", what, t)
+			if t != "string" && t != "array" {
+				v.errf(d.Line, "%s is %s; a fact value must be a string or array field", what, t)
 			}
 		}
 	}

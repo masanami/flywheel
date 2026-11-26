@@ -207,7 +207,7 @@ const ModelRefPrefix = "$models."
 // EffortRefPrefix は llm ステップの effort に書ける参照の接頭辞（$efforts.<名前>）。
 const EffortRefPrefix = "$efforts."
 
-// FactDecl は facts の 1 行。Refs は $steps.<段>.<欄> だけ（読み込みで、段が在り、欄が出力スキーマの文字列であることを検査する）。
+// FactDecl は facts の 1 行。Refs は $steps.<段>.<欄> だけ（読み込みで、段が在り、欄が出力スキーマの文字列か配列であることを検査する）。
 type FactDecl struct {
 	Name string
 	Refs []*Ref
@@ -292,6 +292,8 @@ type Step struct {
 	// AddDirs は claude の --add-dir へ渡すフォルダ（作業ディレクトリの外のファイルを読ませる。§5.6.2）。
 	// 値は参照かリテラルの文字列。解決した値が空の文字列なら渡さない。
 	AddDirs []*Binding
+	// Tools は llm ステップが使える組み込みの道具の名前。nil なら絞らない（起動の引数に --tools を足さない）。
+	Tools []string
 	// Model は model: $models.<名前> の <名前>（モデルの変数。書かなければ空で、claude に --model を渡さない）。
 	Model string
 	// Effort は effort: $efforts.<名前> の <名前>（effort の変数。書かなければ空で、claude に --effort を渡さない）。

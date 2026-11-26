@@ -50,6 +50,7 @@ var (
 	reOutcome  = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)       // outcome の値
 	reAction   = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)       // pull-request・workspace の action の値（ensure-base のようにハイフンを含みうる）
 	reScript   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)     // command の run（スクリプト名）
+	reToolName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`) // llm の tools の道具の名前
 	reRefInput = regexp.MustCompile(`^\$inputs\.([A-Za-z_][A-Za-z0-9_]*)$`)
 	reRefStep  = regexp.MustCompile(`^\$steps\.([a-z][a-z0-9-]*)((?:\.[A-Za-z_][A-Za-z0-9_]*)+)$`)
 	reRefEdge  = regexp.MustCompile(`^\$edge\.([A-Za-z_][A-Za-z0-9_]*)$`)
@@ -74,7 +75,7 @@ type kindSpec struct {
 // 種類を足すときは、ここと engine の実行器の両方に足す。
 var kinds = map[string]kindSpec{
 	"command": {keys: []string{"kind", "description", "run", "with", "output", "outcome_field", "exit", "timeout", "on"}},
-	"llm":     {keys: []string{"kind", "description", "prompt", "agent", "model", "effort", "session", "add_dirs", "with", "output", "budget_usd", "timeout", "on"}},
+	"llm":     {keys: []string{"kind", "description", "prompt", "agent", "model", "effort", "session", "add_dirs", "tools", "with", "output", "budget_usd", "timeout", "on"}},
 	"gate":    {keys: []string{"kind", "description", "type", "decider", "requested_action", "inputs", "observe", "contract_kind", "refresh", "with", "on"}},
 	// select は参照 1 つの enum 値をそのまま outcome にする（副作用なし）。with・output は持たない。
 	"select": {keys: []string{"kind", "description", "value", "on"}},
@@ -671,6 +672,10 @@ func (p *parser) step(id string, knode, n *yaml.Node) *Step {
 			}
 		case "add_dirs":
 			s.AddDirs = p.valueList(f.val, fw)
+		case "tools":
+			if s.Kind == "llm" {
+				s.Tools = p.toolList(f.val, fw)
+			}
 		case "session":
 			if str, ok := p.str(f.val, fw); ok {
 				switch {
@@ -753,6 +758,36 @@ func (p *parser) outcomeList(n *yaml.Node, what string) []string {
 			continue
 		}
 		v, ok := p.matched(it, what+" item", reOutcome)
+		if !ok {
+			continue
+		}
+		if seen[v] {
+			p.errf(it, "%s: duplicate value %q", what, v)
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
+// toolList は llm ステップの tools（道具の名前の並び。1 件以上）を読む。名前はカンマでつないで起動の引数にするので、
+// 区切りや引数と読める文字は受け付けない。
+func (p *parser) toolList(n *yaml.Node, what string) []string {
+	if !p.plain(n, what) {
+		return nil
+	}
+	if n.Kind != yaml.SequenceNode || len(n.Content) == 0 {
+		p.errf(n, "%s must be a non-empty list of tool names", what)
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, it := range n.Content {
+		if !p.plain(it, what) {
+			continue
+		}
+		v, ok := p.matched(it, what+" item", reToolName)
 		if !ok {
 			continue
 		}
