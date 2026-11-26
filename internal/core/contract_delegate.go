@@ -222,6 +222,9 @@ type ContractStartInput struct {
 	Judgment JudgmentInvoker
 	// TaskID は起動するタスクの内部整数 ID。0 なら、起動できるタスクがちょうど 1 個の課題として、そのタスクを起動する。
 	TaskID int64
+	// SpecDraft は、起動するタスクを選ぶときに読み直した仕様の下書きの全文。下書きをリポジトリへ入れるタスクの文面の
+	// ファイルの最後に足す（そのタスクで空なら、起動しない）。
+	SpecDraft string
 	// RunRecording は start の run をストアに記録する区間。非 nil なら、StartContractDelegation が区間に入り、run の記録を
 	// ちょうど 1 回行い、成功したら確定を知らせてから区間を出る（nil なら区間なしで記録する）。
 	// 同時委譲数の許可の数えは、ストアの run の数と、記録前の許可の数の和なので、記録の確定から許可の数の解放までの間に
@@ -693,6 +696,17 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 			doc, err := loadTaskDocument(ctx, tx, cid, plan, task)
 			if err != nil {
 				return err
+			}
+			// 一覧の壊れた計画は、上の文面の組み立てが断っている。
+			list, err := loadPlanAcceptanceCriteria(plan.Spec)
+			if err != nil {
+				return err
+			}
+			if landsSpecDraft(list, task) {
+				if in.SpecDraft == "" {
+					return fmt.Errorf("%w: the task %s lands the spec draft but the draft text is not given", ErrValidation, task.ID)
+				}
+				doc = appendSpecDraftToTaskDocument(doc, in.SpecDraft)
 			}
 			taskText = doc
 		}

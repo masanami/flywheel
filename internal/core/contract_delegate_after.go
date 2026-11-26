@@ -767,7 +767,7 @@ func (s *Store) delegateViaContract(ctx context.Context, in DelegateInput, jc *J
 	rep, err := s.StartContractDelegation(ctx, ContractStartInput{
 		ChallengeID: dc.Challenge.ID, ConnectorID: dc.Connector.ID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl,
 		Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile, MaxBudgetUSD: microsToUSD(dc.ImplBudgetMicros + dc.ReviewBudgetMicros), Judgment: in.Judgment, RunRecording: recording,
-		TaskID: taskIntID(&dc.Task),
+		TaskID: taskIntID(&dc.Task), SpecDraft: dc.SpecDraft,
 	})
 	if err != nil {
 		if jc != nil && errors.Is(err, ErrBudgetExceeded) {

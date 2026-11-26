@@ -240,7 +240,7 @@ func TestHoldScope_AC36_TasksBlockedIsNotRaisedWhileATaskHoldIsOpen(t *testing.T
 	blocked := func() int {
 		var n int
 		if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
-			out, err := selectDelegationTargetsFor(context.Background(), tx, f.conn)
+			out, err := selectDelegationTargetsFor(context.Background(), tx, "", f.conn)
 			n = len(out.Blocked)
 			return err
 		}); err != nil {
@@ -304,7 +304,7 @@ func TestHoldScope_SelectLaunchTasksKeepsTheNotStartedReasonWhenAllTasksAreHeld(
 	var sel *launchSelection
 	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) error {
 		var err error
-		sel, err = selectLaunchTasks(context.Background(), tx, nil, f.id, cid)
+		sel, err = selectLaunchTasks(context.Background(), tx, "", nil, f.id, cid)
 		return err
 	}); err != nil {
 		t.Fatal(err)

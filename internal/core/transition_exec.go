@@ -147,6 +147,10 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 	if err != nil {
 		return nil, err
 	}
+	// 完了・取り下げへ進む遷移は、すべてここを通る（transitionInTx を直接呼ぶ経路は、終端の状態へ進まない）。
+	if result.Status == StatusDone || result.Status == StatusWithdrawn {
+		s.cleanupSpecDraft(ctx, cid, p.actor)
+	}
 	return result, nil
 }
 
