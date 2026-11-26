@@ -541,7 +541,7 @@ func TestFlowLaunch_AC145_J2TaskFieldsHaveNoModel(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{"body", "budget_impl_usd", "budget_review_usd", "depends_on", "done_criteria", "expand_after", "key", "non_goals", "operation", "repo", "source", "title"}
-	want = append(want, "flow_reason", "covers")
+	want = append(want, "flow_reason", "covers", "lands_spec")
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("task fields = %v, want %v", got, want)

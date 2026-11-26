@@ -66,6 +66,8 @@ type TaskInput struct {
 	FlowReason  string
 	// Covers は受け持つ受入基準の識別（task.covers。空は NULL）。
 	Covers []string
+	// LandsSpec は仕様の下書きをリポジトリへ入れるタスクか（task.lands_spec）。
+	LandsSpec bool
 }
 
 // Task はタスク 1 件（前提のタスクの ID つき）。ID・DependsOn の要素は表示形（"T-<n>"）、ChallengeID は "C-<n>"。
@@ -208,12 +210,12 @@ func createTasksWith(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cha
 		}
 		plannedFlow, flowReason := plannedFlowColumns(t.PlannedFlow, t.FlowReason)
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id, planned_flow, flow_reason, covers)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id, planned_flow, flow_reason, covers, lands_spec)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			challengeID, planVersion, nullableTextColumn(t.Key), t.Title, t.Body, t.DoneCriteria, nonGoals, t.Repo, t.Operation,
 			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr,
 			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros), t.ExpandAfter, int64PtrColumn(opts.AdditionID),
-			plannedFlow, flowReason, covers)
+			plannedFlow, flowReason, covers, t.LandsSpec)
 		if store.IsUniqueViolation(err) {
 			return nil, errDuplicateTaskKey
 		}

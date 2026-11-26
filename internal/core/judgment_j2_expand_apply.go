@@ -53,6 +53,9 @@ type j2ExpandValidationContext struct {
 	Criteria *planAcceptanceCriteria
 	// SkipFlowReason は保存済みの足す依頼の spec を回答の段で検査し直すときに真（flow_reason の検査をしない。j2ValidationContext と同じ）。
 	SkipFlowReason bool
+	// CheckSpecLanding が真のとき（出力の確定だけが立てる）、下書きをリポジトリへ入れると書いたタスクを不正にする
+	// （足す形のタスクは下書きを入れない）。
+	CheckSpecLanding bool
 }
 
 // validateJ2ExpandOutput は「足す」の形の出力を検査する。次のいずれかで ok=false:
@@ -154,6 +157,9 @@ func validateJ2ExpandOutputReason(data []byte, vc j2ExpandValidationContext) (*j
 		if reason := checkTaskCovers(i, jt.Covers, knownCriteria(vc.Criteria)); reason != "" {
 			return nil, reason
 		}
+		if vc.CheckSpecLanding && jt.LandsSpec {
+			return nil, fmt.Sprintf("tasks[%d]: %s", i, specLandingUnexpected)
+		}
 		v.Tasks = append(v.Tasks, jt)
 	}
 	spec, err := json.Marshal(in)
@@ -239,6 +245,7 @@ func (s *Store) finalizeJ2ExpandOutput(ctx context.Context, in J2AutoInput, runI
 		if err := vc.useAdditionOrigin(ctx, tx, additionID); err != nil {
 			return err
 		}
+		vc.CheckSpecLanding = true
 		v, reason := validateJ2ExpandOutputReason(structuredOutput, vc.j2ExpandValidationContext)
 		if reason != "" {
 			invalidReason = reason
