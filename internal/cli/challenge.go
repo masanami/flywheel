@@ -17,6 +17,7 @@ func runCreate(a Args) (any, error) {
 		Title:        a.Values["title"],
 		Description:  a.Values["description"],
 		DoneCriteria: a.Values["done-criteria"],
+		Spec:         a.Values["spec"],
 	}
 	if v, ok := a.Values["urgency"]; ok {
 		in.Urgency = &v
@@ -122,6 +123,7 @@ func runEdit(a Args) (any, error) {
 		{"actual", &in.Actual},
 		{"non-goals", &in.NonGoals},
 		{"figure", &in.Figure},
+		{"spec", &in.Spec},
 	}
 	specified := false
 	for _, t := range targets {
@@ -131,7 +133,7 @@ func runEdit(a Args) (any, error) {
 		}
 	}
 	if !specified {
-		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency / --headline / --context / --expected / --actual / --non-goals / --figure のいずれか1つ以上を指定してください")
+		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency / --headline / --context / --expected / --actual / --non-goals / --figure / --spec のいずれか1つ以上を指定してください")
 	}
 
 	c, err := a.Store.EditChallenge(context.Background(), core.ChannelCLI, a.Positional[0], in)
@@ -219,6 +221,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	fmt.Fprintf(&b, "優先度:        %s\n", textOrDash(nilableString(vc.Priority)))
 	fmt.Fprintf(&b, "説明:          %s\n", c.Description)
 	fmt.Fprintf(&b, "完了条件:      %s\n", c.DoneCriteria)
+	if c.SpecPath != nil {
+		fmt.Fprintf(&b, "仕様の文書の場所: %s\n", escapeControl(*c.SpecPath))
+	}
 	fmt.Fprintf(&b, "作成:          %s\n", FormatTimestamp(c.CreatedAt))
 	fmt.Fprintf(&b, "更新:          %s\n", FormatTimestamp(c.UpdatedAt))
 	deps := make([]string, 0, len(d.Dependencies))

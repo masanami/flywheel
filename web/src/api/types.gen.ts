@@ -286,6 +286,7 @@ export interface ShowChallenge {
   priority: string | null;
   reporter: string;
   spec_cost_usd: number;
+  spec_path: string | null;
   status: string;
   status_label: string;
   title: string;
@@ -536,6 +537,7 @@ export interface Task {
   body: string;
   budget_impl_usd: number;
   budget_review_usd: number;
+  covers: string[];
   delegate: TaskDelegate | null;
   depends_on: string[];
   done_criteria: string;
