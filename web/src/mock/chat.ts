@@ -363,6 +363,7 @@ export function chatMock(ctx: MockContext) {
     return {
       chat_sessions: linked,
       spec_cost_usd: linked.reduce((sum, s) => sum + s.cost_usd, 0),
+      spec_draft: null,
     };
   };
 

@@ -287,6 +287,7 @@ export interface ShowChallenge {
   reporter: string;
   spec_base_path: string | null;
   spec_cost_usd: number;
+  spec_draft: SpecDraft | null;
   spec_is_draft: boolean;
   spec_path: string | null;
   status: string;
@@ -316,6 +317,44 @@ export interface Dependency {
 export interface ImprovementKey {
   layer: string;
   target: string;
+}
+
+export interface SpecDraft {
+  answers: SpecDraftAnswer[];
+  attempts: number;
+  base_path: string | null;
+  hold_id: string | null;
+  hold_reason: string | null;
+  max_attempts: number;
+  path: string;
+  questions: SpecDraftQuestion[];
+  reason: string;
+  repo: string;
+  state: string;
+}
+
+export interface SpecDraftAnswer {
+  answer: string;
+  attempt: number;
+  basis: SpecDraftBasis[];
+  by: string;
+  question: string;
+}
+
+export interface SpecDraftBasis {
+  locator: string;
+  path: string;
+}
+
+export interface SpecDraftQuestion {
+  options: SpecDraftOption[];
+  question: string;
+  reason: string;
+  recommended: number;
+}
+
+export interface SpecDraftOption {
+  label: string;
 }
 
 export interface PassedConflictFix {

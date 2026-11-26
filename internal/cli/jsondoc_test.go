@@ -173,7 +173,25 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addCoreRedesignS2aShowShape(t, &doc)
 	addChatSessionShape(t, &doc)
 	addRequestToPlanShape(t, &doc)
+	addSpecDraftRecordShape(t, &doc)
 	return doc
+}
+
+// addSpecDraftRecordShape は下書きづくり（request-to-plan-s2b.md の記録と表示）が `show --json` の challenge に足した
+// キーを doc へ合成する。文書の記述が消えたらここで落ちる。
+func addSpecDraftRecordShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "request-to-plan-s2b.md"))
+	if err != nil {
+		t.Fatalf("read request-to-plan-s2b spec: %v", err)
+	}
+	if !strings.Contains(string(data), "下書きづくりの記録（`spec_draft`）を出す。記録が無ければ `null`。") {
+		t.Fatal("request-to-plan-s2b spec does not document spec_draft")
+	}
+	if len(doc.entity["show_challenge"]) == 0 {
+		t.Fatal("documented shape of show_challenge not found")
+	}
+	doc.entity["show_challenge"]["spec_draft"] = true
 }
 
 // addRequestToPlanShape は要求から計画まで（request-to-plan.md の画面・API設計）が `show --json` の challenge に足した

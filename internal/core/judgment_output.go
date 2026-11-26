@@ -38,17 +38,20 @@ var J1VerdictValues = []J1Verdict{J1VerdictMine, J1VerdictNotMine, J1VerdictUnce
 // J2Verdict は J2（計画）の判定の閉集合。
 type J2Verdict string
 
-// J2Verdict の3値。
+// J2Verdict の4値。
 const (
 	J2VerdictPlan      J2Verdict = "plan"
 	J2VerdictUncertain J2Verdict = "uncertain"
 	// J2VerdictParentDirect は、委譲の計画が立たず親が直接行うのが適切な課題（理由は question、
 	// 親が満たすべき達成条件は done_criteria）。種類 parent_direct の保留を立てる。
 	J2VerdictParentDirect J2Verdict = "parent_direct"
+	// J2VerdictNeedsSpec は、計画の前に仕様の下書きが要る課題（下書きづくりへ回す。対象と理由は spec_draft）。
+	// 計画を登録せず、下書きづくりの記録を作る。
+	J2VerdictNeedsSpec J2Verdict = "needs_spec"
 )
 
 // J2VerdictValues は J2Verdict の全値。
-var J2VerdictValues = []J2Verdict{J2VerdictPlan, J2VerdictUncertain, J2VerdictParentDirect}
+var J2VerdictValues = []J2Verdict{J2VerdictPlan, J2VerdictUncertain, J2VerdictParentDirect, J2VerdictNeedsSpec}
 
 // JudgmentSize は J1・J2 が出すサイズ案の閉集合（S|M|L。
 // .flywheel/agent.json の size_budgets_usd のキーと同じ3文字だが、後者は

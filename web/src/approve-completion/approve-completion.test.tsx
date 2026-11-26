@@ -169,6 +169,7 @@ function showBody(o: Over = {}) {
     reporter: "me",
     chat_sessions: [],
     spec_cost_usd: 0,
+    spec_draft: null,
     status,
     status_label: "",
     title: "題名",

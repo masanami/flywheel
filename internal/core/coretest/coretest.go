@@ -1180,6 +1180,8 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`INSERT INTO activity (at, actor, channel, verification, entity, entity_id, action, before, after, run_id)
 			  VALUES (?, 'tester', 'cli', 'none', 'challenge', 1, 'create', NULL, '{"title":"c1"}', 1)`, []any{at}},
 			{`INSERT INTO occurrence (challenge_id, activity_id, kind, outcome, source, created_at) VALUES (1, 1, 'completion_rejected', 'bad', 'core', ?)`, []any{at}},
+			{`INSERT INTO spec_draft (challenge_id, path, repo, reason, state, attempts, created_at, updated_at)
+			  VALUES (1, '.flywheel/specs/c-1.md', 'o/r', 'why', 'skipped', 1, ?, ?)`, []any{at, at}},
 		}
 		for _, s := range stmts {
 			if _, err := tx.Exec(s.q, s.args...); err != nil {

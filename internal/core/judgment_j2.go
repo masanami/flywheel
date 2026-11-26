@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -65,6 +66,15 @@ type j2RawOutput struct {
 	DeferredCriteria []j2RawDeferred `json:"deferred_criteria"`
 	// AcceptanceCriteria は core が spec へ書き足す欄で、判断点は書かない（受入基準を検査する出力に有れば不正）。
 	AcceptanceCriteria json.RawMessage `json:"acceptance_criteria,omitempty"`
+	// SpecDraft は下書きづくりへ回すときの欄（判定が needs_spec のとき必須。ほかの判定では省略か null）。
+	SpecDraft *j2SpecDraft `json:"spec_draft"`
+}
+
+// j2SpecDraft は出力の spec_draft。検査を通った値では、BasePath の空は nil、Reason は空白でない。
+type j2SpecDraft struct {
+	Repo     string  `json:"repo"`
+	BasePath *string `json:"base_path"`
+	Reason   string  `json:"reason"`
 }
 
 // j2RawTopic は J2 の出力の論点 1 つ（題名・どう決めたか・問い 0〜3 件）の生の形。
@@ -182,6 +192,8 @@ type j2ValidatedOutput struct {
 	DeferredCriteria []j2RawDeferred
 	// DoneSpecLanding は下書きを入れた済みのタスクの題名（無ければ nil）。計画の本文に出す。
 	DoneSpecLanding *string
+	// SpecDraft は needs_spec のときの下書きづくりの欄（検査済み）。
+	SpecDraft *j2SpecDraft
 }
 
 // soleTask は計画のタスクがちょうど 1 件のときそのタスクを返す。委譲（見直しの途中のつなぎ）は、
@@ -233,6 +245,11 @@ type j2ValidationContext struct {
 	DoneCovers map[string]bool
 	// DoneSpecLanding は下書きを入れた済みのタスク（計画の版と、統合先を使うかを問わない）の題名。無ければ nil。
 	DoneSpecLanding *string
+	// SpecDraftRepos は、課題を下書きづくりへ回せるときの、対象にできるリポジトリ。空なら回せず、needs_spec の出力は不正。
+	SpecDraftRepos []string
+	// SpecDraftLandingRepo は下書きづくりの記録が済みの課題の、記録の対象のリポジトリ（そうでなければ空）。空でなければ、
+	// 下書きをリポジトリへ入れるタスクのリポジトリはこれと同じでなければ不正。CheckCriteria が真のときだけ検査する。
+	SpecDraftLandingRepo string
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -353,6 +370,16 @@ func j2OutputSchema() []byte {
 		"maxItems": MaxNonGoals,
 		"items":    stageString,
 	}
+	specDraftSchema := map[string]any{
+		"type": []string{"object", "null"},
+		"properties": map[string]any{
+			"repo":      map[string]any{"type": "string"},
+			"base_path": map[string]any{"type": []string{"string", "null"}, "maxLength": maxSpecBasePathRunes},
+			"reason":    boundedString(MaxSpecDraftReasonRunes),
+		},
+		"required":             []string{"repo", "reason"},
+		"additionalProperties": false,
+	}
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -375,6 +402,7 @@ func j2OutputSchema() []byte {
 			"cross_repo":          map[string]any{"type": []string{"boolean", "null"}},
 			"related_repos":       stringArray,
 			"question":            nullableString,
+			"spec_draft":          specDraftSchema,
 		},
 		"required":             []string{"verdict"},
 		"additionalProperties": false,
@@ -547,7 +575,17 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 		return nil, j2ReasonBadShape
 	}
 
+	if J2Verdict(raw.Verdict) != J2VerdictNeedsSpec && raw.SpecDraft != nil {
+		return nil, "spec_draft must be omitted or null unless the verdict is needs_spec"
+	}
+
 	switch J2Verdict(raw.Verdict) {
+	case J2VerdictNeedsSpec:
+		out, reason := validateJ2SpecDraft(raw.SpecDraft, vc)
+		if reason != "" {
+			return nil, reason
+		}
+		return &j2ValidatedOutput{Verdict: J2VerdictNeedsSpec, SpecDraft: out}, ""
 	case J2VerdictUncertain:
 		if raw.Question == nil || strings.TrimSpace(*raw.Question) == "" {
 			return nil, "uncertain requires a non-blank question"
@@ -678,6 +716,13 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 		if reason := checkPlanSpecLanding(tasks, vc.Criteria, vc.DoneSpecLanding != nil); reason != "" {
 			return nil, reason
 		}
+		if vc.SpecDraftLandingRepo != "" {
+			for _, t := range tasks {
+				if t.LandsSpec && t.Repo != vc.SpecDraftLandingRepo {
+					return nil, "spec landing repo mismatch: the task that lands the spec draft must target the repo of the spec draft"
+				}
+			}
+		}
 	}
 	if vc.RecheckCriteria {
 		list, err := loadPlanAcceptanceCriteria(string(data))
@@ -735,6 +780,34 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 	}
 	v.CrossRepo = *raw.CrossRepo
 	return v, ""
+}
+
+// validateJ2SpecDraft は needs_spec の出力の spec_draft を検査する。
+func validateJ2SpecDraft(in *j2SpecDraft, vc j2ValidationContext) (*j2SpecDraft, string) {
+	if in == nil {
+		return nil, "needs_spec requires spec_draft"
+	}
+	if len(vc.SpecDraftRepos) == 0 {
+		return nil, "spec draft not available for this challenge"
+	}
+	if !slices.Contains(vc.SpecDraftRepos, in.Repo) {
+		return nil, "spec draft repo invalid"
+	}
+	out := &j2SpecDraft{Repo: in.Repo, Reason: in.Reason}
+	if in.BasePath != nil {
+		base, err := specBasePathValue(*in.BasePath)
+		if err != nil {
+			return nil, "spec draft base path invalid"
+		}
+		out.BasePath = base
+	}
+	if strings.TrimSpace(in.Reason) == "" {
+		return nil, "spec_draft.reason must not be blank"
+	}
+	if utf8.RuneCountInString(in.Reason) > MaxSpecDraftReasonRunes {
+		return nil, fmt.Sprintf("spec_draft.reason is longer than %d characters", MaxSpecDraftReasonRunes)
+	}
+	return out, ""
 }
 
 // validateJ2Tasks は plan のタスクを検査する（1〜12 件・key・必須の文字列・前提・対象リポジトリと操作）。
@@ -1179,6 +1252,14 @@ func selectJ2AutoTargets(ctx context.Context, tx *sql.Tx) (out []int64, excluded
 		if active {
 			continue
 		}
+		// 下書きづくりの途中の課題も、実行中の課題と同じに、理由を残さず外す。
+		drafting, err := specDraftBlocksPlanning(ctx, tx, cid)
+		if err != nil {
+			return nil, nil, err
+		}
+		if drafting {
+			continue
+		}
 		ex, err := challengeAutoExclusion(ctx, tx, cid)
 		if err != nil {
 			return nil, nil, err
@@ -1242,6 +1323,10 @@ type j2Prepared struct {
 	Read *readValues
 	// DoneSpecLanding は下書きを入れた済みのタスクの題名（無ければ nil）。
 	DoneSpecLanding *string
+	// SpecDraftRepos は、下書きづくりへ回せる課題の対象にできるリポジトリ（回せなければ nil。出力の検査に使う）。
+	SpecDraftRepos []string
+	// SpecDraftLandingRepo は下書きづくりの記録が済みの課題の対象のリポジトリ（そうでなければ空。出力の検査に使う）。
+	SpecDraftLandingRepo string
 }
 
 // parseExternalKey は "<owner>/<name>#<番号>" を repo と番号へ分ける。
@@ -1278,9 +1363,15 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	var doneTasks []Task
 	var keptBudgets []taskBudget
 	var doneSpecLanding *string
+	var allTasks []Task
+	var specDraft *SpecDraft
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		all, err := listTasks(ctx, tx, cid)
 		if err != nil {
+			return err
+		}
+		allTasks = all
+		if specDraft, err = loadSpecDraft(ctx, tx, cid); err != nil {
 			return err
 		}
 		bs, err := loadTaskBudgets(ctx, tx, cid, in.AgentDecl)
@@ -1375,6 +1466,10 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		}
 	}
 
+	if specDraft != nil && specDraft.State == SpecDraftStateDone {
+		prepared.SpecDraftLandingRepo = specDraft.Repo
+	}
+
 	var upstream *j2UpstreamInput
 	if sb != nil {
 		repo, number, ok := parseExternalKey(sb.ExternalKey)
@@ -1433,8 +1528,18 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	}
 	if criteria != nil {
 		// 済みの印は、区画「済みのタスク」に出るタスクの受け持ちに付ける。
-		sections = append(sections, JudgmentDataSection{Label: AcceptanceCriteriaSectionLabel, Content: formatPlanAcceptanceCriteriaSection(*criteria, doneTasks, doneSpecLanding)})
+		content := formatPlanAcceptanceCriteriaSection(*criteria, doneTasks, doneSpecLanding)
+		if prepared.SpecDraftLandingRepo != "" {
+			content = withSpecDraftTargetRepo(content, prepared.SpecDraftLandingRepo)
+		}
+		sections = append(sections, JudgmentDataSection{Label: AcceptanceCriteriaSectionLabel, Content: content})
 	}
+	draftTargets := specDraftTargetRepos(in.ConnDecl)
+	unavailable := specDraftUnavailable(specDraft, ch.SpecPath, allTasks, draftTargets)
+	if unavailable == "" {
+		prepared.SpecDraftRepos = draftTargets
+	}
+	sections = append(sections, JudgmentDataSection{Label: SpecDraftSectionName, Content: formatSpecDraftSection(unavailable, draftTargets)})
 	if stagesText := formatJ2StagesSection(ch); stagesText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "いまの予想・やらないこと・図", Content: stagesText})
 	}
@@ -1878,6 +1983,15 @@ func (s *Store) finalizeJ2Output(ctx context.Context, runIDDisplay, challengeIDD
 			return succeeded(J2VerdictParentDirect, StatusAwaitingHuman), nil
 		}
 		return j2Finalized{Outcome: string(J2VerdictParentDirect), Result: RunResultSucceeded}, nil
+	case J2VerdictNeedsSpec:
+		mapped, err := s.applyJ2NeedsSpec(ctx, runIDDisplay, challengeIDDisplay, *validated.SpecDraft)
+		if err != nil {
+			return j2Finalized{}, err
+		}
+		if mapped {
+			return succeeded(J2VerdictNeedsSpec, StatusClassified), nil
+		}
+		return j2Finalized{Outcome: string(J2VerdictNeedsSpec), Result: RunResultSucceeded}, nil
 	default:
 		return j2Finalized{Result: RunResultSucceeded}, nil
 	}
@@ -1949,10 +2063,14 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 		// 上流の取得（gh の呼び出し）を無駄にしないため、終了していない run が
 		// あれば取得の前に ErrRunInProgress にする（RunJudgment の①が最終防衛）。
 		cid, _ := parseChallengeID(ch.ID)
-		var active bool
+		var active, drafting bool
 		err = s.db.Read(ctx, func(tx *sql.Tx) error {
 			a, err := challengeHasActiveRun(ctx, tx, cid)
+			if err != nil {
+				return err
+			}
 			active = a
+			drafting, err = specDraftBlocksPlanning(ctx, tx, cid)
 			return err
 		})
 		if err = classifyReadWriteErr(err); err != nil {
@@ -1960,6 +2078,10 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 		}
 		if active {
 			return nil, ErrRunInProgress
+		}
+		// 下書きづくりの途中の課題は、ID を指定しても判断点を呼ばない（計画を登録すると、下書きが宙に浮く）。
+		if drafting {
+			return nil, ErrInvalidTransition
 		}
 		items, notStarted, err := s.planOneJ2(ctx, in, nil, *ch)
 		if err != nil {
@@ -2025,6 +2147,15 @@ func (s *Store) j2AutoPreLaunch(ctx context.Context, in J2AutoInput, cid int64) 
 	}
 	if ch.Status != StatusClassified {
 		return nil, nil, nil
+	}
+	// 対象を選んだ後に下書きづくりへ回っていれば起動しない。
+	var drafting bool
+	err = s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		drafting, err = specDraftBlocksPlanning(ctx, tx, cid)
+		return err
+	})
+	if err = classifyReadWriteErr(err); err != nil || drafting {
+		return nil, nil, err
 	}
 	excluded, err := s.j2StillEligibleForAuto(ctx, cid)
 	if err != nil || excluded != nil {
@@ -2102,7 +2233,7 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
-			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, CheckLimit: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos, KeptBudgets: prepared.KeptBudgets, CheckCriteria: true, Criteria: prepared.Criteria, DoneCovers: prepared.DoneCovers, DoneSpecLanding: prepared.DoneSpecLanding},
+			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, CheckLimit: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos, KeptBudgets: prepared.KeptBudgets, CheckCriteria: true, Criteria: prepared.Criteria, DoneCovers: prepared.DoneCovers, DoneSpecLanding: prepared.DoneSpecLanding, SpecDraftRepos: prepared.SpecDraftRepos, SpecDraftLandingRepo: prepared.SpecDraftLandingRepo},
 			Read:       prepared.Read,
 		})
 		if err != nil {
