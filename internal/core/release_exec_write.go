@@ -256,5 +256,9 @@ func (s *Store) finishReleaseAttempt(ctx context.Context, actor string, opID int
 	if err != nil {
 		return nil, err
 	}
+	// 試行の記録で不可逆操作の状態が変わった（実行済み・取り消し）。完了した課題の下書きは、最後の 1 件が終われば消す。
+	if class != ExecutionClassWait {
+		s.cleanupSpecDraft(ctx, row.ChallengeID, actor)
+	}
 	return item, nil
 }

@@ -125,7 +125,7 @@ func TestJ2TaskFieldsHaveNoModel(t *testing.T) {
 		tags = append(tags, rt.Field(i).Tag.Get("json"))
 	}
 	wantTags := []string{"key", "title", "body", "done_criteria", "non_goals", "depends_on", "repo", "operation",
-		"budget_impl_usd", "budget_review_usd", "source", "expand_after", "flow_reason", "covers,omitempty"}
+		"budget_impl_usd", "budget_review_usd", "source", "expand_after", "flow_reason", "covers,omitempty", "lands_spec,omitempty"}
 	if !reflect.DeepEqual(tags, wantTags) {
 		t.Fatalf("j2RawTask json tags = %v, want %v", tags, wantTags)
 	}
@@ -135,7 +135,7 @@ func TestJ2TaskFieldsHaveNoModel(t *testing.T) {
 		names = append(names, vt.Field(i).Name)
 	}
 	wantNames := []string{"Key", "Title", "Body", "DoneCriteria", "NonGoals", "DependsOn", "Repo", "Operation", "Source",
-		"BudgetImplUSD", "BudgetReviewUSD", "ExpandAfter", "Flow", "FlowReason", "Covers"}
+		"BudgetImplUSD", "BudgetReviewUSD", "ExpandAfter", "Flow", "FlowReason", "Covers", "LandsSpec"}
 	if !reflect.DeepEqual(names, wantNames) {
 		t.Fatalf("j2Task fields = %v, want %v", names, wantNames)
 	}

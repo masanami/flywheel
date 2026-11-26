@@ -60,6 +60,11 @@ const NotStartedNoTasks NotStartedReason = "no_tasks"
 // `cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
 const NotStartedIntegrationUnavailable NotStartedReason = "integration_unavailable"
 
+// NotStartedSpecDraftChanged は、下書きをリポジトリへ入れるタスクを選ぶときに読み直した下書きが、読めないか、受入基準の
+// 識別の並びが承認した計画の一覧と違うので、そのタスクを起動しないことを表す。詳細に、タスク・下書きの場所・訳を付ける。
+// `cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
+const NotStartedSpecDraftChanged NotStartedReason = "spec_draft_changed"
+
 // notStartedReasonValues は NotStartedReason の閉集合（仕様の列挙の順）。
 var notStartedReasonValues = []NotStartedReason{
 	NotStartedCycleBudget,
@@ -82,6 +87,7 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedIntegrationUnavailable,
 	NotStartedNoTasks,
 	NotStartedWaitingOutside,
+	NotStartedSpecDraftChanged,
 }
 
 // NotStartedReasonValues は NotStartedReason の閉集合（§IF / API「cycle の JSON 出力」の

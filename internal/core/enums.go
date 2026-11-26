@@ -322,6 +322,10 @@ const ActivityActionOpExecute = "op_execute"
 // （本番反映のやり直しで取り下げた・PR がマージ済みで片付けた。#485）。
 const ActivityActionOpClose = "op_close"
 
+// ActivityActionSpecDraftCleanupFailed は、終わった課題の仕様の下書きを消せなかったことの作業ログの action
+// （entity=challenge。after は下書きの場所 path と訳 reason）。
+const ActivityActionSpecDraftCleanupFailed = "spec_draft_cleanup_failed"
+
 // 作業ログ（entity=challenge）の action。依存を足した・外したときに残し、after に
 // 足した・外した依存先の ID を持つ。
 const (

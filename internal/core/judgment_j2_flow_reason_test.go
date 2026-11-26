@@ -143,8 +143,8 @@ func TestJ2FlowReason_SchemaAddsOnlyFlowReason(t *testing.T) {
 	if _, ok := props["planned_flow"]; ok {
 		t.Error("planned_flow must not be in the model output type")
 	}
-	if len(props) != 14 {
-		t.Errorf("task fields = %d, want the 12 before plus flow_reason and covers", len(props))
+	if len(props) != 15 {
+		t.Errorf("task fields = %d, want the 12 before plus flow_reason, covers and lands_spec", len(props))
 	}
 }
 

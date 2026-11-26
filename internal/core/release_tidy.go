@@ -166,6 +166,8 @@ func (s *Store) closePendingRelease(ctx context.Context, actor string, p pending
 		return nil, err
 	}
 	if item != nil {
+		// 完了した課題の下書きは、まだ実行していない最後の 1 件が閉じたら消す。
+		s.cleanupSpecDraft(ctx, p.challengeID, actor)
 		// 閉じたので、対応する契約の実行が終わっていなければ status で読んで取り消す（開いたまま残さない。失敗は結果に残す）。
 		item.CancelNote = s.cancelTidiedReleaseRun(ctx, p, opts)
 	}

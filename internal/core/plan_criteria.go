@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -89,6 +90,82 @@ func checkPlanCoverage(tasks []j2Task, deferred []j2RawDeferred, criteria *planA
 	return ""
 }
 
+// 下書きをリポジトリへ入れるタスクの検査で落ちたことを見分ける語（実行の記録の理由の文に含める）。
+const (
+	specLandingMissing    = "spec landing missing"
+	specLandingDuplicate  = "duplicate spec landing"
+	specLandingNotFirst   = "spec landing not first"
+	specLandingUnexpected = "unexpected spec landing"
+)
+
+// specLandingTaskLine は計画の本文で、下書きをリポジトリへ入れるタスクの行に出す文。
+const specLandingTaskLine = "仕様の文書をリポジトリへ入れる"
+
+// checkPlanSpecLanding は下書きをリポジトリへ入れるタスクの数と順を検査する。criteria は検査に使う受入基準の一覧
+// （仕様の文書の場所を持たない課題は nil）、done は下書きを入れた済みのタスクがあるか。下書きを持たない課題では、
+// 入れるタスクがあれば不正。下書きを持つ課題では、済みのタスクが入れていなければ新しいタスクにちょうど 1 件あり、
+// ほかの新しいタスクは前提をたどるとそのタスクに届く。済みのタスクが入れていれば、新しいタスクには 1 件も無い。
+// 前提は検査済み（鍵はすべて tasks の中にあり、循環が無い）であること。通れば空、落ちれば理由の文を返す。
+func checkPlanSpecLanding(tasks []j2Task, criteria *planAcceptanceCriteria, done bool) string {
+	var landing []string
+	for _, t := range tasks {
+		if t.LandsSpec {
+			landing = append(landing, t.Key)
+		}
+	}
+	switch {
+	case criteria == nil || !criteria.Draft:
+		if len(landing) > 0 {
+			return specLandingUnexpected
+		}
+		return ""
+	case len(landing) > 1 || (done && len(landing) == 1):
+		return specLandingDuplicate
+	case done:
+		return ""
+	case len(landing) == 0:
+		return specLandingMissing
+	}
+	reaches := map[string]bool{landing[0]: true}
+	// 前提の並びはタスクの並びと一致しないので、増えなくなるまで広げる。
+	for grown := true; grown; {
+		grown = false
+		for _, t := range tasks {
+			if !reaches[t.Key] && slices.ContainsFunc(t.DependsOn, func(k string) bool { return reaches[k] }) {
+				reaches[t.Key], grown = true, true
+			}
+		}
+	}
+	if len(reaches) < len(tasks) {
+		return specLandingNotFirst
+	}
+	return ""
+}
+
+// doneSpecLandingTitle は、tasks のうち下書きを入れた済みのタスクの題名を返す（無ければ nil）。
+func doneSpecLandingTitle(tasks []Task) *string {
+	for _, t := range tasks {
+		if t.Status == TaskStatusDone && t.LandsSpec {
+			title := t.Title
+			return &title
+		}
+	}
+	return nil
+}
+
+// specLandingTitle は下書きをリポジトリへ入れるタスクの題名を返す（新しいタスクに無ければ、済みのタスク done。どちらも無ければ空）。
+func specLandingTitle(tasks []j2Task, done *string) string {
+	for _, t := range tasks {
+		if t.LandsSpec {
+			return t.Title
+		}
+	}
+	if done != nil {
+		return *done
+	}
+	return ""
+}
+
 // coveredCriteriaHeading は、委譲へ渡すタスクの文面で、タスクが受け持つ受入基準を出す節の名前。
 const coveredCriteriaHeading = "受け持つ受入基準"
 
@@ -125,14 +202,23 @@ func addAcceptanceCriteria(spec []byte, criteria planAcceptanceCriteria) []byte 
 const AcceptanceCoverageHeading = "受入基準の受け持ち"
 
 // writePlanCoverageSection は計画の本文の節「受入基準の受け持ち」を書く。受け持たない基準は一覧の順に 1 基準 1 行で出し、
-// 識別は単独で出さず基準の文の先頭を添える。
-func writePlanCoverageSection(b *strings.Builder, criteria *planAcceptanceCriteria, deferred []j2RawDeferred) {
+// 識別は単独で出さず基準の文の先頭を添える。一覧が下書きのものなら、仕様の文書の行に下書きであることと、
+// リポジトリへ入れるタスクの題名 landingTitle を添え、置き換える元があればその行を出す。
+func writePlanCoverageSection(b *strings.Builder, criteria *planAcceptanceCriteria, deferred []j2RawDeferred, landingTitle string) {
 	b.WriteString("\n## " + AcceptanceCoverageHeading + "\n\n")
 	if criteria == nil {
 		b.WriteString("- 仕様の文書が無いので、受入基準の網羅は検査していない\n")
 		return
 	}
-	fmt.Fprintf(b, "- 仕様の文書: %s\n- 受入基準: %d 件\n", oneLine(criteria.Path), len(criteria.Items))
+	fmt.Fprintf(b, "- 仕様の文書: %s", oneLine(criteria.Path))
+	if criteria.Draft {
+		fmt.Fprintf(b, "（下書き。リポジトリへ入れるのは「%s」）", oneLine(landingTitle))
+	}
+	b.WriteString("\n")
+	if criteria.BasePath != nil {
+		fmt.Fprintf(b, "- 置き換える元: %s\n", oneLine(*criteria.BasePath))
+	}
+	fmt.Fprintf(b, "- 受入基準: %d 件\n", len(criteria.Items))
 	if len(deferred) == 0 {
 		b.WriteString("- 受け持たない基準: なし\n")
 		return

@@ -12,6 +12,8 @@ type planCandidate struct {
 	Seq  int64
 	// TaskSeq は起動するタスクの内部整数 ID（0 はタスクを決めない候補）。同じ課題の候補は、タスクの ID の昇順に並ぶ。
 	TaskSeq int64
+	// SpecDraft は、下書きをリポジトリへ入れるタスクの、候補を作るときに読み直した下書きの全文（ほかのタスクは空）。
+	SpecDraft string
 }
 
 func (c planCandidate) before(o planCandidate) bool {

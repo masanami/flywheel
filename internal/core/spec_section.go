@@ -23,6 +23,10 @@ const acceptanceDoneMark = "（済み）"
 type planAcceptanceCriteria struct {
 	Path  string                `json:"path"`
 	Items []acceptanceCriterion `json:"items"`
+	// Draft は仕様の文書が下書きか。BasePath は下書きが丸ごと置き換える元の文書の場所（下書きでないか、場所が無ければ nil）。
+	// どちらも持たない一覧は、下書きでないと読む。
+	Draft    bool    `json:"draft"`
+	BasePath *string `json:"base_path"`
 }
 
 // loadPlanAcceptanceCriteria は計画の構造化した出力 spec（空は出力なし）が持つ受入基準の一覧を返す。
@@ -72,6 +76,28 @@ func loadDoneTaskCovers(ctx context.Context, tx *sql.Tx, cid int64) (map[string]
 		return nil, err
 	}
 	return doneTaskCovers(all), nil
+}
+
+// formatPlanAcceptanceCriteriaSection は計画の形の呼び出しの区画「受入基準」の本文。下書きの一覧では、見出しの行に続けて、
+// 下書きであること（下書きを入れた済みのタスクがあれば、その題名 doneLanding つき）と、置き換える元の文書
+// （無ければ新しい文書であること）の行を足す。doneLanding は計画の検査（checkPlanSpecLanding）へ渡す値と同じもの。
+// tasks（済みの印を付ける集合）とは別の集合なので、tasks からは導かない。
+func formatPlanAcceptanceCriteriaSection(list planAcceptanceCriteria, tasks []Task, doneLanding *string) string {
+	body := formatAcceptanceCriteriaSection(list, tasks)
+	if !list.Draft {
+		return body
+	}
+	origin := "新しい文書（いまある文書の直しではない）"
+	if list.BasePath != nil {
+		origin = "置き換える元: " + oneLine(*list.BasePath)
+	}
+	state := "下書き（リポジトリにまだ入っていない）"
+	if doneLanding != nil {
+		state = "下書き（済みのタスク「" + oneLine(*doneLanding) + "」がリポジトリへ入れた）"
+	}
+	// 見出し（場所と件数の行）と基準の行の間は、空の行 1 つ。
+	head, items, _ := strings.Cut(body, "\n\n")
+	return head + "\n" + state + "\n" + origin + "\n\n" + items
 }
 
 // formatAcceptanceCriteriaSection は区画「受入基準」の本文。tasks のうち済みのタスクが受け持つ基準の行に、済みの印を付ける。

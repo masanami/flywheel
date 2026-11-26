@@ -44,8 +44,12 @@ type ShowChallenge struct {
 	IntegrationRef *string `json:"integration_ref"`
 	Priority       *string `json:"priority"`
 	Reporter       string  `json:"reporter"`
+	// SpecBasePath は下書きが丸ごと置き換える元の文書の場所（リポジトリの中の相対のパス）。無ければ null。
+	SpecBasePath *string `json:"spec_base_path"`
 	// SpecCostUSD は仕様づくりの費用（課題の予算には数えない）。
 	SpecCostUSD float64 `json:"spec_cost_usd"`
+	// SpecIsDraft は仕様の文書が下書き（下書きの置き場の下の文書）か。
+	SpecIsDraft bool `json:"spec_is_draft"`
 	// SpecPath は仕様の文書の場所（ワークスペースから見た相対のパス）。無ければ null。
 	SpecPath    *string `json:"spec_path"`
 	Status      string  `json:"status"`
@@ -111,6 +115,7 @@ func FromShowChallenge(d *core.ChallengeDetail) ShowChallenge {
 	}
 	return ShowChallenge{
 		ChatSessions: fromChallengeChatSessions(d.ChatSessions), SpecCostUSD: d.SpecCostUSD, SpecPath: d.SpecPath,
+		SpecBasePath: d.SpecBasePath, SpecIsDraft: d.SpecIsDraft(),
 		Context: c.Context, CreatedAt: c.CreatedAt, Dependencies: FromDependencies(d.Dependencies), Dependents: dependents,
 		Description: c.Description, DoneCriteria: c.DoneCriteria, FollowupOf: d.FollowupOf, Headline: c.Headline, ID: c.ID, Improvement: imp, IntegrationRef: d.IntegrationRef, Priority: c.Priority,
 		Reporter: c.Reporter, Status: c.Status, StatusLabel: c.StatusLabel, Title: c.Title, UpdatedAt: c.UpdatedAt,

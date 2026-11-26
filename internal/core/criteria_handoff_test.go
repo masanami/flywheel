@@ -242,7 +242,7 @@ func TestDelegationTargets_HandRegisteredPlanIsNotCheckedForCriteria(t *testing.
 	id := f.newInProgress(t, "t", "P1", "")
 	targets := func() (out delegationTargets) {
 		readForTest(t, f.s, func(tx *sql.Tx) (err error) {
-			out, err = selectDelegationTargetsFor(ctx0, tx, f.conn)
+			out, err = selectDelegationTargetsFor(ctx0, tx, "", f.conn)
 			return err
 		})
 		return out

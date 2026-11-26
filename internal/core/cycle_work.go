@@ -96,7 +96,7 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		st.Verify = len(verify)
-		picked, err := selectDelegationTargetsFor(ctx, tx, conn)
+		picked, err := selectDelegationTargetsFor(ctx, tx, s.workspace, conn)
 		if err != nil {
 			return err
 		}
@@ -314,7 +314,7 @@ func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		st.Verify = len(verify) + len(tasks) + len(fixes)
-		picked, err := selectDelegationTargetsFor(ctx, tx, conn)
+		picked, err := selectDelegationTargetsFor(ctx, tx, s.workspace, conn)
 		if err != nil {
 			return err
 		}

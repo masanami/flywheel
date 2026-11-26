@@ -85,6 +85,7 @@ func parsePlanSpec(spec *string) planSpecView {
 			BudgetImplMicros: taskBudgetMicros(t.BudgetImplUSD), BudgetReviewMicros: taskBudgetMicros(t.BudgetReviewUSD),
 			ExpandAfter: t.ExpandAfter != nil && *t.ExpandAfter,
 			Covers:      t.Covers,
+			LandsSpec:   t.LandsSpec != nil && *t.LandsSpec,
 		})
 	}
 	v.UsesIntegration = raw.UsesIntegration
