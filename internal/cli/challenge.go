@@ -138,6 +138,9 @@ func runEdit(a Args) (any, error) {
 		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency / --headline / --context / --expected / --actual / --non-goals / --figure / --spec / --spec-base のいずれか1つ以上を指定してください")
 	}
 
+	// 下書きづくりの途中の課題に場所を付けるときだけ、core が呼ぶ。
+	in.SpecDraftCancel = func() (core.ContractCancelInput, error) { return contractCancelInput(a) }
+
 	c, err := a.Store.EditChallenge(context.Background(), core.ChannelCLI, a.Positional[0], in)
 	if err != nil {
 		return nil, mapCoreErr(err)
