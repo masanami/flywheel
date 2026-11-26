@@ -439,7 +439,7 @@ func (s *Store) loadJ5ContextFor(ctx context.Context, ch Challenge, taskID *int6
 			return err
 		}
 		var lastID int64
-		lastQ, lastArgs := `SELECT id FROM run WHERE challenge_id = ? AND kind IN (?, ?) AND operation_id IS NULL ORDER BY id DESC LIMIT 1`, []any{cid, string(runKindDelegate), string(runKindContract)}
+		lastQ, lastArgs := `SELECT id FROM run WHERE challenge_id = ? AND kind IN (?, ?) AND operation_id IS NULL AND budget_bucket <> 'spec' ORDER BY id DESC LIMIT 1`, []any{cid, string(runKindDelegate), string(runKindContract)}
 		if taskID != nil {
 			// タスクの単位では、そのタスクの最後の委譲の実行のうち成果物を持つもの（取り込みの読み。後の読みは成果物を取り込み直さない）。
 			lastQ = `SELECT id FROM run WHERE challenge_id = ? AND task_id = ? AND kind IN (?, ?) AND operation_id IS NULL

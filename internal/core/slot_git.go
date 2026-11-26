@@ -68,6 +68,10 @@ type SlotGit interface {
 	// する。無ければ（または空なら）req.Ref へ detach する。強制しない（変更を消さない）。
 	// `git fetch` は実行しない。失敗は error。
 	SwitchTree(ctx context.Context, tree SlotTree, req SlotSwitch) error
+
+	// ChangedPaths は tree の作業ツリーの変わっているパス（追跡していないファイルを含む。Git が無視するものは含まない）を、
+	// リポジトリの根からの相対のパスで返す。`git fetch` は実行せず、作業ツリーと index を変えない。失敗は error。
+	ChangedPaths(ctx context.Context, tree SlotTree) ([]string, error)
 }
 
 // ErrBranchCheckedOutElsewhere は、SwitchTree が checkout しようとしたブランチを、同じ元の

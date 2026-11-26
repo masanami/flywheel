@@ -163,6 +163,8 @@ type Connector struct {
 	RequiredFacts map[string][]string
 	// ChallengeIDPrefix は form: flow の委譲先の任意のキー（"" は省略）。flow の形以外では書けない。
 	ChallengeIDPrefix string
+	// SpecDraftBudgetUSD は form: flow の委譲先の任意のキー（下書きづくり 1 回の上限額。nil は「無い」）。flow の形以外では書けない。
+	SpecDraftBudgetUSD *float64
 }
 
 // UsesContractCommands は c が契約のコマンドを使って起動・確認・再開・取り消しをする委譲先（form: cli か form: flow）か。
@@ -250,7 +252,7 @@ var humanQuestionKindKeys = map[string]bool{"id": true, "label": true}
 var connectorKeys = map[string]bool{
 	"id": true, "form": true, "permission_mode": true, "operations": true,
 	"commands": true, "contract_version": true, "required_facts": true,
-	"challenge_id_prefix": true,
+	"challenge_id_prefix": true, "spec_draft_budget_usd": true,
 }
 var operationKeys = map[string]bool{
 	"id": true, "invocation": true, "interactive": true, "counterpart": true,
@@ -436,6 +438,16 @@ func parseConnectors(raw json.RawMessage) ([]Connector, bool, error) {
 			if err := json.Unmarshal(v, &c.ChallengeIDPrefix); err != nil {
 				return nil, false, fmt.Errorf("[%d].challenge_id_prefix: %w", i, err)
 			}
+		}
+		if v, ok := rc["spec_draft_budget_usd"]; ok {
+			if isJSONNull(v) {
+				return nil, false, fmt.Errorf("[%d].spec_draft_budget_usd: must not be null", i)
+			}
+			var f float64
+			if err := json.Unmarshal(v, &f); err != nil {
+				return nil, false, fmt.Errorf("[%d].spec_draft_budget_usd: %w", i, err)
+			}
+			c.SpecDraftBudgetUSD = &f
 		}
 		if v, ok := rc["contract_version"]; ok {
 			cv, err := decodeIntLiteral(v)
@@ -876,6 +888,9 @@ func validateConnector(c Connector, connectorIDs map[string]bool) error {
 // 起動の時に決まる）。
 // 操作の flow は validateOperation が検査する。permission_mode の 3 値の検査は全ての形で済んでいる。
 func validateFlowConnector(c Connector) error {
+	if v := c.SpecDraftBudgetUSD; v != nil && (!validBudgetAmount(*v) || usdToMicros(*v) <= 0) {
+		return fmt.Errorf("%w: connector %q spec_draft_budget_usd must be a positive number", ErrConfigInvalid, c.ID)
+	}
 	if c.Commands != nil {
 		return fmt.Errorf("%w: connector %q (form flow) must not have commands", ErrConfigInvalid, c.ID)
 	}
@@ -885,8 +900,11 @@ func validateFlowConnector(c Connector) error {
 	return nil
 }
 
-// validateNotFlowKeys は form: flow でない委譲先が、flow の形だけのキー（challenge_id_prefix）を書いていないか検査する。
+// validateNotFlowKeys は form: flow でない委譲先が、flow の形だけのキー（challenge_id_prefix・spec_draft_budget_usd）を書いていないか検査する。
 func validateNotFlowKeys(c Connector) error {
+	if c.SpecDraftBudgetUSD != nil {
+		return fmt.Errorf("%w: connector %q (form %s) must not have spec_draft_budget_usd (only form flow)", ErrConfigInvalid, c.ID, c.Form)
+	}
 	if c.ChallengeIDPrefix != "" {
 		return fmt.Errorf("%w: connector %q (form %s) must not have challenge_id_prefix (only form flow)", ErrConfigInvalid, c.ID, c.Form)
 	}
