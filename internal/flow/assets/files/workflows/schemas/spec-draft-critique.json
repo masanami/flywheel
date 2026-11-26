@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "spec-draft ワークフローの critique（下書きを批評して直し、残った問いを返す）の型付き出力",
+  "type": "object",
+  "required": ["outcome", "summary", "questions"],
+  "properties": {
+    "outcome": { "type": "string", "enum": ["ok", "failure"] },
+    "summary": { "type": "string" },
+    "questions": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": ["question", "options", "recommended", "reason"],
+        "properties": {
+          "question": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "required": ["label"],
+              "properties": {
+                "label": { "type": "string", "minLength": 1, "maxLength": 2000 }
+              },
+              "additionalProperties": false
+            }
+          },
+          "recommended": { "type": "integer", "minimum": 1, "maximum": 5, "description": "推奨する選択肢の、options の中の位置（1 から数える。options の件数以下）" },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
