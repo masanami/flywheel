@@ -1168,7 +1168,8 @@ func parseExternalKey(key string) (repo string, number int, ok bool) {
 	return key[:i], n, true
 }
 
-// prepareJ2 は ch の J2 の入力を組み立てる。取り込み元の対応のある課題では、
+// prepareJ2 は ch の J2 の入力を組み立てる。仕様の文書の場所を持つ課題では文書の受入基準を読み、読めなければ
+// NotStarted（spec_unreadable）を返し、上流の取得もしない。取り込み元の対応のある課題では、
 // ここ（J2 の起動の直前）で上流の本文・全コメント・参照先の Issue を取得する
 // （対応の無い課題では上流の取得を呼ばない）。取得に失敗したら NotStarted
 // （upstream_fetch_failed）を返し、run を作らない＝状態と版を変えない。
@@ -1261,6 +1262,15 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		return nil, nil, fmt.Errorf("%w: read position_file %q: %w", ErrConfigInvalid, in.AgentDecl.PositionFile, err)
 	}
 
+	var criteria *planAcceptanceCriteria
+	if ch.SpecPath != nil {
+		items, err := readSpecCriteria(s.workspace, *ch.SpecPath)
+		if err != nil {
+			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedSpecUnreadable, Detail: err.Error()}, nil
+		}
+		criteria = &planAcceptanceCriteria{Path: *ch.SpecPath, Items: items}
+	}
+
 	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0, KeptBudgets: keptBudgets}
 	seenDoneRepo := map[string]bool{}
 	for _, t := range doneTasks {
@@ -1325,6 +1335,10 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	}
 	if t := formatDoneTasksSection(doneTasks); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: DoneTasksSectionLabel, Content: t})
+	}
+	if criteria != nil {
+		// 済みの印は、区画「済みのタスク」に出るタスクの受け持ちに付ける。
+		sections = append(sections, JudgmentDataSection{Label: AcceptanceCriteriaSectionLabel, Content: formatAcceptanceCriteriaSection(*criteria, doneTasks)})
 	}
 	if stagesText := formatJ2StagesSection(ch); stagesText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "いまの予想・やらないこと・図", Content: stagesText})

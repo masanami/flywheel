@@ -215,14 +215,14 @@ func TestRunResultValues_MatchWhatTheStoreAccepts(t *testing.T) {
 	}
 }
 
-// NotStartedReasonValues は 仕様の 19 値（M4.5 の in_progress・not_executable・dependency・not_learnable と、
+// NotStartedReasonValues は 仕様の 20 値（M4.5 の in_progress・not_executable・dependency・not_learnable と、
 // #440 の upstream_closed・upstream_missing・out_of_policy と、タスクを単位にする委譲の
-// integration_unavailable・no_tasks と、反映の段の waiting_outside を含む）で、写しを返す（呼び出し側が書き換えても本体は変わらない）。
-func TestNotStartedReasonValues_AreTheNineteenAndACopy(t *testing.T) {
+// integration_unavailable・no_tasks と、反映の段の waiting_outside と、計画の段の spec_unreadable を含む）で、写しを返す（呼び出し側が書き換えても本体は変わらない）。
+func TestNotStartedReasonValues_AreTheTwentyAndACopy(t *testing.T) {
 	t.Parallel()
 	got := NotStartedReasonValues()
 	want := []NotStartedReason{NotStartedCycleBudget, NotStartedRateLimited, NotStartedRunBudget, NotStartedSlotUnavailable,
-		NotStartedFailureLimit, NotStartedReworkLimit, NotStartedUpstreamFetchFailed, NotStartedWaitingExternal, NotStartedPlanUnavailable,
+		NotStartedFailureLimit, NotStartedReworkLimit, NotStartedUpstreamFetchFailed, NotStartedSpecUnreadable, NotStartedWaitingExternal, NotStartedPlanUnavailable,
 		NotStartedInProgress, NotStartedNotExecutable, NotStartedDependency, NotStartedNotLearnable,
 		NotStartedUpstreamClosed, NotStartedUpstreamMissing, NotStartedOutOfPolicy, NotStartedIntegrationUnavailable, NotStartedNoTasks, NotStartedWaitingOutside}
 	if len(got) != len(want) {
