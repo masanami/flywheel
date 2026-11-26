@@ -167,6 +167,15 @@ func resolvePlanAnswers(ctx context.Context, tx *sql.Tx, cid int64, items []Plan
 		return nil, 0, nil, ErrTerminalState
 	}
 	if current.Status != StatusAwaitingPlanApproval {
+		if current.Status == StatusAwaitingHuman {
+			open, err := specQuestionHoldOpen(ctx, tx, cid)
+			if err != nil {
+				return nil, 0, nil, err
+			}
+			if open {
+				return nil, 0, nil, fmt.Errorf("%w: %w", ErrInvalidTransition, ErrSpecQuestionNeedsOption)
+			}
+		}
 		return nil, 0, nil, ErrInvalidTransition
 	}
 	pv, ok, err := latestPlanVersion(ctx, tx, cid)

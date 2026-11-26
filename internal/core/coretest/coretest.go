@@ -600,6 +600,37 @@ func InsertHoldWithOptions(t *testing.T, workspace string, challengeID int, ques
 	}
 }
 
+// InsertSpecDraftHold はテスト専用のフィクスチャとして、課題 challengeID に、回答待ちの下書きづくりの記録（実行 1 回。理由 reason・
+// 問いの一覧 questionsJSON。空なら NULL）と、その開いている保留（戻り先は分類済。選択肢 optionsJSON。識別の無い回答は断る）を挿入する。
+// 課題の状態は変えない。
+func InsertSpecDraftHold(t *testing.T, workspace string, challengeID int, reason, questionsJSON, optionsJSON string) {
+	t.Helper()
+	const at = "2026-11-26T00:00:00.000Z"
+	var questions any
+	if questionsJSON != "" {
+		questions = questionsJSON
+	}
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO hold (challenge_id, question, from_status, raised_at, options, option_required) VALUES (?, '下書きづくりの保留', 'classified', ?, ?, 1)`,
+			challengeID, at, optionsJSON)
+		if err != nil {
+			return err
+		}
+		holdID, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO spec_draft (challenge_id, path, repo, reason, state, attempts, questions, hold_id, hold_reason, created_at, updated_at)
+			VALUES (?, ?, 'repo', 'reason', 'awaiting_owner', 1, ?, ?, ?, ?, ?)`,
+			challengeID, fmt.Sprintf(".flywheel/specs/c-%d.md", challengeID), questions, holdID, reason, at, at)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: InsertSpecDraftHold: %v", err)
+	}
+}
+
 // InsertTaskHold はテスト専用のフィクスチャとして、課題 challengeID のタスク（題名 taskTitle）を止める、未回答の保留
 // （scope は task。選択肢は optionsJSON。空なら NULL）を挿入し、保留の行の番号を返す。
 func InsertTaskHold(t *testing.T, workspace string, challengeID int, taskTitle, question, fromStatus, raisedAt, optionsJSON string) int64 {
