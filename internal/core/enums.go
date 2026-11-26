@@ -330,8 +330,11 @@ const ActivityActionSpecDraftCleanupFailed = "spec_draft_cleanup_failed"
 // （entity=challenge。after は下書きの場所 path・置き換える元 base_path・対象のリポジトリ repo・回した理由 reason）。
 const ActivityActionSpecDraftRequested = "spec_draft_requested"
 
-// ActivityActionSpecDraftSkipped は、下書きづくりを省いたことの作業ログの action（entity=challenge。after は細目 detail）。
-const ActivityActionSpecDraftSkipped = "spec_draft_skipped"
+// 作業ログ（entity=challenge）の action。下書きづくりが済んだとき・省いたときに残し、after の detail に、どう済んだか・なぜ省いたかを持つ。
+const (
+	ActivityActionSpecDraftDone    = "spec_draft_done"
+	ActivityActionSpecDraftSkipped = "spec_draft_skipped"
+)
 
 // 作業ログ（entity=challenge）の action。依存を足した・外したときに残し、after に
 // 足した・外した依存先の ID を持つ。
