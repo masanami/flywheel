@@ -24,18 +24,22 @@ var (
 // spec_draft_cleanup_failed を残す。呼び出し元の操作はもう成立しているので、誤りは返さない（ctx の取り消しにも従わない）。
 func (s *Store) cleanupSpecDraft(ctx context.Context, cid int64, actor string) {
 	ctx = context.WithoutCancel(ctx)
+	// 消してよいかの判定と削除は、1 つの書き込みのトランザクションの中で行う。課題を作る・直す書き込みと排他になるので、
+	// 判定の後に、同じ下書きを指す課題が足されてから消す、という順にはならない。
 	var draft string
-	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
-		draft, err = s.removableSpecDraft(ctx, tx, cid)
-		return err
+	var removeErr error
+	err := s.db.Write(ctx, func(tx *sql.Tx) (err error) {
+		if draft, err = s.removableSpecDraft(ctx, tx, cid); err != nil || draft == "" {
+			return err
+		}
+		removeErr = removeSpecDraft(s.workspace, draft)
+		return nil
 	})
 	// 消してよいかを読めないのはストアの障害で、作業ログも書けないので、何もしない。
-	if err != nil || draft == "" {
+	if err != nil || draft == "" || removeErr == nil {
 		return
 	}
-	if err = removeSpecDraft(s.workspace, draft); err == nil {
-		return
-	}
+	err = removeErr
 	reason := err.Error()
 	// 作業ログも書けなければ、残す先が無い。
 	_ = s.mutateAs(ctx, actor, ChannelCLI, VerificationNone, func(_ *sql.Tx, rec *activityRecorder) error {
