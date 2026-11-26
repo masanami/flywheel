@@ -31,11 +31,11 @@ type sdsFixture struct {
 	client *sdsClient
 }
 
-// newSDSFixture は、下書きづくりの対象にできるリポジトリ（flow-wt）を宣言に足した委譲の足場。開始のコマンドは running を返す。
+// newSDSFixture は、下書きづくりの対象にできるリポジトリ（flow-wt）を宣言に足した委譲の足場。開始と状態の確認のコマンドは running を返す。
 func newSDSFixture(t *testing.T) *sdsFixture {
 	t.Helper()
 	f := &sdsFixture{delegateFixture: newDelegateFixture(t),
-		client: &sdsClient{fakeContractClient: &fakeContractClient{uniqueRunIDs: true, startOut: contractOut(ContractStateRunning, nil, nil)}}}
+		client: &sdsClient{fakeContractClient: &fakeContractClient{uniqueRunIDs: true, startOut: contractOut(ContractStateRunning, nil, nil), last: contractOut(ContractStateRunning, nil, nil)}}}
 	sd := specDraftConn(t, specDraftConnectorsJSON)
 	flowConn := sd.Connectors[0]
 	flowConn.ID = "sdflow"

@@ -694,7 +694,7 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 	if in.Contract != nil {
 		reports, err := s.PollContractRuns(ctx, ContractPollInput{
 			ChallengeID: in.ChallengeID, AgentDecl: in.AgentDecl, ConnDecl: in.ConnDecl, Client: in.Contract, CycleID: in.CycleID, Reconcile: in.Reconcile,
-			Judgment: in.Judgment, Cycle: in.Cycle, Checks: in.Checks, Compare: in.Compare,
+			Judgment: in.Judgment, Cycle: in.Cycle, Checks: in.Checks, Compare: in.Compare, Git: in.Git,
 		})
 		if errors.Is(err, ErrStoreError) {
 			return nil, err

@@ -443,6 +443,10 @@ func (s *Store) holdContractWaitWith(ctx context.Context, rep *ContractRunReport
 // pollOne は終わっていない契約の run 1 件を進める。保留への答えが返っていれば resume で返し、無ければ status で読む。
 // 読んだ後に状態の写しと予算の確認を行う。
 func (s *Store) pollOne(ctx context.Context, in ContractPollInput, row *contractRunRow, connector *Connector, binding *sourceBinding, planVersion, cycleID *int64) (*ContractRunReport, error) {
+	// 下書きづくりの実行はタスクも計画も持たないので、下のタスクと上げる依頼の扱いを通さない。
+	if row.Kind == contractRunKindSpec {
+		return s.pollSpecDraftRun(ctx, in, row, connector, binding, planVersion, cycleID)
+	}
 	challengeID := formatChallengeID(row.ChallengeID)
 	row.reqFacts = connector.RequiredFacts
 	if row.Kind == contractRunKindReflect {

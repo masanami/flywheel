@@ -254,7 +254,10 @@ type ContractPollInput struct {
 	// 入った中身の確かめに使う上流の取得の口（GET だけ）。nil なら、その確かめができないので「入れてよい」を返さない。
 	Checks  UpstreamCheckSource
 	Compare UpstreamCompareSource
-	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。
+	// Git は、下書きづくりの実行が終わった後に、対象のリポジトリの元のクローンの変わっているパスを読む口。nil なら確かめられないので、
+	// 下書きづくりは失敗にする。
+	Git SlotGit
+	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。下書きづくりの実行には使わない。
 	WorkDir string
 	// Judgment は判断点の起動の実行者。非 nil で、宣言の supervisor が真なら、回答を待つ契約の run（kind が answer で、ターミナルで解く待ちでない。
 	// 答える者は問わない）をスーパーバイザーへ回す（それ以外はオーナーの保留へ写す）。Cycle は周の枠超過の共有（nil なら共有しない）。
@@ -604,9 +607,10 @@ func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration
 
 // existingContractWorkDir は既存の契約の run へのコマンド（status・resume・cancel）の作業ディレクトリ。決め直さず、
 // start で記録した作業ディレクトリ（contract_run.work_dir）を使う。記録の無い run（記録を足す前に始めたもの）は
-// ワークスペース（contractWorkDir の既定）で実行する。呼び出し元が WorkDir を明示したときはそれを使う。
+// ワークスペース（contractWorkDir の既定）で実行する。呼び出し元が WorkDir を明示したときはそれを使う（下書きづくりの実行は、
+// いつも記録した作業ディレクトリ）。
 func existingContractWorkDir(row *contractRunRow, explicit string) string {
-	if explicit != "" {
+	if explicit != "" && row.Kind != contractRunKindSpec {
 		return explicit
 	}
 	return row.WorkDir
@@ -1573,9 +1577,9 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	planVersions := map[int64]*int64{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		// 読むのはタスクの実行と、着手中・検証中・保留中の課題の上げる依頼（kind が reflect。保留中も状態・費用を読み続ける。受け取りは保留が解けてから）で、課題が完了でないものだけ（完了の課題の実行と
-		// 反映の依頼は反映の段が読む）。
+		// 反映の依頼は反映の段が読む）と、取り下げでない課題の下書きづくりの実行（kind が spec。分類済・人間対応待ちでも読む）。
 		q := contractRunSelect + ` WHERE ended_at IS NULL AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'done')
-			AND (kind = 'task' OR (kind = 'reflect' AND (challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying', 'awaiting_human'))
+			AND (kind = 'task' OR (kind = 'spec' AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'withdrawn')) OR (kind = 'reflect' AND (challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying', 'awaiting_human'))
 				OR operation_id IN (SELECT id FROM operation WHERE state = 'closed' AND closed_reason IN ('superseded', 'challenge_rejected')))))`
 		args := []any{}
 		if only != nil {
