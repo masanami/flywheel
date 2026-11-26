@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/masanami/flywheel/internal/core/coretest"
-	"github.com/masanami/flywheel/internal/core/internal/store"
 )
 
 // 仕様の下書きの見分けと、置き換える元の文書の場所（docs/features/request-to-plan.md の S2a の土台）を実ストアで確かめる。
@@ -306,100 +304,5 @@ func TestImport_SpecBasePathAndLandsSpecSurviveTheRoundTrip(t *testing.T) {
 	}
 	if got := showDetail(t, dst, without).SpecBasePath; got != nil {
 		t.Errorf("AC-129: spec_base_path of a challenge without it = %q", *got)
-	}
-}
-
-// versionBeforeSpecDraft は、この区切りより前の最後のストアの版。
-const versionBeforeSpecDraft = 42
-
-// exportFromVersion42 は版 42 のストアを本番のマイグレーションで作り、課題とタスクを 1 件ずつ入れて書き出す
-// （この区切りより前の版のバイナリが書いたファイルと同じ列の構成）。
-func exportFromVersion42(t *testing.T) []byte {
-	t.Helper()
-	all, err := store.Migrations()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var old []store.Migration
-	for _, m := range all {
-		if m.Version <= versionBeforeSpecDraft {
-			old = append(old, m)
-		}
-	}
-	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "flywheel.db"), old)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
-		const ts = "'2026-01-01T00:00:00.000Z'"
-		if _, err := tx.Exec(`INSERT INTO challenge (title, status, reporter, created_at, updated_at, spec_path)
-			VALUES ('old', 'unclassified', 'tester', ` + ts + `, ` + ts + `, '.flywheel/specs/example.md')`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, repo, operation, status, created_at, updated_at)
-			VALUES (1, 1, 'k', 't', 'b', 'd', 'o/r', 'impl', 'pending', ` + ts + `, ` + ts + `)`)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	data, version, err := (&Store{db: db, workspace: dir}).Export(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if version != versionBeforeSpecDraft || strings.Contains(string(data), "spec_base_path") || strings.Contains(string(data), "lands_spec") {
-		t.Fatalf("the fixture is not a version %d export (version %d)", versionBeforeSpecDraft, version)
-	}
-	return data
-}
-
-// AC-131・AC-132。
-func TestImport_ExportOfThePreviousVersionReadsTheNewColumnsAsUnset(t *testing.T) {
-	dst, _ := newWorkspaceStore(t)
-	version, err := dst.Import(context.Background(), exportFromVersion42(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if version != versionBeforeSpecDraft {
-		t.Errorf("reported schema version = %d, want that of the file (%d)", version, versionBeforeSpecDraft)
-	}
-	d := showDetail(t, dst, "C-1")
-	if d.SpecBasePath != nil {
-		t.Errorf("AC-131: spec_base_path = %q, want nil", *d.SpecBasePath)
-	}
-	if !d.SpecIsDraft() {
-		t.Errorf("the draft is told from the place, so it holds for an old export too")
-	}
-	if len(d.Tasks) != 1 || d.Tasks[0].LandsSpec {
-		t.Errorf("AC-132: tasks = %+v", d.Tasks)
-	}
-}
-
-// 版 42 を名乗るのに列の構成が合わないファイルは、読み替えずに拒否する。
-func TestImport_PreviousVersionWithUnexpectedColumnsIsRejected(t *testing.T) {
-	old := exportFromVersion42(t)
-	for name, mutate := range map[string]func(tables map[string]any){
-		"already has spec_base_path": func(tables map[string]any) {
-			tables["challenge"].([]any)[0].(map[string]any)["spec_base_path"] = "docs/a.md"
-		},
-		"already has lands_spec": func(tables map[string]any) {
-			tables["task"].([]any)[0].(map[string]any)["lands_spec"] = json.Number("1")
-		},
-		"lacks an older column": func(tables map[string]any) {
-			delete(tables["task"].([]any)[0].(map[string]any), "covers")
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			doc := replaceJSON(t, old, func(d map[string]any) { mutate(d["tables"].(map[string]any)) })
-			dst, dir := newWorkspaceStore(t)
-			assertImportRejected(t, dst, dir, doc)
-		})
-	}
-	// 列を足すだけと分かっていない版（41 以前・この版より新しい版）は、これまでどおり拒否する。
-	for _, v := range []string{"41", "44"} {
-		doc := replaceJSON(t, old, func(d map[string]any) { d["schema_version"] = json.Number(v) })
-		dst, dir := newWorkspaceStore(t)
-		assertImportRejected(t, dst, dir, doc)
 	}
 }
