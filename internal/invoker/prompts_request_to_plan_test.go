@@ -2,7 +2,6 @@ package invoker
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,16 +100,49 @@ func TestInstructions_J2ExpandSectionDescribesCovers(t *testing.T) {
 	requirePhrases(t, "the section 足す形の呼び出し", sec, "「受入基準」（あるときだけ）", "covers には、区画「受入基準」の識別をそのまま写す", "区画が無ければ空")
 }
 
-// j2.md の上限は、本文に余白を足した値以下で、19 KiB を超えない（本文が上限以下であることは
-// TestCheckPromptSizes_RealEmbedIsWithinLimits、余白の下限は TestJ2Prompt_HasHeadroomBelowLimit）。
-func TestJ2Prompt_LimitIsRaisedOnlyByTheAddedText(t *testing.T) {
+// j2SpecDraftLine は j2.md の、下書きをリポジトリへ入れるタスクの決め方の行。
+func j2SpecDraftLine(t *testing.T) string {
+	t.Helper()
+	return promptLine(t, promptSection(t, j2Instructions(t), "## 判断"), "   - 下書きを入れるタスク")
+}
+
+// AC-115: 印「下書き」があるときは、下書きをリポジトリへ入れるタスクを 1 件だけ決めて lands_spec を真にする。
+func TestInstructions_J2DecidesExactlyOneTaskThatLandsTheSpecDraft(t *testing.T) {
+	requirePhrases(t, "the spec draft rule", j2SpecDraftLine(t),
+		"印「下書き」があるとき", "下書きをリポジトリへ入れるタスクを 1 件だけ決め", "lands_spec を真にする")
+}
+
+// AC-116: タスクが 1 件の計画では、そのタスクが文書を入れることと実装の両方を行う。
+func TestInstructions_J2TheOnlyTaskLandsTheSpecAndImplements(t *testing.T) {
+	requirePhrases(t, "the spec draft rule", j2SpecDraftLine(t),
+		"タスクが 1 件の計画では、そのタスクが文書を入れることと実装の両方を行う")
+}
+
+// AC-117: タスクが 2 件以上の計画では、文書を入れるタスクを最初に置き、ほかのタスクの前提にする。
+func TestInstructions_J2PutsTheSpecLandingTaskFirstAsAPrerequisite(t *testing.T) {
+	requirePhrases(t, "the spec draft rule", j2SpecDraftLine(t),
+		"2 件以上の計画では、文書を入れるタスクを最初に置き", "ほかのすべてのタスクの前提にする")
+}
+
+// 済みのタスクが下書きを入れた後の作り直しと、下書きでない課題では、どのタスクにも lands_spec を真にしない
+// （計画の検査がどちらも不正にする）。済みのタスクが入れたかは、前の計画の本文と区画「済みのタスク」で見分ける。
+func TestInstructions_J2MarksNoTaskWithoutADraftOrAfterItIsLanded(t *testing.T) {
+	requirePhrases(t, "the spec draft rule", j2SpecDraftLine(t),
+		"済みのタスクが下書きを入れた後", "前の計画の本文の「リポジトリへ入れるのは」が挙げる題名", "区画「済みのタスク」", "印が無いときは、どのタスクも真にしない")
+}
+
+// AC-118: j2.md の上限は、本文のバイト数に 300 を足した値。
+func TestJ2Prompt_LimitIsTheBodySizePlusTheHeadroom(t *testing.T) {
 	size := len(j2Instructions(t))
-	limit := judgmentPromptLimit["j2.md"]
-	if limit > size+j2HeadroomBytes {
-		t.Errorf("j2.md limit %d bytes, want <= %d (size %d + %d)", limit, size+j2HeadroomBytes, size, j2HeadroomBytes)
+	if limit := judgmentPromptLimit["j2.md"]; limit != size+j2HeadroomBytes {
+		t.Errorf("j2.md limit %d bytes, want %d (size %d + %d)", limit, size+j2HeadroomBytes, size, j2HeadroomBytes)
 	}
-	if limit > 19456 {
-		t.Errorf("j2.md limit %d bytes, want <= 19456", limit)
+}
+
+// AC-119: j2.md の上限は 20 KiB を超えない。
+func TestJ2Prompt_LimitIsWithinTheCap(t *testing.T) {
+	if limit := judgmentPromptLimit["j2.md"]; limit > 20480 {
+		t.Errorf("j2.md limit %d bytes, want <= 20480", limit)
 	}
 }
 
@@ -135,20 +167,69 @@ func TestChatInstructions_AfterTheSpecSkill(t *testing.T) {
 		"仕様づくりのスキル", "終わりの案内", "Issue を作らない", "Issue に分けるスキルを呼ばない", "--spec")
 }
 
-func TestChatPrompt_LimitIsRaisedWithinTheCap(t *testing.T) {
-	fsys, err := promptsSubFS()
+// chatAfterTheSpecSkill は chat.md の節「仕様づくりの後」を返す。
+func chatAfterTheSpecSkill(t *testing.T) string {
+	t.Helper()
+	ins, err := ChatInstructions()
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := fs.Stat(fsys, chatPromptFile)
+	return promptSection(t, ins, "## 仕様づくりの後")
+}
+
+// AC-121: 仕様の文書は、対象のリポジトリではなく下書きの置き場に書く。
+func TestChatInstructions_WritesTheSpecUnderTheDraftDirectory(t *testing.T) {
+	line := promptLine(t, chatAfterTheSpecSkill(t), "- 仕様の文書は")
+	requirePhrases(t, "chat.md の下書きの置き場", line,
+		"対象のリポジトリではなく", "下書きの置き場（`.flywheel/specs/` の下）に書く")
+}
+
+// AC-122: 仕様づくりのスキルの保存先は、下書きの置き場にする。
+func TestChatInstructions_SetsTheSaveLocationOfTheSpecSkillToTheDraftDirectory(t *testing.T) {
+	requirePhrases(t, "chat.md の仕様づくりの後", chatAfterTheSpecSkill(t),
+		"仕様づくりのスキルを使うときは、「保存先」を下書きの置き場にする")
+}
+
+// AC-123: 既存の文書を直すときは、全文を写してから直し、--spec-base を付ける。
+func TestChatInstructions_CopiesTheWholeDocumentAndSetsSpecBase(t *testing.T) {
+	line := promptLine(t, chatAfterTheSpecSkill(t), "- 既存の文書を直すとき")
+	requirePhrases(t, "chat.md の既存の文書の直し", line,
+		"全文を写してから直し", "`--spec-base <パス>`", "置き換える元の文書", "リポジトリの中の相対のパス")
+}
+
+// AC-124: 課題を作るときは、--spec で下書きの場所を付ける。
+func TestChatInstructions_SetsSpecToTheDraftWhenCreatingTheChallenge(t *testing.T) {
+	line := promptLine(t, chatAfterTheSpecSkill(t), "- 仕様の文書から課題を作るとき")
+	requirePhrases(t, "chat.md の課題の作成", line,
+		"`flywheel create`", "`--spec <下書きのパス>`", "ワークスペースから見た相対のパス")
+}
+
+// AC-125: 仕様づくりのスキルの案内に従って Issue を作らない案内が残る。
+func TestChatInstructions_KeepsTheRuleNotToCreateAnIssue(t *testing.T) {
+	requirePhrases(t, "chat.md の仕様づくりの後", chatAfterTheSpecSkill(t),
+		"仕様づくりのスキルの終わりの案内に従わず、Issue を作らない")
+}
+
+// AC-126: Issue に分けるスキルを呼ばない案内が残る。
+func TestChatInstructions_KeepsTheRuleNotToCallTheSplittingSkill(t *testing.T) {
+	requirePhrases(t, "chat.md の仕様づくりの後", chatAfterTheSpecSkill(t), "Issue に分けるスキルを呼ばない")
+}
+
+// AC-127: chat.md の上限は、前の値（5,060 バイト）より大きく、本文のバイト数以上。
+func TestChatPrompt_LimitIsRaisedAndCoversTheBody(t *testing.T) {
+	ins, err := ChatInstructions()
 	if err != nil {
 		t.Fatal(err)
 	}
 	limit := judgmentPromptLimit[chatPromptFile]
-	if limit <= 4682 || limit > 5632 {
-		t.Errorf("chat.md limit %d bytes, want > 4682 and <= 5632", limit)
+	if limit <= 5060 || limit < len(ins) {
+		t.Errorf("chat.md limit %d bytes, want > 5060 and >= %d", limit, len(ins))
 	}
-	if info.Size() > int64(limit) {
-		t.Errorf("chat.md is %d bytes, exceeds the limit %d", info.Size(), limit)
+}
+
+// AC-128: chat.md の上限は 5.5 KiB を超えない。
+func TestChatPrompt_LimitIsWithinTheCap(t *testing.T) {
+	if limit := judgmentPromptLimit[chatPromptFile]; limit > 5632 {
+		t.Errorf("chat.md limit %d bytes, want <= 5632", limit)
 	}
 }
