@@ -1,4 +1,4 @@
-// Package assets は flow の資材（ticket・ticket-light・reflect の定義と、それが使う指示文・出力の型・つなぎのスクリプト）を
+// Package assets は flow の資材（ticket・ticket-light・reflect・spec-draft の定義と、それが使う指示文・出力の型・つなぎのスクリプト）を
 // バイナリへ埋め込み、版ごとのディレクトリへ展開する。
 //
 // 展開先は <ワークスペース>/.flywheel/flow/runtime/<版>/ で、版ごとに不変にする（長く走る run の途中で
