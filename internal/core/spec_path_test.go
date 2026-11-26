@@ -46,7 +46,7 @@ func TestSpecPath_CreateAndEdit(t *testing.T) {
 	specLinkFixture(t, ws)
 
 	for _, ok := range []string{
-		"docs/x.md", "docs/y.md", "no/such/dir/x.md", "docs/../docs/x.md", "indir/x.md", "inabs/new.md",
+		"docs/x.md", "docs/y.md", "no/such/dir/x.md", "indir/x.md", "inabs/new.md",
 		"indangling", "docs/up/docs/x.md", "docs/x.md/under-a-file.md", "..hidden.md",
 	} {
 		c, err := s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: "t", Spec: ok})
@@ -83,6 +83,8 @@ func TestSpecPath_CreateAndEdit(t *testing.T) {
 		// 字面で畳むと外を指すリンクになる。
 		"docs/up/../outfile", "no/../outfile",
 		".", "docs/..", "root", "  ", "a\x00b", "bad\xff.md",
+		// `..` の要素は、中に収まるものも断る。
+		"docs/../docs/x.md",
 	} {
 		before := mustExport(t, s)
 		if _, err := s.CreateChallenge(ctx, ChannelCLI, CreateInput{Title: "t", Spec: bad}); !errors.Is(err, ErrValidation) {

@@ -26,21 +26,29 @@ type planAcceptanceCriteria struct {
 }
 
 // loadPlanAcceptanceCriteria は計画の構造化した出力 spec（空は出力なし）が持つ受入基準の一覧を返す。
-// 一覧を持たない（項目が無いか、基準が 0 件の）計画では nil。
+// 一覧を持たない（項目 acceptance_criteria が無い）計画では nil。項目があるのに null・基準が 0 件のものは、
+// 壊れた出力として誤りにする（core は 1 件以上の一覧だけを書き足す。一覧なしと読むと、検査し直しが黙って外れる）。
 func loadPlanAcceptanceCriteria(spec string) (*planAcceptanceCriteria, error) {
 	if spec == "" {
 		return nil, nil
 	}
 	var out struct {
-		AcceptanceCriteria *planAcceptanceCriteria `json:"acceptance_criteria"`
+		AcceptanceCriteria json.RawMessage `json:"acceptance_criteria"`
 	}
 	if err := json.Unmarshal([]byte(spec), &out); err != nil {
 		return nil, fmt.Errorf("task_plan spec acceptance_criteria: %w", err)
 	}
-	if out.AcceptanceCriteria == nil || len(out.AcceptanceCriteria.Items) == 0 {
+	if out.AcceptanceCriteria == nil {
 		return nil, nil
 	}
-	return out.AcceptanceCriteria, nil
+	var list *planAcceptanceCriteria
+	if err := json.Unmarshal(out.AcceptanceCriteria, &list); err != nil {
+		return nil, fmt.Errorf("task_plan spec acceptance_criteria: %w", err)
+	}
+	if list == nil || len(list.Items) == 0 {
+		return nil, fmt.Errorf("task_plan spec acceptance_criteria: the list is empty")
+	}
+	return list, nil
 }
 
 // doneTaskCovers は、tasks のうち済みのタスクが受け持つ識別の集合を返す。
