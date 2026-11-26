@@ -79,8 +79,10 @@ func loadDoneTaskCovers(ctx context.Context, tx *sql.Tx, cid int64) (map[string]
 }
 
 // formatPlanAcceptanceCriteriaSection は計画の形の呼び出しの区画「受入基準」の本文。下書きの一覧では、見出しの行に続けて、
-// 下書きであることと、置き換える元の文書（無ければ新しい文書であること）の行を足す。
-func formatPlanAcceptanceCriteriaSection(list planAcceptanceCriteria, tasks []Task) string {
+// 下書きであること（下書きを入れた済みのタスクがあれば、その題名 doneLanding つき）と、置き換える元の文書
+// （無ければ新しい文書であること）の行を足す。doneLanding は計画の検査（checkPlanSpecLanding）へ渡す値と同じもの。
+// tasks（済みの印を付ける集合）とは別の集合なので、tasks からは導かない。
+func formatPlanAcceptanceCriteriaSection(list planAcceptanceCriteria, tasks []Task, doneLanding *string) string {
 	body := formatAcceptanceCriteriaSection(list, tasks)
 	if !list.Draft {
 		return body
@@ -89,9 +91,13 @@ func formatPlanAcceptanceCriteriaSection(list planAcceptanceCriteria, tasks []Ta
 	if list.BasePath != nil {
 		origin = "置き換える元: " + oneLine(*list.BasePath)
 	}
+	state := "下書き（リポジトリにまだ入っていない）"
+	if doneLanding != nil {
+		state = "下書き（済みのタスク「" + oneLine(*doneLanding) + "」がリポジトリへ入れた）"
+	}
 	// 見出し（場所と件数の行）と基準の行の間は、空の行 1 つ。
 	head, items, _ := strings.Cut(body, "\n\n")
-	return head + "\n下書き（リポジトリにまだ入っていない）\n" + origin + "\n\n" + items
+	return head + "\n" + state + "\n" + origin + "\n\n" + items
 }
 
 // formatAcceptanceCriteriaSection は区画「受入基準」の本文。tasks のうち済みのタスクが受け持つ基準の行に、済みの印を付ける。

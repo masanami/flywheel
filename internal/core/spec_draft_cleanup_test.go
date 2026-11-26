@@ -269,6 +269,86 @@ func TestSpecDraftCleanup_ReleaseExecution(t *testing.T) {
 	})
 }
 
+// 実行されずに閉じた反映の操作も、まだ実行していない不可逆操作から外れる（Issue #1343）。
+func TestSpecDraftCleanup_ReleaseClosedWithoutExecution(t *testing.T) {
+	t.Parallel()
+	const otherRef = "https://github.com/o/r/pull/99"
+	// fixture は下書きを持つ完了した課題と、承認待ちの反映の操作 1 件。
+	fixture := func(t *testing.T) *relFixture {
+		t.Helper()
+		f := newRelFixture(t)
+		writeWorkspaceFile(t, f.s.workspace, sdPath, "# 下書き\n")
+		sdSetSpec(t, f.s, formatChallengeID(f.cid), sdPath, "")
+		f.setOpState(t, OperationStatePending)
+		return f
+	}
+	for _, tc := range []struct {
+		state  string
+		reason ClosedReason
+	}{
+		{"closed", ClosedReasonPRClosed},
+		{"merged", ClosedReasonMergedOutside},
+	} {
+		t.Run("最後の承認待ちの反映が閉じたら消す "+string(tc.reason), func(t *testing.T) {
+			t.Parallel()
+			f := fixture(t)
+			f.fake.pr = UpstreamPullRequestChecks{State: tc.state, Base: "main", HeadSHA: relHead}
+			res := f.runAll(t, nil)
+			if len(res.Tidied) != 1 || res.Tidied[0].ClosedReason != tc.reason {
+				t.Fatalf("tidied = %+v, want one %s", res.Tidied, tc.reason)
+			}
+			scRequireExists(t, f.s, sdPath, false)
+		})
+	}
+	t.Run("ほかに承認待ちの反映が残るあいだは残す", func(t *testing.T) {
+		t.Parallel()
+		f := fixture(t)
+		// 参照を PR の URL にしないので、片付けは 2 件目を読まず、承認待ちのまま残る。
+		coretest.InsertReleaseOperation(t, f.s.workspace, int(f.cid), "not-a-pr", string(OperationStatePending))
+		f.fake.pr = UpstreamPullRequestChecks{State: "closed", Base: "main", HeadSHA: relHead}
+		if res := f.runAll(t, nil); len(res.Tidied) != 1 {
+			t.Fatalf("tidied = %+v, want one", res.Tidied)
+		}
+		scRequireExists(t, f.s, sdPath, true)
+	})
+	t.Run("最後の承認待ちの操作を人が差し戻したら消す", func(t *testing.T) {
+		t.Parallel()
+		f := fixture(t)
+		ctx := context.Background()
+		id, reason := formatOperationID(f.opID), "入れない"
+		prev, err := f.s.PrepareOperationRejection(ctx, id, reason)
+		if err != nil {
+			t.Fatalf("PrepareOperationRejection: %v", err)
+		}
+		if _, _, err := f.s.ExecuteOperationApproval(ctx, OperationApprovalRequest{
+			OperationID: id, Decision: ApprovalDecisionRejected, Reason: &reason,
+			ExpectedVersion: prev.Version, ExpectedChallengeVersion: prev.ChallengeVersion,
+		}, verifiedAttestationForTest(t, id)); err != nil {
+			t.Fatalf("ExecuteOperationApproval: %v", err)
+		}
+		scRequireExists(t, f.s, sdPath, false)
+	})
+	t.Run("契約の成果物から外れて閉じた最後の 1 件", func(t *testing.T) {
+		t.Parallel()
+		f := fixture(t)
+		coretest.InsertReleaseOperation(t, f.s.workspace, int(f.cid), otherRef, string(OperationStatePending))
+		runID := coretest.InsertRun(t, f.s.workspace, coretest.InsertRunInput{
+			ChallengeID: int(f.cid), Kind: "delegate", ChallengeVersion: 1, SessionID: "33333333-3333-4333-8333-333333333333",
+			PID: 1, Host: "h", HeartbeatAt: execTS(0), StartedAt: execTS(0), EndedAt: execTS(0), Result: "succeeded",
+			MaxBudgetUSD: 1_000_000, BudgetBucket: "impl",
+		})
+		keepOther := map[string]bool{prKey("o/r", 99): true}
+		if err := f.s.supersedeStaleReleases(context.Background(), f.cid, runID, keepOther); err != nil {
+			t.Fatalf("supersedeStaleReleases: %v", err)
+		}
+		scRequireExists(t, f.s, sdPath, true)
+		if err := f.s.supersedeStaleReleases(context.Background(), f.cid, runID, nil); err != nil {
+			t.Fatalf("supersedeStaleReleases: %v", err)
+		}
+		scRequireExists(t, f.s, sdPath, false)
+	})
+}
+
 func TestSpecDraftCleanup_KeptWhileTheChallengeGoesOn(t *testing.T) {
 	t.Parallel()
 	t.Run("AC-112 計画の承認", func(t *testing.T) {
