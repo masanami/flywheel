@@ -129,8 +129,6 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	spec = append(spec, "integration_unavailable", "no_tasks")
 	// 反映の段（S3a）が足した理由。直前の試行が waiting_outside の反映の操作を、試行の行を増やさず飛ばす。
 	spec = append(spec, "waiting_outside")
-	// 仕様の文書を読めない課題を、計画の段が起動しない理由（docs/features/request-to-plan.md）。
-	spec = append(spec, "spec_unreadable")
 	sort.Strings(spec)
 
 	var impl []string
