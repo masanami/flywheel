@@ -33,6 +33,12 @@ func resolveSpecPath(workspace, p string) (string, error) {
 	if filepath.IsAbs(p) {
 		return "", errSpecPathAbsolute
 	}
+	// `..` の要素を含む場所は、中に収まるものも受け取らない（仕様: `..` を含むものは検査の誤り）。
+	for _, elem := range strings.Split(filepath.ToSlash(p), "/") {
+		if elem == ".." {
+			return "", errSpecPathOutside
+		}
+	}
 	clean := filepath.Clean(p)
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", errSpecPathOutside
