@@ -640,6 +640,26 @@ S2 の分。S1 の分は、下の「機能全体の設計（S1・実装済み）
 6. **画面**: API の欄と、タスクの詳細の一覧（4 の後）
 7. **文書と切り替え**: 設計書・用語集・`CLAUDE.md`・Tom の切り替えの手順（3 の後）
 
+## 下書きづくりのフロー `spec-draft` と、そのための直し（要求から計画まで S2b-1 で足した）
+
+下書きづくりの流れ・core の側の扱い・受入基準の正本は [request-to-plan-s2b.md](request-to-plan-s2b.md)。ここには、組み込みのフローと、フローを進める仕組みの側で足したものを書く。上の S1・S2 の節の記述は、当時の形を残している。
+
+### 組み込みのフロー `spec-draft`
+
+- 定義は `internal/flow/assets/files/workflows/spec-draft.yaml`。指示文は `prompts/spec-draft-write.md`・`prompts/spec-draft-critique.md`、出力の型は `schemas/spec-draft-write.json`・`schemas/spec-draft-critique.json`（写した元の無い flywheel の資材。`SHA256SUMS` に載せる）。
+- ステップは `llm` の 2 つで、`write`（失敗の理由 `write_failed`）の後に `critique`（`critique_failed`）。どちらもセッションは新しく始め、やり直しの遷移は持たない。`critique` は、プラグインの批評役（`claude-harness:spec-critic`）を 3 つの観点で並べて呼び、修正役（`claude-harness:spec-fixer`）に直させる。問いが残っても成功で終わる。
+- 入力は `draft_file`・`brief_file`・`brief_dir`・`repo_dir`・`base_path`（任意）・`challenge_id`。`facts` は `spec_questions`（`critique` の出力の問いの配列）の 1 つ。
+- 2 つのステップは、`add_dirs` に入力 `repo_dir`・`brief_dir` を持ち、`tools` は `Read`・`Grep`・`Glob`・`Write`・`Edit`・`Agent` だけ。
+- 作業ディレクトリは下書きの置き場（`.flywheel/specs/`）で、Git の作業ツリーでなくてよい。
+- `limits.budget_usd` は、core の定数 `SpecDraftDefaultBudgetUSD` と同じ値（試験で一致させる）。モデル・effort・ステップの上限額・時間切れは定義が持つ（仮の値。実物の実行を測って決め直す）。
+- 委譲先の操作の `flow` に書ける値（`ticket`・`ticket-light`）には入れない。core がタスクの無い契約の実行（種類 `spec`）として始める。
+
+### フローを進める仕組みに足したもの
+
+- **`facts` に配列の欄を載せられる**: 出力の型が配列の欄は、`encoding/json` の既定の直列化（空白なし・要素とキーは出力の順）の文字列にして載せる。`null`・欠けている・配列でないときは値なし（その名前を載せない。前の値も残さない）。オブジェクト・数値・真偽の欄は、定義の読み込みで誤り。契約の JSON の形（名前 → 文字列）と版は変えない。
+- **`llm` のステップのキー `tools`**: 道具の名前の並び（1 件以上）。書いたステップだけ、実行エンジンの起動の引数に `--tools <名前をカンマでつないだもの>` を足す。書かないステップの引数は変わらない。
+- **`flywheel flow start --budget-usd <額>`**: 正の数。渡した額が、その実行の `limits.budget_usd` になる。フロー `spec-draft` のときだけ受け付け、ほかのフローでは使い方の誤り。core は下書きづくりの開始で、決めた上限額をいつも渡す。定義を利用側で変える口（`--override`）は、受け付けないまま。
+
 ## スライス（出荷の単位）
 
 | スライス | 内容 | 触るファイル数（概算） | 出荷条件 |
