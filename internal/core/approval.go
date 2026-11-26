@@ -516,6 +516,11 @@ type AnswerPreview struct {
 	AnswerText     string
 	Options        []HoldOption
 	OptionRequired bool
+	// SpecHoldReason は答える保留が下書きづくりの保留のときの理由（そうでなければ空）、SpecQuestions はその記録の残った問い。
+	// SpecAnswers は選択肢 answer で答えるときに記録する、問いごとの答え。
+	SpecHoldReason SpecDraftHoldReason
+	SpecQuestions  []SpecDraftQuestion
+	SpecAnswers    []SpecDraftAnswer
 }
 
 // PrepareAnswer は answer の①（読み取り）。answer が空なら、端末を開く前に
@@ -537,6 +542,20 @@ func (s *Store) PrepareAnswerOption(ctx context.Context, id string, answer strin
 // 開いている保留が 2 つ以上で hold が空・hold がその課題の開いている保留でない・H-<番号>の形でないときは、何も書かず ErrValidation
 // （2 つ以上のときの誤りの文に、開いている保留の ID・タスクの題名・問いの先頭を出す）。
 func (s *Store) PrepareAnswerHold(ctx context.Context, id string, hold string, answer string, option string, replan bool) (*AnswerPreview, error) {
+	return s.PrepareAnswerWithItems(ctx, id, hold, answer, option, replan, nil)
+}
+
+// PrepareAnswerWithItems は PrepareAnswerHold に、下書きの問いの保留への問いごとの答え（items。無ければ nil）を足した版。
+// 下書きづくりの保留では、選択肢と items も検査する（proceed は下書きを読む）。items があるのに答える相手が下書きの問いの保留でない
+// （課題が無い・人間対応待ちでない・保留を決められないときを含む）なら ErrSpecAnswersNotAccepted で、その訳の誤りも errors.Is で見分けられる。
+func (s *Store) PrepareAnswerWithItems(ctx context.Context, id string, hold string, answer string, option string, replan bool, items []PlanAnswerItem) (*AnswerPreview, error) {
+	// notAccepted は、保留を決める前の誤りを、items があるときだけ「問いごとの答えを受けられない」にも見分けられるようにする。
+	notAccepted := func(err error) error {
+		if len(items) == 0 {
+			return err
+		}
+		return fmt.Errorf("%w: %w", ErrSpecAnswersNotAccepted, err)
+	}
 	if option != "" && replan {
 		return nil, fmt.Errorf("%w: --option and --replan cannot be combined", ErrValidation)
 	}
@@ -546,24 +565,38 @@ func (s *Store) PrepareAnswerHold(ctx context.Context, id string, hold string, a
 
 	cid, ok := parseChallengeID(id)
 	if !ok {
-		return nil, ErrNotFound
+		return nil, notAccepted(ErrNotFound)
 	}
 
 	var preview AnswerPreview
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		current, err := loadChallenge(ctx, tx, cid)
+		if errors.Is(err, ErrNotFound) {
+			return notAccepted(err)
+		}
 		if err != nil {
 			return err
 		}
 		if IsTerminal(Table, StatusVocabulary, current.Status) {
-			return ErrTerminalState
+			return notAccepted(ErrTerminalState)
 		}
 		if current.Status != StatusAwaitingHuman {
-			return ErrInvalidTransition
+			return notAccepted(ErrInvalidTransition)
 		}
 
 		holdID, question, fromStatus, _, taskTitle, err := selectAnswerHold(ctx, tx, cid, current.ID, hold)
+		if errors.Is(err, ErrValidation) {
+			return notAccepted(err)
+		}
 		if err != nil {
+			return err
+		}
+		spec, err := specDraftOfHold(ctx, tx, cid, holdID)
+		if err != nil {
+			return err
+		}
+		// 選択肢の検査より先に断る（問いの保留でない相手には、どの選択肢でも同じ誤りを返す）。
+		if err := requireSpecQuestionHold(spec, items); err != nil {
 			return err
 		}
 		opts, required, err := loadHoldOptionsOf(ctx, tx, holdID)
@@ -597,6 +630,13 @@ func (s *Store) PrepareAnswerHold(ctx context.Context, id string, hold string, a
 			Answer:         answer,
 			Version:        current.Version,
 			FromStatus:     fromStatus,
+		}
+		if spec != nil {
+			answers, err := s.checkSpecDraftAnswer(spec, *chosen, items)
+			if err != nil {
+				return err
+			}
+			preview.SpecHoldReason, preview.SpecQuestions, preview.SpecAnswers = *spec.HoldReason, spec.Questions, answers
 		}
 		return nil
 	})
@@ -1062,6 +1102,9 @@ type AnswerRequest struct {
 	// Agent・Conn は、足す依頼の保留で「足す」を選んだとき、保存した出力を検査する宣言（nil なら core が作業ディレクトリの宣言を読む）。
 	Agent *AgentDeclaration
 	Conn  *ConnectorsDeclaration
+	// Items は下書きの問いの保留への問いごとの答え。選択肢 answer と一緒のときだけ受ける（ほかの保留・選択肢と一緒なら ErrValidation）。
+	// 答えの無い問いには、推奨を答えたことになる。
+	Items []PlanAnswerItem
 	// HoldCheck は、画面が読んだときの保留の照合の値（Hold.Check）。経路 ui の回答では必須で、書き込みの中でいまの値と同じことを確かめる
 	// （違えば ErrConflict）。経路 ui の回答は HoldID も必須。ほかの経路は使わない。
 	HoldCheck string
@@ -1084,6 +1127,10 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	if !attestationPermits(att, req.ChallengeID, actionAnswer) {
 		return nil, nil, ErrVerificationRejected
 	}
+	// 足す依頼の保留の問いの出し直しは遷移の前に書くので、問いごとの答えと一緒にできない選択肢は先に断る。
+	if len(req.Items) > 0 && req.Option == taskAddOptionAdd {
+		return nil, nil, fmt.Errorf("%w: %w", ErrValidation, ErrSpecAnswersNotAccepted)
+	}
 
 	answerText := req.Answer
 	var chosenOption *string
@@ -1093,6 +1140,9 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	var holdTaskID sql.NullInt64
 	// replan は計画を作り直す回答か（--replan、または足す依頼の保留で選んだ「計画を作り直す」）。
 	replan := req.Replan
+	// spec は答える保留が下書きづくりの保留のときの記録、specAnswers は記録に足す答え。
+	var spec *SpecDraft
+	var specAnswers []SpecDraftAnswer
 
 	resolvePreceding := func(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge) (Status, error) {
 		id, question, fromStatus, raisedAt, _, err := selectAnswerHold(ctx, tx, cid, current.ID, req.HoldID)
@@ -1100,6 +1150,13 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return "", err
 		}
 		holdID = id
+		spec, err = specDraftOfHold(ctx, tx, cid, id)
+		if err != nil {
+			return "", err
+		}
+		if err := requireSpecQuestionHold(spec, req.Items); err != nil {
+			return "", err
+		}
 		opts, required, err := loadHoldOptionsOf(ctx, tx, id)
 		if err != nil {
 			return "", err
@@ -1107,6 +1164,13 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		answerText, chosenOption, err = resolveAnswerOption(opts, required, req.Option, req.Answer)
 		if err != nil {
 			return "", err
+		}
+		if spec != nil {
+			// 書き込みの前に確かめる。確かめ（PrepareAnswer…）を通らない画面の回答も、ここで断る。
+			specAnswers, err = s.checkSpecDraftAnswer(spec, *chosenOption, req.Items)
+			if err != nil {
+				return "", err
+			}
 		}
 		replan = req.Replan || isTaskAdditionReplanChoice(ctx, tx, id, chosenOption)
 		if replan {
@@ -1153,6 +1217,11 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			Reason: holdReasonValue, TaskID: holdTaskID,
 		}); err != nil {
 			return err
+		}
+		if spec != nil {
+			if err := applySpecDraftAnswer(ctx, tc, spec, *chosenOption, specAnswers); err != nil {
+				return err
+			}
 		}
 
 		// S3（Issue #39）: 未設定（保留の answer が無い）から値が入るので、
@@ -1226,6 +1295,10 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+	// 下書きは、省く書き込みが成立した後に消す（消せなくても回答は成立している）。
+	if spec != nil && chosenOption != nil && *chosenOption == specDraftOptionSkip {
+		s.discardSpecDraft(ctx, cid, att.Actor())
 	}
 	return c, &holdOut, nil
 }
