@@ -16,6 +16,7 @@ import {
   WAITING_LABELS,
   waitingKindsOfActions,
 } from "../shell/waiting.ts";
+import { SpecDraftHold } from "./SpecDraftHold.tsx";
 
 // 種類の語は課題の画面と同じ（shell/waiting.ts）。知らないコードは生のコードを出す。
 const waitingLabel = (a: string): string => {
@@ -37,6 +38,7 @@ export function Waiting({
   reload: () => void;
 }) {
   const id = show.challenge.id;
+  const specDraft = show.challenge.spec_draft;
   const answerState = useHoldAnswer(agentName, id, reload);
   const actions = show.card.next_human_actions;
   const openHolds = show.holds.filter(
@@ -129,6 +131,13 @@ export function Waiting({
                     ) : (
                       <p data-testid="hold-scope">課題全体を止めています</p>
                     )}
+                    {specDraft !== null && specDraft.hold_id === h.hold_id ? (
+                      <SpecDraftHold
+                        draft={specDraft}
+                        challengeId={id}
+                        workspacePath={workspacePath}
+                      />
+                    ) : null}
                     {hasOptions(h) ? (
                       <HoldOptions
                         key={`${h.hold_id}:${h.check ?? ""}`}
