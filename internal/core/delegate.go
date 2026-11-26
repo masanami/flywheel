@@ -716,6 +716,14 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 
 // runDelegationAfterPoll は RunDelegation の、契約の run の状態の読みより後の本体。
 func (s *Store) runDelegationAfterPoll(ctx context.Context, in DelegateInput) (*DelegateResult, error) {
+	// 下書きづくりを始める（承認なし。タスクの起動より先）。ID を指定した呼び出しで対象があれば、ここで終える。
+	specs, specHandled, err := s.startSpecDrafts(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if in.ChallengeID != nil && specHandled {
+		return specs, nil
+	}
 	// 統合先を使う課題の、全部のタスクが済んだときの上げる依頼を始める（タスクの起動より先。始めた課題は、タスクの起動の対象にならない）。
 	reflects, handled, err := s.startIntegrationReflects(ctx, in)
 	if err != nil {
@@ -728,7 +736,7 @@ func (s *Store) runDelegationAfterPoll(ctx context.Context, in DelegateInput) (*
 	if err != nil {
 		return nil, err
 	}
-	res.Items = append(reflects.Items, res.Items...)
+	res.Items = append(append(specs.Items, reflects.Items...), res.Items...)
 	res.NotStarted = append(reflects.NotStarted, res.NotStarted...)
 	return res, nil
 }

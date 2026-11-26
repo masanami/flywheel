@@ -49,7 +49,7 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 	}
 
 	var runTargets []int64
-	var contractRuns, blockedRuns int
+	var contractRuns, blockedRuns, specDrafts int
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		ids, _, err := selectJ1AutoTargets(ctx, tx)
 		if err != nil {
@@ -101,6 +101,12 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		runTargets, blockedRuns = picked.Targets, len(picked.Blocked)
+		// 下書きづくりを始められる課題と、行き止まりの下書きづくり（失敗の保留にする）も、委譲の段が進める。
+		startable, stalls, err := selectSpecDraftWork(ctx, tx, nil)
+		if err != nil {
+			return err
+		}
+		specDrafts = len(startable) + len(stalls)
 		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE ended_at IS NULL`).Scan(&contractRuns)
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -121,7 +127,7 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 		if err != nil {
 			return nil, err
 		}
-		st.Run = n + contractRuns + blockedRuns + len(reflects)
+		st.Run = n + contractRuns + blockedRuns + len(reflects) + specDrafts
 	}
 	return &CycleWork{Total: st.sum(), Stages: st}, nil
 }

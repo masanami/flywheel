@@ -317,7 +317,7 @@ type contractRunRow struct {
 	WorkDir string
 	// TaskID は結び付くタスクの内部整数 ID（0026。nil は NULL）。
 	TaskID *int64
-	// Kind は契約の実行の種類（task | reflect）。OperationID は反映の依頼が結び付く反映の操作（task は nil）。
+	// Kind は契約の実行の種類（task | reflect | spec）。OperationID は反映の依頼が結び付く反映の操作（task は nil）。
 	Kind        string
 	OperationID *int64
 	// LandRef は「入れてよい」を返す前に書いた通す中身（NULL・空は、いまの承認ではまだ返していないこと）。
@@ -348,6 +348,8 @@ func contractKindOrTask(kind string) string {
 const (
 	contractRunKindTask    = "task"
 	contractRunKindReflect = "reflect"
+	// contractRunKindSpec は下書きづくり。タスクにも計画にも結び付かず、タスクと反映の依頼の経路を通さない。
+	contractRunKindSpec = "spec"
 )
 
 // contractReviewWaitingOpenTx は、課題のタスク taskID の、開いている（終わっていない）契約のレビュー待ちの実行があるかを、
@@ -409,6 +411,8 @@ type contractFill struct {
 	Flow string
 	// ArtifactRef は reflect の {artifact_ref}（反映の操作の参照）。反映の依頼を始める反映の段だけが入れる（それ以外は空）。
 	ArtifactRef string
+	// Spec は下書きづくりの開始（contractCmdSpec）の値。ほかのコマンドでは nil。
+	Spec *specContractFill
 }
 
 // fillContractArgs は契約のコマンドの引数の差し込みを、取り込み元が無いときに空の文字列で埋めない形で埋める
@@ -933,6 +937,11 @@ type contractCall struct {
 	HoldSuccessEnd bool
 }
 
+// isSpec は、下書きづくりの実行の呼び出し（開始と、既にある実行へのコマンド）か。
+func (c contractCall) isSpec() bool {
+	return c.Kind == contractRunKindSpec || (c.Existing != nil && c.Existing.Kind == contractRunKindSpec)
+}
+
 // landedStop は、状態 st が失敗・中止で、「入れてよい」を返し済み（land_ref がある）の統合先を使う課題のタスクの実行か。
 // こうした実行は、統合先へ入ったかを上流で確かめるまで、終わった記録にせず、通す中身もタスクも変えない。
 func (c contractCall) landedStop(st ContractState) bool {
@@ -1081,6 +1090,17 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 	report.CostDeltaUSD, report.CostTotalUSD = microsToUSD(delta), microsToUSD(newTotal)
 	if status == nil && c.Existing != nil {
 		report.State, report.Summary = c.Existing.State, c.Existing.Summary
+	}
+	if c.isSpec() {
+		// 下書きづくりの実行は、タスクの契約の実行の保留を作らない。開始の失敗だけを、下書きづくりの保留にする。
+		if c.Existing == nil {
+			held, herr := s.holdFailedSpecDraftStart(ctx, c, status, reclaimed, result, errSummary)
+			if herr != nil {
+				return nil, herr
+			}
+			report.Held = held
+		}
+		return report, nil
 	}
 	if question := contractHoldQuestion(c, status, out.Status, reclaimed, result, errSummary); question != "" && !c.ReleaseStage &&
 		(status == nil || !c.landedStop(status.State)) {
@@ -1283,6 +1303,13 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	report.Facts = st.Facts
 	if err := s.writeContractRunRecord(ctx, tx, c, st, rk, rd, rt, rb, totalMicros, now, endedAt, report); err != nil {
 		return err
+	}
+	// 下書きづくりの実行は、状態を写すだけで、タスク・成果物・課題の遷移に触れない。始まったら、同じ書き込みで記録へ写す。
+	if c.isSpec() {
+		if c.Existing == nil {
+			return s.markSpecDraftRunning(ctx, tx, c.ChallengeIDInt)
+		}
+		return nil
 	}
 	// 「入れてよい」を返し済みの実行の失敗・取り消しは、統合先へ入ったかを上流で確かめるまで、通す中身もタスクも変えない
 	// （確かめの結果で、済み・保留・着手中へ戻すのどれかを 1 つの書き込みで決める。afterContractRead が扱う）。
@@ -1652,13 +1679,13 @@ func (s *Store) sameTaskRunOpen(ctx context.Context, row *contractRunRow) (bool,
 
 // reclaimedContractStartWhere は、回収された（interrupted）か回収以外で失敗した契約の start の run で、まだ保留に
 // 写していないものを選ぶ条件（run を r、課題を c と別名にした副問い合わせの本体）。start の run は、契約の run（contract_run）を
-// 作る前に回収されると contract_run を持たない。status の run との区別は「その課題の、先に始まった契約の run が
+// 作る前に回収されると contract_run を持たない。下書きづくりの開始（予算の枠 spec）は選ばない（下書きづくりの経路が扱う）。status の run との区別は「その課題の、先に始まった契約の run が
 // その run の開始時点で終わっていなかった」ことで行う。終わりと同じ時刻（ミリ秒）の run は start の run として扱う:
 // 契約の run を終わらせるのは成功した契約のコマンドの run（start・status・resume・cancel）で、成功以外の run は
 // 終わらせない。この条件は成功以外の run だけを選ぶから。run のタスクを進めてよくなければ選ばない（述語 taskMayProceedSQL。
 // 選ぶのは、課題が着手中か、タスクを止める保留だけが開いた人間対応待ちで、そのタスクに開いている保留が無いとき。
 // 課題を止める保留・そのタスクの保留が開いている・取り下げ・完了は選ばない）。
-var reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND ` + taskMayProceedSQL("c", "r.task_id") + `
+var reclaimedContractStartWhere = `r.kind = 'contract' AND r.budget_bucket <> 'spec' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND ` + taskMayProceedSQL("c", "r.task_id") + `
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND COALESCE(k.task_id, 0) = COALESCE(r.task_id, 0) AND k.start_run_id < r.id
 		AND (k.ended_at IS NULL OR k.ended_at > r.started_at))
