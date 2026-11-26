@@ -10,7 +10,7 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 
 ## assets/
 
-`runtime/workflows/` の `ticket.yaml`・`reflect.yaml` と、その 2 つが使う `prompts/`・`schemas/`・`scripts/` のファイルを `assets/files/workflows/` へ写して `go:embed` したもの。`conflict-predict-issue.yaml`・`list-tests.yaml` とその 2 つだけが使うファイルは写していない。プラグインのスクリプト・エージェント定義も埋め込まない。文書の `prompts/README.md` も写していない。写した後に変えた点は、下の「写した後に振る舞いを変えた点」にある。なお `ticket-light.yaml`・`prompts/ticket-light-*.md`・`scripts/ticket-light-branch.sh`・`schemas/ticket-light-branch.json` は写した元の無い flywheel 独自の資材で、`ticket.yaml` との差分は `docs/features/flow-port.md` の「簡略なフローの定義」の表のとおり。
+`runtime/workflows/` の `ticket.yaml`・`reflect.yaml` と、その 2 つが使う `prompts/`・`schemas/`・`scripts/` のファイルを `assets/files/workflows/` へ写して `go:embed` したもの。`conflict-predict-issue.yaml`・`list-tests.yaml` とその 2 つだけが使うファイルは写していない。プラグインのスクリプト・エージェント定義も埋め込まない。文書の `prompts/README.md` も写していない。写した後に変えた点は、下の「写した後に振る舞いを変えた点」にある。なお `spec-draft.yaml`・`prompts/spec-draft-write.md`・`prompts/spec-draft-critique.md`・`schemas/spec-draft-write.json`・`schemas/spec-draft-critique.json` は写した元の無い flywheel 独自の資材（`docs/features/flow-port.md` の「下書きづくりのフロー `spec-draft` と、そのための直し」）。また `ticket-light.yaml`・`prompts/ticket-light-*.md`・`scripts/ticket-light-branch.sh`・`schemas/ticket-light-branch.json` は写した元の無い flywheel 独自の資材で、`ticket.yaml` との差分は `docs/features/flow-port.md` の「簡略なフローの定義」の表のとおり。
 
 - `assets/SHA256SUMS`: 写した元のファイルごとの SHA-256（`assets/files/` からのパス）。試験が埋め込んだ資材と過不足なく突き合わせる。資材のファイルを足す・消す・直すときは、この一覧も更新する。
 - 展開先は `<ワークスペース>/.flywheel/flow/runtime/<版>/`（版は flywheel のバイナリのコミット。版を得られない・未コミットの変更つきのビルドでは、中身のハッシュの 12 文字を版に足す）。置き場は `--workspace` の値だけから決め、環境変数は読まない。中身の印（`.bundle-sha256`）で確かめ、違えば上書きしない。
@@ -71,6 +71,12 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 - フローの YAML の最上位に `efforts`（変数の名前 → effort。値は `low`・`medium`・`high`・`xhigh`・`max` の 5 つの文字列だけ）を置け、`llm` のステップの任意のキー `effort` に `$efforts.<名前>` だけを書ける。値を直に書く・定義していない変数を指す・`llm` 以外に書く・`efforts` の値が 5 つの外か文字列でない、は定義の検査の誤り。
 - 解決した値は、実行の始まりの記録に持ち、`resume` の後も同じ値を使う。変数を指したステップは、その値を `--effort <値>` に付けて claude を起動する。指さない `llm` のステップには付けない。
 - 契約の出力（版は 1 のまま）の `steps` の要素に `effort` を持つ。変数を指したステップは解決した値、指さないステップは `null`。
+
+### 下書きづくりのフロー spec-draft に合わせた直し（要求から計画まで S2b-1）
+
+- **`facts` に配列の欄を載せる**: 写した元の `facts` は、出力の型が文字列の欄だけ。配列の欄も宣言できるようにし、値は `encoding/json` の既定の直列化（空白なし・要素とキーは出力の順）の文字列にして載せる。配列を宣言した欄が `null`・欠けている・配列でないときは値なしにする（前の値も残さない）。オブジェクト・数値・真偽の欄は、定義の読み込みで誤り。契約の JSON の形（名前 → 文字列）と版は変えない。
+- **`llm` のステップのキー `tools`**: 道具の名前の並び（1 件以上）。書いたステップだけ、claude の起動の引数に `--tools <名前をカンマでつないだもの>` を足す。
+- **`flow start --budget-usd <額>`**: 正の数。フロー `spec-draft` のときだけ受け付け（ほかのフローでは使い方の誤り）、渡した額をその実行の `limits.budget_usd` にする。
 
 ### ステップの一覧の出力
 
