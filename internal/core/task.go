@@ -64,6 +64,8 @@ type TaskInput struct {
 	// flow の形の委譲先の操作を選んだタスクだけが持つ。FlowReason は書くときに前後の空白を除く（createTasksWith）。
 	PlannedFlow string
 	FlowReason  string
+	// Covers は受け持つ受入基準の識別（task.covers。空は NULL）。
+	Covers []string
 }
 
 // Task はタスク 1 件（前提のタスクの ID つき）。ID・DependsOn の要素は表示形（"T-<n>"）、ChallengeID は "C-<n>"。
@@ -194,14 +196,22 @@ func createTasksWith(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cha
 			}
 			nonGoals = string(b)
 		}
+		var covers any
+		if len(t.Covers) > 0 {
+			b, err := json.Marshal(t.Covers)
+			if err != nil {
+				return nil, err
+			}
+			covers = string(b)
+		}
 		plannedFlow, flowReason := plannedFlowColumns(t.PlannedFlow, t.FlowReason)
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id, planned_flow, flow_reason)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id, planned_flow, flow_reason, covers)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			challengeID, planVersion, nullableTextColumn(t.Key), t.Title, t.Body, t.DoneCriteria, nonGoals, t.Repo, t.Operation,
 			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr,
 			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros), t.ExpandAfter, int64PtrColumn(opts.AdditionID),
-			plannedFlow, flowReason)
+			plannedFlow, flowReason, covers)
 		if store.IsUniqueViolation(err) {
 			return nil, errDuplicateTaskKey
 		}
