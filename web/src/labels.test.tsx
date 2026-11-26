@@ -45,6 +45,7 @@ import {
   MARK_KINDS,
   MARK_LABELS,
   MODIFIER_LABELS,
+  NOT_STARTED_REASON_LABELS,
   OPERATION_KIND_LABELS,
   OPERATION_STATE_LABELS,
   PHASE_LABELS,
@@ -169,6 +170,19 @@ it("#814: label() は、constructor・toString・__proto__ のような名前の
 // #906: 統合先の識別を初めて記録した作業ログの action（integration_ref_set）に、経緯の文言がある。
 it("#906: 経緯の action integration_ref_set に文言がある", () => {
   expect(HISTORY_ACTION_LABELS.integration_ref_set).toBe("統合先を記録した");
+});
+
+// #1334: 仕様の下書きを消せなかった作業ログの action と、委譲を起動しない理由 spec_draft_changed に文言がある。
+it("#1334: 経緯の action spec_draft_cleanup_failed に文言がある", () => {
+  expect(HISTORY_ACTION_LABELS.spec_draft_cleanup_failed).toBe(
+    "仕様の下書きを消せなかった",
+  );
+});
+
+it("#1334: 委譲を起動しない理由 spec_draft_changed に文言がある", () => {
+  expect(NOT_STARTED_REASON_LABELS.spec_draft_changed).toBe(
+    "仕様の下書きが計画の後に変わった",
+  );
 });
 
 // 値の集合は core の閉集合（types.gen.ts の *_CODES）で、語の表は全部の値に語を持つ（過不足なし）。
