@@ -49,6 +49,8 @@ type Challenge struct {
 	UpdatedAt    time.Time
 	// SpecPath は仕様の文書の場所（ワークスペースから見た相対のパス。challenge.spec_path）。無ければ nil。
 	SpecPath *string
+	// SpecBasePath は下書きが丸ごと置き換える元の文書の場所（リポジトリの中の相対のパス。challenge.spec_base_path）。無ければ nil。
+	SpecBasePath *string
 	// StageFields は「一言で」「位置づけ」と段階の欄（S4。NULL は nil）。
 	StageFields
 }
@@ -302,6 +304,8 @@ type CreateInput struct {
 	Urgency      *string // nil なら未指定
 	// Spec は仕様の文書の場所。空なら場所を持たない。
 	Spec string
+	// SpecBase は置き換える元の文書の場所。空なら場所を持たない。
+	SpecBase string
 	// Chat は対話の欄の印。nil でなければ、書き込みの中で印を検査し（通らなければ ErrChatMarkInvalid で何も書かない）、
 	// 作った課題を印の会話に紐づける。
 	Chat *ChatSessionMark
@@ -316,6 +320,8 @@ type EditInput struct {
 	Urgency      *string
 	// Spec は仕様の文書の場所。空文字は NULL にする。
 	Spec *string
+	// SpecBase は置き換える元の文書の場所。空文字は NULL にする。
+	SpecBase *string
 	// Headline・Context・Figure は文字列、Expected・Actual・NonGoals は JSON の配列の
 	// 文字列（欄の形は stages.go）。空文字は NULL にする。
 	Headline *string
@@ -331,7 +337,7 @@ type ListOptions struct {
 	Status *string // nil なら絞り込まない
 }
 
-const challengeSelectColumns = `SELECT id, title, description, done_criteria, urgency, priority, status, version, reporter, created_at, updated_at, headline, context, issues, issues_hold_id, expected, actual, non_goals, figure, spec_path FROM challenge`
+const challengeSelectColumns = `SELECT id, title, description, done_criteria, urgency, priority, status, version, reporter, created_at, updated_at, headline, context, issues, issues_hold_id, expected, actual, non_goals, figure, spec_path, spec_base_path FROM challenge`
 
 // rowScanner は *sql.Row と *sql.Rows の両方が満たすインタフェース。
 type rowScanner interface {
@@ -348,10 +354,10 @@ func scanChallengeRow(scanner rowScanner) (*Challenge, error) {
 		urgency, priority                                  sql.NullString
 		version                                            int
 		stages                                             stageScan
-		specPath                                           sql.NullString
+		specPath, specBasePath                             sql.NullString
 	)
 	dests := append([]any{&id, &title, &description, &doneCriteria, &urgency, &priority, &status, &version, &reporter, &createdAtStr, &updatedAtStr}, stages.dests()...)
-	dests = append(dests, &specPath)
+	dests = append(dests, &specPath, &specBasePath)
 	if err := scanner.Scan(dests...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -368,6 +374,7 @@ func scanChallengeRow(scanner rowScanner) (*Challenge, error) {
 		Version:      version,
 		Reporter:     reporter,
 		SpecPath:     nullStr(specPath),
+		SpecBasePath: nullStr(specBasePath),
 	}
 	if urgency.Valid {
 		u := Urgency(urgency.String)
@@ -843,6 +850,10 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 	if err != nil {
 		return nil, err
 	}
+	specBasePath, err := specBasePathValue(in.SpecBase)
+	if err != nil {
+		return nil, err
+	}
 
 	var result *Challenge
 	err = s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
@@ -865,6 +876,12 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 			}
 			after["spec_path"] = *specPath
 		}
+		if specBasePath != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE challenge SET spec_base_path = ? WHERE id = ?`, *specBasePath, id); err != nil {
+				return err
+			}
+			after["spec_base_path"] = *specBasePath
+		}
 		if err := rec.record("challenge", id, "create", nil, after); err != nil {
 			return err
 		}
@@ -886,6 +903,7 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 			CreatedAt:    now,
 			UpdatedAt:    now,
 			SpecPath:     specPath,
+			SpecBasePath: specBasePath,
 		}
 		return nil
 	})
@@ -1159,6 +1177,13 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 		}
 	}
 
+	var newSpecBase *string
+	if in.SpecBase != nil {
+		if newSpecBase, err = specBasePathValue(*in.SpecBase); err != nil {
+			return nil, err
+		}
+	}
+
 	cid, ok := parseChallengeID(id)
 	if !ok {
 		return nil, ErrNotFound
@@ -1211,6 +1236,12 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 			after["spec_path"] = nullableString(newSpec)
 			newSpecPath = newSpec
 		}
+		newSpecBasePath := current.SpecBasePath
+		if in.SpecBase != nil && !reflect.DeepEqual(current.SpecBasePath, newSpecBase) {
+			before["spec_base_path"] = nullableString(current.SpecBasePath)
+			after["spec_base_path"] = nullableString(newSpecBase)
+			newSpecBasePath = newSpecBase
+		}
 
 		newStage := current.applyPatch(patch, before, after)
 
@@ -1230,9 +1261,9 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 			return err
 		}
 		args := append([]any{newTitle, newDescription, newDoneCriteria, nullableUrgency(newUrgencyValue), newVersion, nowStr}, stageArgs...)
-		args = append(args, nullableString(newSpecPath), cid, current.Version)
+		args = append(args, nullableString(newSpecPath), nullableString(newSpecBasePath), cid, current.Version)
 		res, err := tx.ExecContext(ctx,
-			`UPDATE challenge SET title = ?, description = ?, done_criteria = ?, urgency = ?, version = ?, updated_at = ?, `+stageUpdateSQL+`, spec_path = ?
+			`UPDATE challenge SET title = ?, description = ?, done_criteria = ?, urgency = ?, version = ?, updated_at = ?, `+stageUpdateSQL+`, spec_path = ?, spec_base_path = ?
 			 WHERE id = ? AND version = ?`,
 			args...,
 		)
@@ -1266,6 +1297,7 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 			UpdatedAt:    now,
 			StageFields:  newStage,
 			SpecPath:     newSpecPath,
+			SpecBasePath: newSpecBasePath,
 		}
 		return nil
 	})

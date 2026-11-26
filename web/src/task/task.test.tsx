@@ -42,6 +42,7 @@ const BASE = "/api/v1/workspaces/alpha";
 const T = (id: string, p: Partial<Task> = {}): Task => ({
   added: null,
   covers: [],
+  lands_spec: false,
   flow_reason: null,
   planned_flow: null,
   body: "",
@@ -153,6 +154,8 @@ function show(o: Over = {}): ShowCardResponse {
     challenge: {
       chat_sessions: [],
       spec_cost_usd: 0,
+      spec_base_path: null,
+      spec_is_draft: false,
       spec_path: null,
       context: null,
       created_at: "2026-01-01T00:00:00Z",

@@ -293,6 +293,7 @@ export function alphaDetailExtras(id: string): Extras {
       return {
         added: null,
         covers: [],
+        lands_spec: false,
         flow_reason: null,
         planned_flow: null,
         budget_impl_usd: 0,

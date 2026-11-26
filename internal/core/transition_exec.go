@@ -373,6 +373,7 @@ func (s *Store) transitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRec
 		UpdatedAt:    now,
 		StageFields:  tc.stage,
 		SpecPath:     current.SpecPath,
+		SpecBasePath: current.SpecBasePath,
 	}, nil
 }
 
