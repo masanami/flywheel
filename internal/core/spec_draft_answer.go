@@ -131,23 +131,30 @@ func applySpecDraftAnswer(ctx context.Context, tc *transitionCtx, d *SpecDraft, 
 	}
 	switch option {
 	case specDraftOptionProceed:
-		// 仕様の文書の場所は、記録を done にするのと同じ書き込みの中だけで書く。置き換える元は、無ければ書かない。
-		if _, err := tc.tx.ExecContext(ctx, `UPDATE challenge SET spec_path = ?, spec_base_path = COALESCE(?, spec_base_path) WHERE id = ?`,
-			d.Path, d.BasePath, tc.id); err != nil {
-			return err
-		}
 		path := d.Path
 		tc.current.SpecPath = &path
-		after := map[string]any{"detail": specDraftDoneByOwner, "spec_path": d.Path}
 		if d.BasePath != nil {
 			tc.current.SpecBasePath = d.BasePath
-			after["spec_base_path"] = *d.BasePath
 		}
-		return tc.rec.record("challenge", tc.id, ActivityActionSpecDraftDone, nil, after)
+		return writeSpecDraftDone(ctx, tc.tx, tc.rec, tc.id, d, specDraftDoneByOwner)
 	case specDraftOptionSkip:
 		return tc.rec.record("challenge", tc.id, ActivityActionSpecDraftSkipped, nil, map[string]any{"detail": specDraftSkippedByAnswer})
 	}
 	return nil
+}
+
+// writeSpecDraftDone は、記録 d を done にする書き込みの中で、課題の仕様の文書の場所を書き、作業ログ spec_draft_done（細目 detail）を
+// 残す。仕様の文書の場所は、記録を done にするのと同じ書き込みの中だけで書く。置き換える元は、無ければ書かない。
+func writeSpecDraftDone(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cid int64, d *SpecDraft, detail string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE challenge SET spec_path = ?, spec_base_path = COALESCE(?, spec_base_path) WHERE id = ?`,
+		d.Path, d.BasePath, cid); err != nil {
+		return err
+	}
+	after := map[string]any{"detail": detail, "spec_path": d.Path}
+	if d.BasePath != nil {
+		after["spec_base_path"] = *d.BasePath
+	}
+	return rec.record("challenge", cid, ActivityActionSpecDraftDone, nil, after)
 }
 
 // specQuestionHoldOpen は課題 cid に、開いている下書きの問いの保留があるか。

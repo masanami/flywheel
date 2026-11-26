@@ -15,7 +15,7 @@ import (
 // このファイルは、下書きづくりを始める処理（docs/features/request-to-plan-s2b.md「下書きづくりを始める」「1 回の上限額」）を持つ。
 // 始めるのはサイクルの委譲の段で、契約の実行の種類 spec として、タスクにも計画にも結び付けずに起動する。
 // 起動できなかったときと、実行中の記録なのに終わっていない実行が無いときは、下書きづくりの保留（spec_failed）にする。
-// 実行が終わった後の扱いは、このファイルの対象ではない。
+// 実行が終わった後の扱いは spec_draft_finish.go が持つ。
 
 // SpecDraftDefaultBudgetUSD は下書きづくり 1 回の上限額の既定の値（USD）。埋め込んだフロー spec-draft の limits.budget_usd と同じ値にする。
 const SpecDraftDefaultBudgetUSD = 15.0
