@@ -1,7 +1,10 @@
 package invoker
 
 import (
+	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -109,6 +112,16 @@ func TestJ2Prompt_LimitIsRaisedOnlyByTheAddedText(t *testing.T) {
 	if limit > 19456 {
 		t.Errorf("j2.md limit %d bytes, want <= 19456", limit)
 	}
+}
+
+// docs/features/m3-invoker-delegation.md の分量の記述は、j2.md のいまの上限を書く。
+func TestJ2Prompt_LimitIsDocumentedInTheM3Spec(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "docs", "features", "m3-invoker-delegation.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := promptLine(t, string(data), "- [ ] 指示文の分量の上限をテストで固定する")
+	requirePhrases(t, "the size limit line of the m3 spec", line, fmt.Sprintf("J2: %d バイト", judgmentPromptLimit["j2.md"]))
 }
 
 // 対話の欄は、仕様づくりのスキルの後に Issue を作らず、仕様の文書の場所を課題へ渡す。
