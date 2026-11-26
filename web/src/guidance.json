@@ -57,6 +57,13 @@
       "template": "flywheel answer <C-ID> --workspace <パス> --choice <問いの番号>=<選択肢の番号>"
     },
     {
+      "id": "answer-spec-choice",
+      "when": { "context": "spec_question" },
+      "command": ["answer"],
+      "flags": ["workspace", "option", "choice"],
+      "template": "flywheel answer <C-ID> --workspace <パス> --option answer --choice <問いの番号>=<選択肢の番号>"
+    },
+    {
       "id": "approve-operation",
       "when": { "actions": ["approve_operation"] },
       "command": ["approve"],

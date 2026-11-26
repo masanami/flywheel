@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.ts";
 import { ApiError, isNotAwaitingError } from "../api/error.ts";
-import type {
-  ApprovalSummary,
-  PlanQuestion,
-  PlanTopic,
-} from "../api/types.gen.ts";
+import type { ApprovalSummary, PlanTopic } from "../api/types.gen.ts";
 import { APPROVAL_REJECT_NOTE, guidesForContext } from "../guidance.ts";
 import {
   FLOW_LABELS,
@@ -20,6 +16,7 @@ import type { LiveState } from "../live/useLive.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { ClampedText } from "../parts/ClampedText.tsx";
 import { FigureView } from "../parts/FigureView.tsx";
+import { PlanQuestionView } from "../parts/PlanQuestionView.tsx";
 import { IssuesAnswerView, IssuesView } from "../parts/StagesDetail.tsx";
 import { CycleStartButton } from "../shell/CycleStartButton.tsx";
 import { CycleStartLine } from "../shell/CycleStartLine.tsx";
@@ -463,37 +460,8 @@ function TopicView({ topic }: { topic: PlanTopic }) {
       <h4>{topic.title}</h4>
       <Markdown text={topic.decision} />
       {topic.questions.map((q) => (
-        <QuestionView key={q.number} q={q} />
+        <PlanQuestionView key={q.number} q={q} />
       ))}
     </article>
-  );
-}
-
-// 問いの選択肢は見せるだけ（選べない）。推奨の印と、記録されている答えを出す。
-function QuestionView({ q }: { q: PlanQuestion }) {
-  const answer = q.answer;
-  const answerLabel = answer ? (answer.label ?? answer.text ?? "") : null;
-  return (
-    <div className="plan-question" data-testid="plan-question">
-      <p data-field="question">
-        問い {q.number}: <ClampedText text={q.question} />
-      </p>
-      <ol>
-        {q.options.map((o, j) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: 固定の一覧
-          <li key={j} data-recommended={j + 1 === q.recommended}>
-            <ClampedText text={o.label} />
-            {j + 1 === q.recommended && (
-              <span className="plan-recommended-mark"> 推奨</span>
-            )}
-          </li>
-        ))}
-      </ol>
-      {answerLabel !== null && (
-        <p data-field="answer">
-          答え: <ClampedText text={answerLabel} />
-        </p>
-      )}
-    </div>
   );
 }
