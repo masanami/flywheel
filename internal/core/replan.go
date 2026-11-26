@@ -123,7 +123,8 @@ func formatChallengeCheckFindingsSection(n *replanNote) string {
 }
 
 // formatDoneTasksSection は J2 の入力の区画「済みのタスク」の本文（題名と完了条件。済みのタスクが無ければ空）。
-func formatDoneTasksSection(done []Task) string {
+// 区画「受入基準」を入れるとき（criteria が非 nil）は、タスクごとに、受け持つ識別のうちその区画にあるものの件数を足す。
+func formatDoneTasksSection(done []Task, criteria *planAcceptanceCriteria) string {
 	if len(done) == 0 {
 		return ""
 	}
@@ -131,8 +132,26 @@ func formatDoneTasksSection(done []Task) string {
 	b.WriteString("統合先へ入った済みのタスク。やり直さず、新しい計画には入れない（足りない分のタスクだけを出す）。新しい計画の統合先を使うかは、真にする。\n")
 	for i, t := range done {
 		fmt.Fprintf(&b, "\n%d. %s\n   完了条件: %s", i+1, oneLine(t.Title), oneLine(t.DoneCriteria))
+		if criteria != nil {
+			fmt.Fprintf(&b, "\n   受け持ち済みの受入基準: %d 件", countListedCriteria(*criteria, t.Covers))
+		}
 	}
 	return b.String()
+}
+
+// countListedCriteria は一覧 list の基準のうち、受け持ち covers にあるものの件数を返す。
+func countListedCriteria(list planAcceptanceCriteria, covers []string) int {
+	own := make(map[string]bool, len(covers))
+	for _, id := range covers {
+		own[id] = true
+	}
+	n := 0
+	for _, c := range list.Items {
+		if own[c.ID] {
+			n++
+		}
+	}
+	return n
 }
 
 // formatReplanSection は J2 の入力の区画「計画の作り直し」の本文。

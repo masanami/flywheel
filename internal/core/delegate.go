@@ -446,6 +446,7 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 	var override *planBudgetOverride
 	var spend bucketSpend
 	var history *launchHistory
+	var doneCovers map[string]bool
 	var planOK bool
 	var unavailable error
 	var tasks []Task
@@ -510,6 +511,9 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 				}
 			}
 		}
+		if doneCovers, err = loadDoneTaskCovers(ctx, tx, cid); err != nil {
+			return err
+		}
 		history, err = loadLaunchHistory(ctx, tx, cid)
 		return err
 	})
@@ -523,7 +527,7 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 		return nil, fmt.Errorf("%w: the challenge has no approved plan with a structured spec", ErrValidation)
 	}
 
-	validated, ok := validateJ2Output([]byte(dc.Plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: dc.Binding != nil, SkipFlowReason: true})
+	validated, ok := validateJ2Output([]byte(dc.Plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: dc.Binding != nil, SkipFlowReason: true, RecheckCriteria: true, DoneCovers: doneCovers})
 	if !ok || validated.Verdict != J2VerdictPlan {
 		return nil, fmt.Errorf("%w: the approved plan does not match the current declarations", ErrValidation)
 	}
@@ -600,13 +604,17 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 	if ch.Priority != nil {
 		priority = string(*ch.Priority)
 	}
+	criteria, err := loadPlanAcceptanceCriteria(dc.Plan.Spec)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: the approved plan spec is malformed", ErrValidation)
+	}
 	sections := []JudgmentDataSection{
 		{Label: "課題", Content: fmt.Sprintf(
 			"タイトル: %s\n\n説明:\n%s\n\n達成条件:\n%s\n\n緊急度: %s\n優先度: %s\n起票者: %s",
 			ch.Title, ch.Description, ch.DoneCriteria, urgency, priority, ch.Reporter)},
 		{Label: "承認済みの計画の本文", Content: dc.Plan.Body},
 		{Label: "承認済みの計画の構造化した出力", Content: dc.Plan.Spec},
-		{Label: labelTaskSection, Content: formatTaskSection(dc.Task)},
+		{Label: labelTaskSection, Content: formatBriefTaskSection(dc.Task, criteria)},
 	}
 	if t := formatCompletionRejectionsSection(dc.Rejections); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: CompletionRejectionsSectionLabel, Content: t})

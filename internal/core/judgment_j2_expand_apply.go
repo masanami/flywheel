@@ -48,6 +48,9 @@ type j2ExpandValidationContext struct {
 	Origin      TaskAdditionOrigin
 	FrameImpl   *int64
 	FrameReview *int64
+	// Criteria は承認した計画に書き足した受入基準の一覧（一覧を持たない計画は nil）。足すタスクの受け持ちは、この一覧の識別だけを持てる
+	// （nil なら、識別が 1 件でもあれば不正）。受け持たれていない基準が残っていても不正にしない。
+	Criteria *planAcceptanceCriteria
 	// SkipFlowReason は保存済みの足す依頼の spec を回答の段で検査し直すときに真（flow_reason の検査をしない。j2ValidationContext と同じ）。
 	SkipFlowReason bool
 }
@@ -56,7 +59,7 @@ type j2ExpandValidationContext struct {
 //   - JSON として解釈できない・判断値が add|none|ask の外・ask で問いが空
 //   - 出どころが followup のとき: 判断値 none・タスクが 1 個でない add も不正。タスクの枠は足す依頼の額に置き換える（枠の検査はかけない。
 //     足す依頼に額が無い枠だけ、出力の値を使い検査にかける）
-//   - add で: タスクが 1〜12 件でない・鍵／題名／本文／完了条件が空・鍵が重なる・鍵がいまあるタスク（取りやめ・済みを含む）の鍵と重なる・
+//   - add で: 受け持ち（covers）に一覧に無い識別がある・1 つのタスクで重なる・タスクが 1〜12 件でない・鍵／題名／本文／完了条件が空・鍵が重なる・鍵がいまあるタスク（取りやめ・済みを含む）の鍵と重なる・
 //     前提が自分自身・足すタスクの鍵でもいまある（取りやめでない）タスクの鍵でもない・足すタスクどうしの前提に輪がある・
 //     リポジトリがいまあるタスクと同じ 1 つでない・宣言に無い／起動できない操作・枠（実装・レビュー対応）が無い・不正
 func validateJ2ExpandOutput(data []byte, vc j2ExpandValidationContext) (*j2ExpandValidated, bool) {
@@ -147,6 +150,9 @@ func validateJ2ExpandOutputReason(data []byte, vc j2ExpandValidationContext) (*j
 		if followup {
 			applyFollowupFrames(&jt, vc)
 			in[0].BudgetImplUSD, in[0].BudgetReviewUSD = jt.BudgetImplUSD, jt.BudgetReviewUSD
+		}
+		if reason := checkTaskCovers(i, jt.Covers, knownCriteria(vc.Criteria)); reason != "" {
+			return nil, reason
 		}
 		v.Tasks = append(v.Tasks, jt)
 	}
@@ -325,6 +331,14 @@ func loadJ2ExpandValidationContext(ctx context.Context, tx *sql.Tx, cid int64, i
 		return j2ExpandState{}, false, err
 	}
 	st := j2ExpandState{Version: version, DepIDs: map[string]int64{}}
+	// 受け持ちの検査に使う一覧は、承認した計画に書き足したもの（仕様の文書は読み直さない）。
+	if ap, found, err := loadApprovedPlanAnySpec(ctx, tx, cid); err != nil {
+		return j2ExpandState{}, false, err
+	} else if found {
+		if st.Criteria, err = loadPlanAcceptanceCriteria(ap.Spec); err != nil {
+			return j2ExpandState{}, false, err
+		}
+	}
 	st.Agent, st.Conn = in.AgentDecl, in.ConnDecl
 	st.TakenKeys, st.DepKeys = map[string]bool{}, map[string]bool{}
 	repos := map[string]bool{}
@@ -402,7 +416,7 @@ func j2ExpandTaskInputs(tasks []j2Task) []TaskInput {
 			Key: t.Key, Title: t.Title, Body: t.Body, DoneCriteria: t.DoneCriteria, NonGoals: t.NonGoals,
 			Repo: t.Repo, Operation: t.Operation, DependsOn: t.DependsOn,
 			BudgetImplMicros: taskBudgetMicros(t.BudgetImplUSD), BudgetReviewMicros: taskBudgetMicros(t.BudgetReviewUSD), ExpandAfter: t.ExpandAfter,
-			PlannedFlow: t.Flow, FlowReason: t.FlowReason,
+			PlannedFlow: t.Flow, FlowReason: t.FlowReason, Covers: t.Covers,
 		})
 	}
 	return inputs
