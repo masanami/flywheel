@@ -348,7 +348,7 @@ func contractKindOrTask(kind string) string {
 const (
 	contractRunKindTask    = "task"
 	contractRunKindReflect = "reflect"
-	// contractRunKindSpec は下書きづくり。タスクにも計画にも結び付かず、タスクと反映の依頼の経路を通さない。
+	// contractRunKindSpec は下書きづくりの実行。タスクも計画も持たない。
 	contractRunKindSpec = "spec"
 )
 
@@ -430,7 +430,7 @@ func (s *Store) fillCommandArgs(connector *Connector, cmd contractCmd, challenge
 // fillRowCommandArgs は契約の実行 row のコマンドの引数を埋める。反映の依頼（上げる依頼を含む）は取り込み元を持たないので、
 // 取り込み元の差し込みを空の文字列で埋める。それ以外は fillCommandArgs と同じ。
 func (s *Store) fillRowCommandArgs(connector *Connector, row *contractRunRow, cmd contractCmd, challengeID string, sb *sourceBinding, answer contractAnswer) ([]string, error) {
-	if row.Kind == contractRunKindReflect {
+	if row.Kind == contractRunKindReflect || row.Kind == contractRunKindSpec { // 取り込み元を読まない
 		return s.contractCommandArgs(connector, cmd, contractFill{ChallengeID: challengeID, EmptySource: true, RunID: row.ExternalRunID, Answer: answer})
 	}
 	return s.fillCommandArgs(connector, cmd, challengeID, sb, row.ExternalRunID, answer)
@@ -803,12 +803,12 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 // operationID が非 nil なら、反映の操作のために呼んだ run として印を付ける（run.operation_id。反映の段・完了から戻す前の読み・
 // 片付けだけが渡す。印の付いた run は、課題の最後の委譲の run・最後の契約のコマンドを読む所から外れる）。
 func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64) (int64, error) {
-	return s.beginContractRunMarked(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, taskID, operationID, false)
+	return s.beginContractRunMarked(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, taskID, operationID, false, budgetBucketImpl)
 }
 
 // beginContractRunMarked は beginContractRunForTask に、反映の依頼の印（run.reflect）を足したもの。reflect が真なら、反映の操作が無い
-// 反映の依頼（上げる依頼）の run にも印を付ける（課題の使った額・最後の委譲の実行の読みから外すため）。
-func (s *Store) beginContractRunMarked(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64, reflect bool) (int64, error) {
+// 反映の依頼（上げる依頼）の run にも印を付ける（課題の使った額・最後の委譲の実行の読みから外すため）。bucket は run の予算の枠。
+func (s *Store) beginContractRunMarked(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64, reflect bool, bucket budgetBucket) (int64, error) {
 	host, _ := os.Hostname()
 	now := s.currentTime()
 	var runIDInt int64
@@ -879,7 +879,7 @@ func (s *Store) beginContractRunMarked(ctx context.Context, cid int64, cycleID, 
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: runTask, Repo: taskRepo, OperationID: operationID, Reflect: reflect,
+			MaxBudgetUSD: maxMicros, BudgetBucket: bucket, TaskID: runTask, Repo: taskRepo, OperationID: operationID, Reflect: reflect,
 		})
 		if err != nil {
 			return err

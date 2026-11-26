@@ -176,7 +176,7 @@ const (
 	budgetBucketImpl     budgetBucket = "impl"
 	budgetBucketReview   budgetBucket = "review"
 	budgetBucketPredict  budgetBucket = "predict"
-	// budgetBucketSpec は下書きづくりの実行の枠。課題の実装枠・レビュー対応枠には数えない。
+	// budgetBucketSpec は下書きづくりの実行の枠。費用は課題の予算に数えず、仕様づくりの費用に数える。
 	budgetBucketSpec budgetBucket = "spec"
 )
 
