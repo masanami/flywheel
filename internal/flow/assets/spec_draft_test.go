@@ -73,18 +73,8 @@ func stringList(t *testing.T, v any) []string {
 	return out
 }
 
-// loaderKnowsTools は、定義の読み込みが llm のステップのキー tools を知っているかを、最小の定義を読ませて確かめる。
-func loaderKnowsTools() bool {
-	probe := []byte("schema: harness.workflow/v1\nid: probe\nsteps:\n  a:\n    kind: llm\n    tools: [Read]\n")
-	_, err := workflow.Parse("probe.yaml", probe)
-	return err == nil || !strings.Contains(err.Error(), `unknown key "tools"`)
-}
-
 // AC-145
 func TestEmbeddedSpecDraftPassesValidation(t *testing.T) {
-	if !loaderKnowsTools() {
-		t.Skip(`the workflow loader does not know the llm step key "tools" yet (issue #1340)`)
-	}
 	validateEmbedded(t, "spec-draft")
 }
 
