@@ -6,7 +6,7 @@ import (
 )
 
 // 最上位の facts（接続契約の facts に出す値の宣言。docs/harness-runtime-design.md §5.6.2）の読み込みと検査。
-// 参照は $steps.<段>.<欄> だけで、段が在り、欄がその段の出力スキーマにある文字列であること。
+// 参照は $steps.<段>.<欄> だけで、段が在り、欄がその段の出力スキーマにある文字列か配列であること。
 
 func withFacts(t *testing.T, facts string) string {
 	t.Helper()
@@ -31,8 +31,8 @@ func TestFactsAreRejected(t *testing.T) {
 	cases := []struct{ name, facts, want string }{
 		{"a step that does not exist", "  f: [$steps.nope.detail.name]", "refers to a step that does not exist"},
 		{"a field that is not in the output schema", "  f: [$steps.a.nope]", `output schema has no field "nope"`},
-		{"a field that is not a string (array)", "  f: [$steps.a.items]", "must be a string field"},
-		{"a field that is not a string (object)", "  f: [$steps.a.detail]", "must be a string field"},
+		{"AC-122 an object field", "  f: [$steps.a.detail]", "must be a string or array field"},
+		{"AC-123 a number field", "  f: [$steps.a.count]", "must be a string or array field"},
 		{"an input reference", "  f: [$inputs.s]", "must be a $steps.<step>.<field> reference"},
 		{"an edge reference", "  f: [$edge.x]", "must be a $steps.<step>.<field> reference"},
 		{"a literal", "  f: [complete]", "must be exactly one reference"},
@@ -47,6 +47,15 @@ func TestFactsAreRejected(t *testing.T) {
 				t.Fatalf("err = %v, want it to contain %q", err, c.want)
 			}
 		})
+	}
+}
+
+// AC-121: 出力の型が配列の欄は facts に宣言できる（要素の型は問わない）。
+func TestFactsAcceptAnArrayField(t *testing.T) {
+	for _, facts := range []string{"  f: [$steps.a.items]", "  f: [$steps.a.anything]"} {
+		if err := check(t, withFacts(t, facts)); err != nil {
+			t.Errorf("%s: %v", facts, err)
+		}
 	}
 }
 

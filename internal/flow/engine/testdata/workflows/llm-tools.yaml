@@ -1,0 +1,25 @@
+# llm 種類の tools を確かめる: narrow は使える道具を絞り、wide は絞らない。
+schema: harness.workflow/v1
+id: llm-tools
+limits:
+  budget_usd: 5
+steps:
+  narrow:
+    kind: llm
+    prompt: prompts/fix.md
+    with: { summary: narrow }
+    output: schemas/impl.json
+    budget_usd: 2
+    tools: [Read, Edit]
+    on:
+      pass: wide
+      failure: { fail: narrow_failed }
+  wide:
+    kind: llm
+    prompt: prompts/fix.md
+    with: { summary: wide }
+    output: schemas/impl.json
+    budget_usd: 2
+    on:
+      pass: { done: ok }
+      failure: { fail: wide_failed }

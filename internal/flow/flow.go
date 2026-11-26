@@ -91,6 +91,9 @@ func reopen(run *runstate.Run, st *runstate.State) (*engine.Engine, error) {
 // flowName は start に渡せるフローの名前（埋め込んだ定義の名前。パスは受け付けない）。
 var flowName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
+// SpecDraftFlow は、上限額を呼び出し元が渡せる（flow start --budget-usd）ただ 1 つのフローの名前。
+const SpecDraftFlow = "spec-draft"
+
 // StartOptions は Start に渡すもの。
 type StartOptions struct {
 	// Name はフローの名前（埋め込んだ定義。例: ticket）。
@@ -101,6 +104,8 @@ type StartOptions struct {
 	PermissionMode string
 	// DelegatedRun は --delegated-run の値（委譲する run の ID）。claude の子の環境の FLYWHEEL_DELEGATED_RUN になる。
 	DelegatedRun string
+	// BudgetUSD は正なら、その実行の limits.budget_usd にする（0 なら定義の値）。受け付けるフローの検査は呼び出し元が行う。
+	BudgetUSD float64
 }
 
 // Start は run を始め、切り離した runner に進めさせて、runner が引き継いだのを確かめてから戻る。
@@ -148,7 +153,7 @@ func Start(env Env, o StartOptions) int {
 	}
 	eng, err := engine.Start(engine.StartParams{
 		RunsDir: runsDir(env.Workspace), WF: wf, Inputs: inputs, ScriptsDir: plugin.ScriptsDir, WorkflowDir: layout.WorkflowDir,
-		Cwd: cwd, Origin: "flow", CLIVersion: env.Version, Embedded: true, Models: workflow.ResolveModels(wf), Efforts: workflow.ResolveEfforts(wf),
+		Cwd: cwd, Origin: "flow", BudgetUSD: o.BudgetUSD, CLIVersion: env.Version, Embedded: true, Models: workflow.ResolveModels(wf), Efforts: workflow.ResolveEfforts(wf),
 	})
 	if err != nil {
 		logf(env.Stderr, "flywheel flow: cannot start the run: %v\n", err)

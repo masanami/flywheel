@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/masanami/flywheel/internal/flow/runstate"
@@ -131,6 +132,10 @@ func (e *Engine) executeLLM(ctx context.Context, st *runstate.State, u *runstate
 	}
 	if e.PermissionMode != "" {
 		args = append(args, "--permission-mode", e.PermissionMode)
+	}
+	if len(step.Tools) > 0 {
+		// 使える組み込みの道具そのものを絞る（許可の一覧ではない）。
+		args = append(args, "--tools", strings.Join(step.Tools, ","))
 	}
 	dirs, err := addDirValues(st, u, step)
 	if err != nil {
