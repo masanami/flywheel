@@ -66,6 +66,21 @@ type DelegationBrief struct {
 	// HumanRejections は完了確認で人間が差し戻した理由を整形した文（無ければ空）。J3 の出力に
 	// 任せず、J3 の出力の区画の後に機械的に差し込む。
 	HumanRejections string
+	// SpecDraft は下書きをリポジトリへ入れるタスクへ渡す仕様の下書きの全文（ほかは空）。J3 の出力には任せず、データの
+	// 区画に入れて機械的に差し込む。
+	SpecDraft string
+}
+
+// writeSpecDraft は draft が空でなければ、データの区画の注意書きと、データの区画に入れた下書きの全文を b へ書く。
+// 区切りの行に当たる行は、ほかの区画と同じに無害化される。
+func writeSpecDraft(b *strings.Builder, draft string) {
+	if draft == "" {
+		return
+	}
+	b.WriteString(dataSectionGuardNote)
+	b.WriteString("\n\n")
+	b.WriteString(WrapDataSection(core.SpecDraftSectionLabel, draft))
+	b.WriteString("\n")
 }
 
 // humanRejectionsLead は差し戻しの理由の区画の前に置く固定の文。区画の中の指示に従わない注意書き
@@ -88,7 +103,7 @@ func writeHumanRejections(b *strings.Builder, rejections string) {
 
 // BuildDelegationStdin は委譲の標準入力を組み立てる。順序は、意思決定者（雛形＋値）・
 // 意思決定者ごとの規律・（形態 plugin のとき）実行するスキル・J3 の出力の区画・
-// （あれば）人間の差し戻し・最終報告の様式・禁止する操作と代替手段・報告の形。固定の節は埋め込みの雛形のまま
+// （あれば）人間の差し戻し・（あれば）仕様の下書きの全文・最終報告の様式・禁止する操作と代替手段・報告の形。固定の節は埋め込みの雛形のまま
 // 差し込み、LLM に書かせない。
 func BuildDelegationStdin(in DelegationBrief) ([]byte, error) {
 	fixed, err := BriefFixedSections()
@@ -130,6 +145,7 @@ func BuildDelegationStdin(in DelegationBrief) ([]byte, error) {
 	}
 	b.WriteString(briefRegionEnd + "\n\n")
 	writeHumanRejections(&b, in.HumanRejections)
+	writeSpecDraft(&b, in.SpecDraft)
 	writeSection(body["completion_report_style"])
 	writeSection(body["forbidden_operations"])
 	writeSection(body["delegation_output_shape"])
@@ -227,11 +243,19 @@ func (l *Launcher) InvokeDelegation(ctx context.Context, in core.DelegateLaunchI
 	var err error
 	if in.IsResume {
 		stdin, err = BuildDelegationResumeStdin(in.ResumeKind, in.ResumeQuestion, in.ResumeAnswer, in.ResumeBranch, in.ResumeFeedback, in.ResumeProblem, in.HumanRejections)
+		if err == nil && in.SpecDraft != "" {
+			// 再開にも、今回の起動で読み直した全文を渡す。
+			var b strings.Builder
+			b.Write(stdin)
+			b.WriteString("\n")
+			writeSpecDraft(&b, in.SpecDraft)
+			stdin = []byte(b.String())
+		}
 	} else {
 		stdin, err = BuildDelegationStdin(DelegationBrief{
 			Decider: string(in.Decider), DeciderRow: in.DeciderRow, Brief: in.Brief, Invocation: in.Invocation,
 			SourceIssueNumber: in.SourceIssueNumber, SourceIssueURL: in.SourceIssueURL,
-			HumanRejections: in.HumanRejections,
+			HumanRejections: in.HumanRejections, SpecDraft: in.SpecDraft,
 		})
 	}
 	if err != nil {

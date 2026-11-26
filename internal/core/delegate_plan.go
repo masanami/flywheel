@@ -69,7 +69,7 @@ func (s *Store) loadPlanCandidates(ctx context.Context, in DelegateInput, cid in
 		if plan, planOK, err = loadApprovedPlan(ctx, tx, cid); err != nil || !planOK {
 			return err
 		}
-		if sel, err = selectLaunchTasks(ctx, tx, in.ConnDecl, formatChallengeID(cid), cid); err != nil {
+		if sel, err = selectLaunchTasks(ctx, tx, s.workspace, in.ConnDecl, formatChallengeID(cid), cid); err != nil {
 			return err
 		}
 		if doneCovers, err = loadDoneTaskCovers(ctx, tx, cid); err != nil {
@@ -100,7 +100,8 @@ func (s *Store) loadPlanCandidates(ctx context.Context, in DelegateInput, cid in
 		if repo == nil {
 			return nil, false, "起動するタスクのリポジトリが今の宣言に無い", nil
 		}
-		c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid, TaskSeq: taskIntID(&sel.Tasks[i])}
+		c := planCandidate{ID: ch.ID, Rank: priorityRank(ch.Priority), Seq: cid, TaskSeq: taskIntID(&sel.Tasks[i]),
+			SpecDraft: sel.SpecDrafts[sel.Tasks[i].ID]}
 		ones = append(ones, planOne{cand: c, repo: repo.Name})
 	}
 	return ones, true, "", nil
@@ -496,6 +497,16 @@ type delegateRun struct {
 	waitCtx context.Context
 	// taskID は起動するタスクの内部整数 ID（0 なら、起動できるタスクがちょうど 1 個の課題として決める）。
 	taskID int64
+	// draft は起動するタスクへ渡す仕様の下書きの全文（下書きを入れるタスクだけ）。
+	draft string
+}
+
+// specDraft は起動するタスクへ渡す仕様の下書きの全文（nil の run は空）。
+func (r *delegateRun) specDraft() string {
+	if r == nil {
+		return ""
+	}
+	return r.draft
 }
 
 // task は起動するタスクの内部整数 ID（nil の run は 0）。
@@ -636,7 +647,7 @@ func (s *Store) executePlan(ctx context.Context, in DelegateInput, jc *JudgmentC
 					return
 				}
 			}
-			item, ns, err := s.delegateOne(ctx, in, jc, *ch, &delegateRun{sch: sch, w: w, waitCtx: waitCtx, taskID: c.TaskSeq})
+			item, ns, err := s.delegateOne(ctx, in, jc, *ch, &delegateRun{sch: sch, w: w, waitCtx: waitCtx, taskID: c.TaskSeq, draft: c.SpecDraft})
 			if err != nil {
 				// 1 件の課題の問題（承認済みの計画が今の宣言と合わない等）で、他の課題の委譲を
 				// 止めない。ストアの障害など、それ以外のエラーだけが全体を打ち切る。
@@ -696,7 +707,7 @@ func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Ch
 	// 起動できるタスクと統合先の使用。計画の検査より前で、記録した前提の後（ID を省いた段と同じ順）。
 	var sel *launchSelection
 	err = s.db.Read(ctx, func(tx *sql.Tx) (err error) {
-		sel, err = selectLaunchTasks(ctx, tx, in.ConnDecl, ch.ID, cid)
+		sel, err = selectLaunchTasks(ctx, tx, s.workspace, in.ConnDecl, ch.ID, cid)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -738,7 +749,7 @@ func (s *Store) runSingleDelegation(ctx context.Context, in DelegateInput, ch Ch
 	sch := newDelegationScheduler(s, in)
 	for _, pc := range pcs {
 		repo, _ := in.ConnDecl.findConnectorRepo(pc.Repo)
-		item, ns, err := s.delegateOne(ctx, in, nil, ch, &delegateRun{sch: sch, w: sch.newWaiter(*repo, pc.Cand), taskID: pc.Cand.TaskSeq})
+		item, ns, err := s.delegateOne(ctx, in, nil, ch, &delegateRun{sch: sch, w: sch.newWaiter(*repo, pc.Cand), taskID: pc.Cand.TaskSeq, draft: pc.Cand.SpecDraft})
 		if err != nil {
 			// 先のタスクをもう起動したなら、後のタスクの枠・予算・状態の不足で全体を失敗にせず、起動できなかった理由として返す。
 			if len(result.Items) > 0 && (errors.Is(err, ErrSlotUnavailable) || errors.Is(err, ErrBudgetExceeded) ||

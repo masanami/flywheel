@@ -364,7 +364,7 @@ func TestMultiTask_ReviewWaitingContractRunTaskIsNotALaunchCandidate(t *testing.
 	}
 	var sel *launchSelection
 	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
-		sel, err = selectLaunchTasks(context.Background(), tx, f.conn, id, cid)
+		sel, err = selectLaunchTasks(context.Background(), tx, "", f.conn, id, cid)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -401,7 +401,7 @@ func TestMultiTask_OnlyReviewWaitingContractRunTaskRemainsWaitsWithoutHold(t *te
 	}
 	var sel *launchSelection
 	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
-		sel, err = selectLaunchTasks(context.Background(), tx, f.conn, id, cid)
+		sel, err = selectLaunchTasks(context.Background(), tx, "", f.conn, id, cid)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -464,7 +464,7 @@ func TestMultiTask_AC11_CandidatesAreOrderedByPriorityChallengeThenTask(t *testi
 	in := f.input(f.cycle(t, 300), nil)
 	var picked delegationTargets
 	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
-		picked, err = selectDelegationTargetsFor(context.Background(), tx, f.conn)
+		picked, err = selectDelegationTargetsFor(context.Background(), tx, "", f.conn)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -509,7 +509,7 @@ func TestMultiTask_AC11_SamePriorityChallengeIDBeatsTaskID(t *testing.T) {
 	in := f.input(f.cycle(t, 300), nil)
 	var picked delegationTargets
 	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
-		picked, err = selectDelegationTargetsFor(context.Background(), tx, f.conn)
+		picked, err = selectDelegationTargetsFor(context.Background(), tx, "", f.conn)
 		return err
 	}); err != nil {
 		t.Fatal(err)

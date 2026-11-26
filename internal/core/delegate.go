@@ -85,6 +85,9 @@ type DelegateLaunchInput struct {
 	// ResumeProblem は ResumeKind が interrupted で、再開元の run が子の報告の不備
 	// （invalid_output）で終わったときの、不備の理由（無ければ空）。
 	ResumeProblem string
+	// SpecDraft は、下書きをリポジトリへ入れるタスクへ渡す仕様の下書きの全文（ほかのタスクは空）。invoker が標準入力の
+	// データの区画（SpecDraftSectionLabel）に入れる。再開の起動にも渡す。
+	SpecDraft string
 }
 
 // DelegationInvoker は core が定義する、委譲の起動 1 回の実行の IF
@@ -184,6 +187,11 @@ type delegationContext struct {
 	Follow *followBranch
 	// Previous は、計画を作り直した後の最初の委譲に渡す、前の計画の成果物（接続先の成果物。変更の提案・作業ブランチ）。無ければ nil。
 	Previous *previousDeliverable
+	// SpecSection は起動するタスクの仕様の文書の節。NeedsSpecDraft は下書きをリポジトリへ入れるタスクか。SpecDraft は
+	// 起動するタスクを選ぶときに読み直した下書きの全文。
+	SpecSection    specTaskSection
+	NeedsSpecDraft bool
+	SpecDraft      string
 }
 
 // estimateMicros は周の上限の評価額（実装枠の残り ＋ レビュー対応枠の残り）。`--max-budget-usd` と
@@ -277,7 +285,7 @@ func loadApprovedPlan(ctx context.Context, tx *sql.Tx, challengeID int64) (appro
 // 計画の承認が済んでいるのに計画を引けない（承認に計画の版が無い・版の計画が無い・構造化した
 // 出力が無い）課題は、黙って除外せず skipped に理由つきで返す。
 func selectDelegationTargets(ctx context.Context, tx *sql.Tx) (out []int64, skipped []NotStarted, err error) {
-	t, err := selectDelegationTargetsFor(ctx, tx, nil)
+	t, err := selectDelegationTargetsFor(ctx, tx, "", nil)
 	return t.Targets, t.Skipped, err
 }
 
@@ -299,7 +307,7 @@ type blockedChallenge struct {
 
 // selectDelegationTargetsFor は selectDelegationTargets の、委譲先の宣言 conn（nil なら、委譲先の形による判定をしない）を
 // 受け取り、進めようが無い課題も返す版。統合先を使う課題は、終わっていない実行をタスクの単位で見る（課題の単位では見ない）。
-func selectDelegationTargetsFor(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration) (out delegationTargets, err error) {
+func selectDelegationTargetsFor(ctx context.Context, tx *sql.Tx, workspace string, conn *ConnectorsDeclaration) (out delegationTargets, err error) {
 	// 着手中の課題と、タスクを止める保留だけが開いている人間対応待ちの課題（保留が結び付くタスク以外を進める）。
 	challenges, err := loadChallengesWithProceedableTasks(ctx, tx)
 	if err != nil {
@@ -355,7 +363,7 @@ func selectDelegationTargetsFor(ctx context.Context, tx *sql.Tx, conn *Connector
 			continue
 		}
 		// 起動できるタスクと統合先の使用（計画の検査より先。計画の構造化した出力ではなくタスクの行で決める）。
-		sel, err := selectLaunchTasks(ctx, tx, conn, ch.ID, cid)
+		sel, err := selectLaunchTasks(ctx, tx, workspace, conn, ch.ID, cid)
 		if err != nil {
 			return out, err
 		}
@@ -511,8 +519,17 @@ func (s *Store) loadDelegationContextForTask(ctx context.Context, in DelegateInp
 				}
 			}
 		}
-		if doneCovers, err = loadDoneTaskCovers(ctx, tx, cid); err != nil {
+		all, err := listTasks(ctx, tx, cid)
+		if err != nil {
 			return err
+		}
+		doneCovers = doneTaskCovers(all)
+		if len(tasks) == 1 {
+			// 壊れた一覧は、下の計画の検査が断る。
+			if list, perr := loadPlanAcceptanceCriteria(p.Spec); perr == nil {
+				dc.SpecSection = specTaskSectionFor(list, tasks[0], all)
+				dc.NeedsSpecDraft = landsSpecDraft(list, tasks[0])
+			}
 		}
 		history, err = loadLaunchHistory(ctx, tx, cid)
 		return err
@@ -614,7 +631,7 @@ func (s *Store) prepareJ3(ctx context.Context, in DelegateInput, dc *delegationC
 			ch.Title, ch.Description, ch.DoneCriteria, urgency, priority, ch.Reporter)},
 		{Label: "承認済みの計画の本文", Content: dc.Plan.Body},
 		{Label: "承認済みの計画の構造化した出力", Content: dc.Plan.Spec},
-		{Label: labelTaskSection, Content: formatBriefTaskSection(dc.Task, criteria)},
+		{Label: labelTaskSection, Content: formatBriefTaskSection(dc.Task, criteria, dc.SpecSection)},
 	}
 	if t := formatCompletionRejectionsSection(dc.Rejections); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: CompletionRejectionsSectionLabel, Content: t})
@@ -776,7 +793,7 @@ func (s *Store) runDelegationTasks(ctx context.Context, in DelegateInput) (*Dele
 
 	var selected delegationTargets
 	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
-		selected, err = selectDelegationTargetsFor(ctx, tx, in.ConnDecl)
+		selected, err = selectDelegationTargetsFor(ctx, tx, s.workspace, in.ConnDecl)
 		return err
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -892,6 +909,14 @@ func (s *Store) delegateOnce(ctx context.Context, in DelegateInput, jc *Judgment
 			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedPlanUnavailable, Detail: err.Error()}, nil
 		}
 		return nil, nil, err
+	}
+
+	// 下書きをリポジトリへ入れるタスクは、起動するタスクを選ぶときに読み直した全文が無ければ起動しない
+	// （選んだ後に下書きが変わり、候補を作り直すときに外れた場合）。
+	dc.SpecDraft = run.specDraft()
+	if dc.NeedsSpecDraft && dc.SpecDraft == "" {
+		n := specDraftNotStarted(ch.ID, dc.Task.ID, "読み直した下書きの全文が無い（起動するタスクを選んだ後に、下書きが変わった）")
+		return nil, &n, nil
 	}
 
 	// form: cli の接続ツールの操作は、claude の子も J3 も起動せず、契約の start を呼んで実行 ID を記録し、その周の委譲を終える。
@@ -1098,6 +1123,7 @@ func (s *Store) launchDelegation(ctx context.Context, in DelegateInput, jc *Judg
 		DeciderRow:     dc.DeciderRow,
 		Brief:          brief,
 		Invocation:     dc.Invocation,
+		SpecDraft:      dc.SpecDraft,
 
 		HumanRejections: formatCompletionRejectionsSection(dc.Rejections),
 	}

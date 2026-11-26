@@ -98,36 +98,42 @@ func readSpecCriteria(workspace, path string) ([]acceptanceCriterion, error) {
 }
 
 func loadSpecCriteria(workspace, path string) ([]acceptanceCriterion, error) {
+	_, criteria, err := readSpecDocument(workspace, path)
+	return criteria, err
+}
+
+// readSpecDocument は仕様の文書の全文と、抜き出した受入基準を返す（読めない条件は loadSpecCriteria と同じ）。
+func readSpecDocument(workspace, path string) ([]byte, []acceptanceCriterion, error) {
 	resolved, err := resolveSpecPath(workspace, path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// 通常のファイルでないもの（FIFO など）は、開くと止まりうるので先に断る。
 	info, err := os.Stat(resolved)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
+		return nil, nil, errors.New("not a regular file")
 	}
 	f, err := os.Open(resolved)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, maxSpecDocumentBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(data) > maxSpecDocumentBytes {
-		return nil, errSpecTooLarge
+		return nil, nil, errSpecTooLarge
 	}
 	criteria, err := extractAcceptanceCriteria(string(data))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(criteria) == 0 {
-		return nil, errSpecNoCriteria
+		return nil, nil, errSpecNoCriteria
 	}
-	return criteria, nil
+	return data, criteria, nil
 }
