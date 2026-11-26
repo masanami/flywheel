@@ -36,6 +36,9 @@ describe("読み取り（types.gen.ts の形）", () => {
     expect(q.questions.map((x) => x.challenge_id)).toEqual([
       "C-8",
       "C-4",
+      "C-5",
+      "C-6",
+      "C-6",
       "C-28",
     ]);
   });
@@ -225,6 +228,9 @@ describe("親が直接行う保留（#452）", () => {
     // オーナーが答える問いにも出ない（C-28 のタスクの問いは親が直接行う保留ではないので残る）
     expect((await a.questions()).questions.map((x) => x.challenge_id)).toEqual([
       "C-4",
+      "C-5",
+      "C-6",
+      "C-6",
       "C-28",
     ]);
   });

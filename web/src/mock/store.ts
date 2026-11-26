@@ -321,6 +321,62 @@ function specQuestionChallenge(): MockChallenge {
   });
 }
 
+// 下書きづくりの失敗の保留を持つ課題（問いの保留の課題を元に、理由・回数・選択肢を変える）。
+function specFailedChallenge(): MockChallenge {
+  const base = specQuestionChallenge();
+  return {
+    ...base,
+    c: { ...base.c, id: "C-5", title: "予約の変更を足す" },
+    specDraft: base.specDraft && {
+      ...base.specDraft,
+      hold_reason: "spec_failed",
+      path: ".flywheel/specs/c-5.md",
+      questions: [],
+    },
+    holds: base.holds.map((h) => ({
+      ...h,
+      check: "seed-spec-failed",
+      question: "仕様の下書きづくりが失敗しました。",
+      options: [
+        { id: "retry", label: "やり直す", description: "", button: true },
+        ...h.options.filter((o) => o.id !== "answer"),
+      ],
+    })),
+  };
+}
+
+// 回数の上限の保留と、下書きづくりでない保留を 1 つずつ持つ課題。
+function specAttemptLimitChallenge(): MockChallenge {
+  const base = specQuestionChallenge();
+  const [spec] = base.holds as [Hold];
+  return {
+    ...base,
+    c: { ...base.c, id: "C-6", title: "予約の通知を足す" },
+    specDraft: base.specDraft && {
+      ...base.specDraft,
+      attempts: 3,
+      hold_id: "H-2",
+      hold_reason: "spec_attempt_limit",
+      path: ".flywheel/specs/c-6.md",
+    },
+    holds: [
+      {
+        ...spec,
+        check: undefined,
+        options: [],
+        question: "通知の送り先はどこにしますか。",
+      },
+      {
+        ...spec,
+        hold_id: "H-2",
+        check: "seed-spec-limit",
+        question: "仕様の下書きづくりが、回数の上限に達しました。",
+        options: spec.options.filter((o) => o.id !== "answer"),
+      },
+    ],
+  };
+}
+
 export function seed(): Record<string, MockWorkspace> {
   const depSeeds = seedDeps();
   const alpha: MockChallenge[] = [
@@ -789,6 +845,8 @@ export function seed(): Record<string, MockWorkspace> {
       ],
     }),
     specQuestionChallenge(),
+    specFailedChallenge(),
+    specAttemptLimitChallenge(),
   ];
   const ok = (name: string): Workspace => ({
     error: null,
