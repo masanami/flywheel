@@ -451,6 +451,55 @@ func TestReplanJ2_SpecLanding(t *testing.T) {
 	})
 }
 
+// 済みのタスクが下書きを入れた後の作り直しでは、区画「受入基準」の下書きの行が、入れたタスクの題名を出す行に変わる。
+// テストの名前の AC の番号は、Issue #1343 の受け持ち。
+func TestReplanJ2_SpecSectionAfterTheDraftIsLanded(t *testing.T) {
+	t.Parallel()
+	const landed = "\n下書き（済みのタスク「TASK-a」がリポジトリへ入れた）\n"
+	section := func(t *testing.T, f *paFixture) string {
+		t.Helper()
+		in, _ := f.j2Input(t, landReplanOut(t, 1, true, false, landCritDone, landCritNew))
+		content, ok := j2SectionText(in, AcceptanceCriteriaSectionLabel)
+		if !ok {
+			t.Fatal("no section 受入基準")
+		}
+		return content
+	}
+	for _, tc := range []struct {
+		name        string
+		integration bool
+	}{
+		{"AC-146・AC-147 統合先を使う", true},
+		{"AC-146・AC-147 統合先を使わない（区画「済みのタスク」に出ない）", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := landReplan(t)
+			if !tc.integration {
+				coretest.Exec(t, f.s.Workspace(), `UPDATE challenge SET uses_integration = 0 WHERE id = ?`, f.cid())
+			}
+			got := section(t, f)
+			requireContains(t, got, landed)
+			requireContains(t, got, "\n新しい文書（いまある文書の直しではない）\n")
+			requireAbsent(t, got, "リポジトリにまだ入っていない")
+		})
+	}
+	t.Run("置き換える元の行は変えない", func(t *testing.T) {
+		t.Parallel()
+		f := landReplan(t)
+		setSpecBase(t, f.s, f.id, landBasePath)
+		requireContains(t, section(t, f), landed+"置き換える元: "+landBasePath+"\n\n")
+	})
+	t.Run("下書きを入れるタスクが済みでなければ入れる前の行のまま", func(t *testing.T) {
+		t.Parallel()
+		f := landReplan(t)
+		setTaskStatusRaw(t, f.s, f.cid(), "a", TaskStatusCancelled)
+		got := section(t, f)
+		requireContains(t, got, "\n下書き（リポジトリにまだ入っていない）\n")
+		requireAbsent(t, got, "リポジトリへ入れた")
+	})
+}
+
 // landDraftList は計画の出力の一覧を下書きのものにする。
 func landDraftList(list planAcceptanceCriteria) planAcceptanceCriteria {
 	list.Path, list.Draft = landDraftPath, true

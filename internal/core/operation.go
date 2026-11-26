@@ -521,6 +521,11 @@ func (s *Store) ExecuteOperationApproval(ctx context.Context, req OperationAppro
 	if err != nil {
 		return nil, nil, err
 	}
+	// 差し戻した操作は実行しないので、完了した課題の下書きは、まだ実行していない最後の 1 件なら消す。
+	if req.Decision == ApprovalDecisionRejected {
+		cid, _ := parseChallengeID(opOut.ChallengeID)
+		s.cleanupSpecDraft(ctx, cid, att.actor)
+	}
 	return &opOut, &approvalOut, nil
 }
 

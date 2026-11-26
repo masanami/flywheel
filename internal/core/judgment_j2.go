@@ -1433,7 +1433,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	}
 	if criteria != nil {
 		// 済みの印は、区画「済みのタスク」に出るタスクの受け持ちに付ける。
-		sections = append(sections, JudgmentDataSection{Label: AcceptanceCriteriaSectionLabel, Content: formatPlanAcceptanceCriteriaSection(*criteria, doneTasks)})
+		sections = append(sections, JudgmentDataSection{Label: AcceptanceCriteriaSectionLabel, Content: formatPlanAcceptanceCriteriaSection(*criteria, doneTasks, doneSpecLanding)})
 	}
 	if stagesText := formatJ2StagesSection(ch); stagesText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "いまの予想・やらないこと・図", Content: stagesText})

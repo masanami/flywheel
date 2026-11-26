@@ -328,5 +328,7 @@ func (s *Store) supersedeStaleReleases(ctx context.Context, cid, runInt int64, k
 			return err
 		}
 	}
+	// 閉じる間に課題が完了していれば作り直されないので、ここでも下書きの後始末をする。
+	s.cleanupSpecDraft(ctx, cid, actor)
 	return nil
 }

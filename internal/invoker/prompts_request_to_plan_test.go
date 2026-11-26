@@ -124,11 +124,18 @@ func TestInstructions_J2PutsTheSpecLandingTaskFirstAsAPrerequisite(t *testing.T)
 		"2 件以上の計画では、文書を入れるタスクを最初に置き", "ほかのすべてのタスクの前提にする")
 }
 
-// 済みのタスクが下書きを入れた後の作り直しと、下書きでない課題では、どのタスクにも lands_spec を真にしない
-// （計画の検査がどちらも不正にする）。済みのタスクが入れたかは、前の計画の本文と区画「済みのタスク」で見分ける。
+// AC-148（Issue #1343）: 区画「受入基準」に「リポジトリへ入れた」の行があるときは、どのタスクの lands_spec も真にしない。
+// 下書きでない課題（印が無い）でも同じ（計画の検査がどちらも不正にする）。
 func TestInstructions_J2MarksNoTaskWithoutADraftOrAfterItIsLanded(t *testing.T) {
 	requirePhrases(t, "the spec draft rule", j2SpecDraftLine(t),
-		"済みのタスクが下書きを入れた後", "前の計画の本文の「リポジトリへ入れるのは」が挙げる題名", "区画「済みのタスク」", "印が無いときは、どのタスクも真にしない")
+		"区画「受入基準」に「リポジトリへ入れた」の行があるときと、印が無いときは、どのタスクの lands_spec も真にしない")
+}
+
+// AC-149（Issue #1343）: 下書きを入れた後かどうかを、前の計画の本文から見分けさせない。
+func TestInstructions_J2DoesNotReadTheLandingFromThePreviousPlanBody(t *testing.T) {
+	if old := "前の計画の本文の「リポジトリへ入れるのは」"; strings.Contains(j2Instructions(t), old) {
+		t.Errorf("j2.md still contains %q", old)
+	}
 }
 
 // AC-118: j2.md の上限は、本文のバイト数に 300 を足した値。
