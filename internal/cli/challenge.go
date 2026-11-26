@@ -233,6 +233,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	if c.SpecBasePath != nil {
 		fmt.Fprintf(&b, "置き換える元の文書の場所: %s\n", escapeControl(*c.SpecBasePath))
 	}
+	if sd := d.SpecDraft; sd != nil {
+		fmt.Fprintf(&b, "下書きづくり:  %s (%s)・実行 %d 回（上限 %d 回）\n", sd.State.Label(), sd.State, sd.Attempts, core.SpecDraftMaxAttempts)
+	}
 	fmt.Fprintf(&b, "作成:          %s\n", FormatTimestamp(c.CreatedAt))
 	fmt.Fprintf(&b, "更新:          %s\n", FormatTimestamp(c.UpdatedAt))
 	deps := make([]string, 0, len(d.Dependencies))

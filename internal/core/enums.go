@@ -326,6 +326,10 @@ const ActivityActionOpClose = "op_close"
 // （entity=challenge。after は下書きの場所 path と訳 reason）。
 const ActivityActionSpecDraftCleanupFailed = "spec_draft_cleanup_failed"
 
+// ActivityActionSpecDraftRequested は、計画を作る判断点が課題を下書きづくりへ回すと決めたことの作業ログの action
+// （entity=challenge。after は下書きの場所 path・置き換える元 base_path・対象のリポジトリ repo・回した理由 reason）。
+const ActivityActionSpecDraftRequested = "spec_draft_requested"
+
 // 作業ログ（entity=challenge）の action。依存を足した・外したときに残し、after に
 // 足した・外した依存先の ID を持つ。
 const (

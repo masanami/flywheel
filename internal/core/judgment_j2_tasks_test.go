@@ -62,16 +62,16 @@ func j2SchemaRoot(t *testing.T) map[string]any {
 	return decoded["properties"].(map[string]any)
 }
 
-// AC-14: verdict の値の集合は plan・uncertain・parent_direct の 3 つ。
-func TestJ2OutputSchema_VerdictEnumIsPlanUncertainParentDirect(t *testing.T) {
+// AC-14: verdict の値の集合は plan・uncertain・parent_direct・needs_spec の 4 つ。
+func TestJ2OutputSchema_VerdictEnumIsPlanUncertainParentDirectNeedsSpec(t *testing.T) {
 	t.Parallel()
 	enum := j2SchemaRoot(t)["verdict"].(map[string]any)["enum"].([]any)
 	got := map[string]bool{}
 	for _, v := range enum {
 		got[v.(string)] = true
 	}
-	want := map[string]bool{"plan": true, "uncertain": true, "parent_direct": true}
-	if len(got) != 3 || !got["plan"] || !got["uncertain"] || !got["parent_direct"] {
+	want := map[string]bool{"plan": true, "uncertain": true, "parent_direct": true, "needs_spec": true}
+	if len(got) != 4 || !got["plan"] || !got["uncertain"] || !got["parent_direct"] || !got["needs_spec"] {
 		t.Errorf("verdict enum = %v, want exactly %v", enum, want)
 	}
 }

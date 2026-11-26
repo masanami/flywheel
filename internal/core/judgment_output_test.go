@@ -21,11 +21,11 @@ func TestJ1VerdictValues_Are3ClosedValues(t *testing.T) {
 	}
 }
 
-// TestJ2VerdictValues_Are3ClosedValues は J2 の判定の閉集合が plan/uncertain/parent_direct の
-// 3値（論点を先に問う issues は外した）であることを固定する。
-func TestJ2VerdictValues_Are3ClosedValues(t *testing.T) {
+// TestJ2VerdictValues_Are4ClosedValues は J2 の判定の閉集合が plan/uncertain/parent_direct/needs_spec の
+// 4値（論点を先に問う issues は外した）であることを固定する。
+func TestJ2VerdictValues_Are4ClosedValues(t *testing.T) {
 	t.Parallel()
-	want := []J2Verdict{J2VerdictPlan, J2VerdictUncertain, J2VerdictParentDirect}
+	want := []J2Verdict{J2VerdictPlan, J2VerdictUncertain, J2VerdictParentDirect, J2VerdictNeedsSpec}
 	if len(J2VerdictValues) != len(want) {
 		t.Fatalf("len(J2VerdictValues) = %d, want %d", len(J2VerdictValues), len(want))
 	}

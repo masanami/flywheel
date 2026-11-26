@@ -269,6 +269,8 @@ type ChallengeDetail struct {
 	SpecCostUSD float64
 	// ChatSessions は課題に紐づいた会話（無ければ空）。
 	ChatSessions []ChallengeChatSession
+	// SpecDraft は下書きづくりの記録（無ければ nil）。
+	SpecDraft *SpecDraft
 }
 
 // ChallengeChatSession は課題に紐づいた対話の欄の会話。
@@ -1049,6 +1051,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		if detail.SupervisorHandsTaken, err = countExecutedSupervisorHands(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.SpecDraft, err = loadSpecDraft(ctx, tx, cid); err != nil {
 			return err
 		}
 		if detail.SpecCostUSD, detail.ChatSessions, err = loadChallengeSpec(ctx, tx, cid); err != nil {
