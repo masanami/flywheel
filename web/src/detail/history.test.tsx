@@ -64,6 +64,7 @@ const task = (
   title: string,
 ): ShowCardResponse["tasks"][number] => ({
   added: null,
+  covers: [],
   flow_reason: null,
   planned_flow: null,
   body: "",

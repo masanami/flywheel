@@ -172,7 +172,25 @@ func loadDocumentedJSON(t *testing.T) documentedJSON {
 	addM45DependencyKeysShape(t, &doc)
 	addCoreRedesignS2aShowShape(t, &doc)
 	addChatSessionShape(t, &doc)
+	addRequestToPlanShape(t, &doc)
 	return doc
+}
+
+// addRequestToPlanShape は要求から計画まで（request-to-plan.md の画面・API設計）が `show --json` の challenge に足した
+// キーを doc へ合成する。文書の記述が消えたらここで落ちる。
+func addRequestToPlanShape(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "request-to-plan.md"))
+	if err != nil {
+		t.Fatalf("read request-to-plan spec: %v", err)
+	}
+	if !strings.Contains(string(data), "課題の詳細に足す値: `spec_path`（文字列か `null`）。") {
+		t.Fatal("request-to-plan spec does not document spec_path")
+	}
+	if len(doc.entity["show_challenge"]) == 0 {
+		t.Fatal("documented shape of show_challenge not found")
+	}
+	doc.entity["show_challenge"]["spec_path"] = true
 }
 
 // addChatSessionShape は対話の欄の作り替え（chat-session.md の画面・API設計）が `show --json` の challenge と

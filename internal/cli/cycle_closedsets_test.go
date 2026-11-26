@@ -159,7 +159,9 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		"no_tasks":                "TestDelegateTask_AC121_NoTasksForAnOldShapePlan (internal/core/delegate_task_test.go)",
 		// チェック待ちは作業中の実行と同じ扱い（止める指示まで回りを繰り返す）なので、cycle --json では終わりまで観測できない。core のテストが観測する。
 		"waiting_external": "TestRunCycle_VerifyPhase_PendingChecksAreWaitingExternal (internal/core/cycle_run_s2_test.go)",
-		"waiting_outside":  "TestReleaseOutside_SecondTimeReturnsNotStartedWaitingOutside (internal/core/release_exec_outside_test.go)",
+		// 仕様の文書を読めない課題は、core のテストが計画の段で観測する。
+		"spec_unreadable": "TestPlanAutoJ2_Criteria_UnreadableDocumentDoesNotInvokeJ2 (internal/core/judgment_j2_criteria_test.go)",
+		"waiting_outside": "TestReleaseOutside_SecondTimeReturnsNotStartedWaitingOutside (internal/core/release_exec_outside_test.go)",
 	}
 	observed := map[string]bool{}
 	for r, ref := range coreObservedReasons {
@@ -383,6 +385,8 @@ func notStartedConstFor(reason string) string {
 		return "NotStartedOutOfPolicy"
 	case "waiting_outside":
 		return "NotStartedWaitingOutside"
+	case "spec_unreadable":
+		return "NotStartedSpecUnreadable"
 	}
 	return "?"
 }

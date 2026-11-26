@@ -377,6 +377,8 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 		approved int64
 		qaText   string
 		fu       *Followup
+		criteria *planAcceptanceCriteria
+		allTasks []Task
 	)
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -392,6 +394,17 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 		all, err := listTasks(ctx, tx, cid)
 		if err != nil {
 			return err
+		}
+		allTasks = all
+		ap, found, err := loadApprovedPlanAnySpec(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if found {
+			// 受入基準の一覧は承認した計画のものを使う（仕様の文書は読み直さない）。
+			if criteria, err = loadPlanAcceptanceCriteria(ap.Spec); err != nil {
+				return err
+			}
 		}
 		// いまのタスクは、承認済みの版のタスクだけ（前の版のタスクの鍵は、足すタスクの前提に使えない）。
 		for _, t := range all {
@@ -446,6 +459,10 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 		{Label: labelChallenge, Content: fmt.Sprintf("タイトル: %s\n\n説明:\n%s", ch.Title, ch.Description)},
 		{Label: labelExpandApprovedPlan, Content: formatExpandPlanSection(ch, pv)},
 		{Label: labelExpandTasks, Content: formatExpandTasksSection(tasks)},
+	}
+	if criteria != nil {
+		// 済みの印は、前の版を含むすべての済みのタスクの受け持ちに付ける。
+		sections = append(sections, JudgmentDataSection{Label: AcceptanceCriteriaSectionLabel, Content: formatAcceptanceCriteriaSection(*criteria, allTasks)})
 	}
 	if origin != "" {
 		label := labelExpandOrigin

@@ -45,12 +45,18 @@ func TestFlowChoiceMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 版 39 の列（新しい列を除く）を全部並べて比べる。
+	var challengeColumns string
+	if err := old.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT group_concat(name, ', ') FROM (SELECT name FROM pragma_table_info('challenge') ORDER BY cid)`).Scan(&challengeColumns)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	dump := func(db *DB) string {
 		var out string
 		if err := db.Read(context.Background(), func(tx *sql.Tx) error {
 			for _, q := range []string{
 				`SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at FROM task`,
-				`SELECT * FROM challenge`, `SELECT * FROM cycle`, `SELECT * FROM run`, `SELECT * FROM contract_run`,
+				`SELECT ` + challengeColumns + ` FROM challenge`, `SELECT * FROM cycle`, `SELECT * FROM run`, `SELECT * FROM contract_run`,
 				`SELECT id, contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used FROM contract_run_step`,
 			} {
 				rows, err := tx.Query(q)

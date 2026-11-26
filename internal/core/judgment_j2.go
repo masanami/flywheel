@@ -61,6 +61,10 @@ type j2RawOutput struct {
 	Figure   *string         `json:"figure"`
 	// DependsOn は省略可の依存先の課題 ID（M45P3）。ストアを読む検査は写像の中で行う。
 	DependsOn []string `json:"depends_on"`
+	// DeferredCriteria はこの計画で受け持たない受入基準（無い・null は空）。
+	DeferredCriteria []j2RawDeferred `json:"deferred_criteria"`
+	// AcceptanceCriteria は core が spec へ書き足す欄で、判断点は書かない（受入基準を検査する出力に有れば不正）。
+	AcceptanceCriteria json.RawMessage `json:"acceptance_criteria,omitempty"`
 }
 
 // j2RawTopic は J2 の出力の論点 1 つ（題名・どう決めたか・問い 0〜3 件）の生の形。
@@ -89,6 +93,8 @@ type j2RawTask struct {
 	ExpandAfter *bool `json:"expand_after"`
 	// FlowReason は flow の形の委譲先の操作を選んだ理由（flow の形の操作では必須。そうでない操作では空以外が不正）。
 	FlowReason *string `json:"flow_reason"`
+	// Covers はこのタスクが受け持つ受入基準の識別（無い・null は空）。
+	Covers []string `json:"covers,omitempty"`
 }
 
 // j2Topic は検査済みの論点 1 つ。
@@ -118,6 +124,8 @@ type j2Task struct {
 	// Flow は選んだ操作の flow（flow の形の委譲先の操作だけ。そうでなければ空）。FlowReason は出力の flow_reason（flow の形のときだけ。空白を除かない）。
 	Flow       string
 	FlowReason string
+	// Covers は受け持つ受入基準の識別（出力の値）。一覧との突き合わせは checkPlanCoverage が行う。
+	Covers []string
 }
 
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
@@ -164,6 +172,10 @@ type j2ValidatedOutput struct {
 	// Spec は構造化した出力の JSON を空白を除いて詰めたもの（task_plan.spec。
 	// null の額も出力のまま残す＝「spec は構造化した出力と一致する」）。
 	Spec []byte
+	// Criteria は受け持ちの検査に使った受入基準の一覧（仕様の文書の場所を持たない課題と、受入基準を検査しない読み直しでは nil）。
+	// DeferredCriteria は出力の受け持たない基準。
+	Criteria         *planAcceptanceCriteria
+	DeferredCriteria []j2RawDeferred
 }
 
 // soleTask は計画のタスクがちょうど 1 件のときそのタスクを返す。委譲（見直しの途中のつなぎ）は、
@@ -202,6 +214,16 @@ type j2ValidationContext struct {
 	// SkipFlowReason が真のとき、flow_reason の検査と planned_flow の書き足しをしない（承認済みの計画・保留中の足す依頼の spec を、
 	// 委譲の段・回答の段で検査し直すとき。S2 より前に承認した計画は flow_reason を持たず、宣言もその後に変わりうる）。
 	SkipFlowReason bool
+	// CheckCriteria が真のとき、受け持ちを Criteria と突き合わせ、一覧を spec へ書き足す（J2 の出力の確定だけが立てる）。
+	// Criteria が nil なら区画「受入基準」を渡していない計画で、識別が 1 件でもあれば不正。
+	// 偽のとき（承認済みの計画を委譲の段で読み直すとき）は、受け持ちを検査しない。
+	CheckCriteria bool
+	Criteria      *planAcceptanceCriteria
+	// RecheckCriteria が真のとき（承認済みの計画を委譲の段で読み直すとき）は、data が持つ一覧（登録のときに書き足した
+	// acceptance_criteria）と受け持ちを突き合わせる。仕様の文書は読まない。一覧を持たない計画は受け持ちを検査しない。
+	RecheckCriteria bool
+	// DoneCovers は済みのタスクが受け持つ識別（受け持ちの検査で漏れに数えない）。
+	DoneCovers map[string]bool
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -279,12 +301,25 @@ func j2OutputSchema() []byte {
 				"operation":     map[string]any{"type": "string"},
 				"source":        nullableString,
 				"flow_reason":   map[string]any{"type": []string{"string", "null"}, "maxLength": MaxFlowReasonRunes},
+				"covers":        map[string]any{"type": []string{"array", "null"}, "items": map[string]any{"type": "string"}},
 
 				"budget_impl_usd":   nullableNumber,
 				"budget_review_usd": nullableNumber,
 				"expand_after":      map[string]any{"type": []string{"boolean", "null"}},
 			},
 			"required":             []string{"key", "title", "body", "done_criteria", "non_goals", "depends_on", "repo", "operation"},
+			"additionalProperties": false,
+		},
+	}
+	deferredSchema := map[string]any{
+		"type": []string{"array", "null"},
+		"items": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id":     map[string]any{"type": "string"},
+				"reason": boundedString(MaxDeferredReasonRunes),
+			},
+			"required":             []string{"id", "reason"},
 			"additionalProperties": false,
 		},
 	}
@@ -320,6 +355,7 @@ func j2OutputSchema() []byte {
 			"figure":              nullableString,
 			"depends_on":          stringArray,
 			"tasks":               tasksSchema,
+			"deferred_criteria":   deferredSchema,
 			"uses_integration":    map[string]any{"type": []string{"boolean", "null"}},
 			"size":                map[string]any{"type": []string{"string", "null"}, "enum": sizes},
 			"budget_impl_usd":     nullableNumber,
@@ -622,6 +658,26 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 		}
 	}
 
+	if vc.CheckCriteria {
+		if raw.AcceptanceCriteria != nil {
+			return nil, "acceptance_criteria must not be in the output"
+		}
+		if reason := checkPlanCoverage(tasks, raw.DeferredCriteria, vc.Criteria, vc.DoneCovers); reason != "" {
+			return nil, reason
+		}
+	}
+	if vc.RecheckCriteria {
+		list, err := loadPlanAcceptanceCriteria(string(data))
+		if err != nil {
+			return nil, j2ReasonBadShape
+		}
+		if list != nil {
+			if reason := checkPlanCoverage(tasks, raw.DeferredCriteria, list, vc.DoneCovers); reason != "" {
+				return nil, reason
+			}
+		}
+	}
+
 	var spec bytes.Buffer
 	if err := json.Compact(&spec, data); err != nil {
 		return nil, "output is not valid JSON"
@@ -650,6 +706,12 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 	}
 	if !vc.SkipFlowReason {
 		v.Spec = addPlannedFlow(v.Spec, tasks)
+	}
+	if vc.CheckCriteria {
+		v.Criteria, v.DeferredCriteria = vc.Criteria, raw.DeferredCriteria
+		if vc.Criteria != nil {
+			v.Spec = addAcceptanceCriteria(v.Spec, *vc.Criteria)
+		}
 	}
 	if vc.CheckSource {
 		v.OpenChildKeys = vc.OpenChildKeys
@@ -788,6 +850,7 @@ func validateJ2TaskFields(t j2RawTask, vc j2ValidationContext, requireBudgets bo
 		BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD,
 		ExpandAfter: t.ExpandAfter != nil && *t.ExpandAfter,
 		Flow:        flow, FlowReason: flowReason,
+		Covers: t.Covers,
 	}, ""
 }
 
@@ -1020,6 +1083,7 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 		if t.BudgetImplUSD != nil && t.BudgetReviewUSD != nil {
 			b.WriteString("   - 枠: 実装 " + formatUSDAmount(*t.BudgetImplUSD) + " USD・レビュー対応 " + formatUSDAmount(*t.BudgetReviewUSD) + " USD\n")
 		}
+		fmt.Fprintf(&b, "   - 受け持つ受入基準: %d 件\n", len(t.Covers))
 		if t.Source != "" {
 			b.WriteString("   - 取り込み元の子: " + oneLine(t.Source) + "\n")
 		}
@@ -1043,6 +1107,7 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 			b.WriteString("- " + oneLine(k) + "\n")
 		}
 	}
+	writePlanCoverageSection(&b, v.Criteria, v.DeferredCriteria)
 	if s := strings.TrimSpace(v.Summary); s != "" {
 		b.WriteString("\n## 方針\n\n" + s + "\n")
 	}
@@ -1149,6 +1214,10 @@ type j2Prepared struct {
 	DoneRepos []string
 	// KeptBudgets は課題の済みのタスクの枠の実効値（上限の検査が見込みを数えるのに使う）。
 	KeptBudgets []taskBudget
+	// Criteria は区画「受入基準」を作った一覧（仕様の文書の場所を持たない課題は nil。出力の検査に使う）。
+	Criteria *planAcceptanceCriteria
+	// DoneCovers は区画「済みのタスク」に出るタスクが受け持つ識別（出力の検査で漏れに数えない）。
+	DoneCovers map[string]bool
 	// Read が非 nil のときだけ、計画を登録した後に読んだ記録を付けてよい
 	// （取り込み元の対応があり、最新のコメントをすべて入力へ含めた場合）。値は
 	// J2 の直前の取得で得たコメント数と更新日時（ストアの観測値ではない）。
@@ -1168,7 +1237,8 @@ func parseExternalKey(key string) (repo string, number int, ok bool) {
 	return key[:i], n, true
 }
 
-// prepareJ2 は ch の J2 の入力を組み立てる。取り込み元の対応のある課題では、
+// prepareJ2 は ch の J2 の入力を組み立てる。仕様の文書の場所を持つ課題では文書の受入基準を読み、読めなければ
+// NotStarted（spec_unreadable）を返し、上流の取得もしない。取り込み元の対応のある課題では、
 // ここ（J2 の起動の直前）で上流の本文・全コメント・参照先の Issue を取得する
 // （対応の無い課題では上流の取得を呼ばない）。取得に失敗したら NotStarted
 // （upstream_fetch_failed）を返し、run を作らない＝状態と版を変えない。
@@ -1261,7 +1331,16 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		return nil, nil, fmt.Errorf("%w: read position_file %q: %w", ErrConfigInvalid, in.AgentDecl.PositionFile, err)
 	}
 
-	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0, KeptBudgets: keptBudgets}
+	var criteria *planAcceptanceCriteria
+	if ch.SpecPath != nil {
+		items, err := readSpecCriteria(s.workspace, *ch.SpecPath)
+		if err != nil {
+			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedSpecUnreadable, Detail: err.Error()}, nil
+		}
+		criteria = &planAcceptanceCriteria{Path: *ch.SpecPath, Items: items}
+	}
+
+	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0, KeptBudgets: keptBudgets, Criteria: criteria, DoneCovers: doneTaskCovers(doneTasks)}
 	seenDoneRepo := map[string]bool{}
 	for _, t := range doneTasks {
 		if !seenDoneRepo[t.Repo] {
@@ -1323,8 +1402,12 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	if replan != nil && replan.Reason == string(holdReasonChallengeCheckNotMet) {
 		sections = append(sections, JudgmentDataSection{Label: ChallengeCheckFindingsSectionLabel, Content: formatChallengeCheckFindingsSection(replan)})
 	}
-	if t := formatDoneTasksSection(doneTasks); t != "" {
+	if t := formatDoneTasksSection(doneTasks, criteria); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: DoneTasksSectionLabel, Content: t})
+	}
+	if criteria != nil {
+		// 済みの印は、区画「済みのタスク」に出るタスクの受け持ちに付ける。
+		sections = append(sections, JudgmentDataSection{Label: AcceptanceCriteriaSectionLabel, Content: formatAcceptanceCriteriaSection(*criteria, doneTasks)})
 	}
 	if stagesText := formatJ2StagesSection(ch); stagesText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "いまの予想・やらないこと・図", Content: stagesText})
@@ -1993,7 +2076,7 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
-			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, CheckLimit: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos, KeptBudgets: prepared.KeptBudgets},
+			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, CheckLimit: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos, KeptBudgets: prepared.KeptBudgets, CheckCriteria: true, Criteria: prepared.Criteria, DoneCovers: prepared.DoneCovers},
 			Read:       prepared.Read,
 		})
 		if err != nil {
