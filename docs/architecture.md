@@ -222,7 +222,8 @@ DDL ではなく、何を持つかの合意のための素描である。
 | `source_binding` | challenge_id, source_id, external_key, fingerprint, last_synced_at, upstream_state | 取り込み元との対応。上流の close を保持できる（claude-flywheel#140） |
 | `cycle` | id, started_at, ended_at, result, budget_usd, spent_usd | 現行の `cycle_start` / `cycle_end` |
 | `run` | id, cycle_id（NULL 可）, kind（delegate / adhoc / judgment / contract。contract は `form: cli` の契約のコマンドの実行）, challenge_id, operation_id（S3a。反映の操作のために呼んだ contract の run の印。NULL は委譲の段の実行と過去の行。印の付いた run は成果物を持たず、課題の最後の委譲の実行・最後の契約のコマンドを読む所から外す）, repo, slot_id, session_ref, started_at, ended_at, result, cost_usd | 現行の `delegate_*` / `adhoc_*` に、判断点の呼び出しを加えたもの。**終了していない `run` が「実行中」** |
-| `contract_run` | id, challenge_id, connector_id, external_run_id, start_run_id, state, summary, requested_kind・requested_decider・requested_text・requested_resolvable_by, cost_usd, max_budget_usd, wait_hold_id, held_success, started_at, observed_at, ended_at, work_dir, kind・operation_id・requested_options・content_ref・facts・facts_unmet_count・land_ref・land_delivered（S3a） | `form: cli` の接続ツールの run（契約の実行 ID）を周をまたいで持つ（0019）。`cost_usd` は契約が報告した累計で、run の費用には前回との差分だけを記録する。終わっていない行は課題ごとに高々 1 つ。`wait_hold_id` は契約の `waiting` を写した保留の ID（0020）で、保留への答えを `resume` で返すとき、その保留の答えだけを返すために使い、返す前に NULL にして二重に返さない。`held_success` は課題が保留の間に契約の run が `succeeded` まで進んだ印（0021）で、答えの後の周で resume も start も呼ばずに検証中へ進めたら 0 に戻す（[M3 の機能仕様](features/m3-invoker-delegation.md) §委譲の流れ（`form: cli`））。`work_dir` は `start` を実行した作業ディレクトリ（0023）で、`status`・`resume`・`cancel` は決め直さずにこれを使う（NULL の既存の行はワークスペース）。`requested_resolvable_by` は最後に読んだ求めの `resolvable_by`（0024。NULL は項目なし＝`answer`）で、`terminal` の待ちへの回答では `resume` を呼ばない判定に使う。反映の段が読んだ終わり（succeeded・failed・cancelled）は、反映の試行の結果（待つ以外）を書くまで ended_at を入れず、その間は終わっていない行として数える。結果を書く前に、対応する承認済みの反映の操作が無くなったら（試行が競合で閉じた・別の反映の操作の反映の段が読んだ）、結果を書かずに ended_at を入れる（区切り S3a）。S3a で足した列: `kind` は契約の実行の種類（`task`〔既定〕・`reflect`＝反映の依頼）、`operation_id` は反映の依頼が結び付く反映の操作（task は NULL）、`requested_options` は最後に読んだ求めの選択肢、`content_ref` は最後に読んだ求めの中身の識別、`facts` は最後に読んだ状態の facts、`facts_unmet_count` は facts を満たさなかった回数（既定 0）、`land_ref` は「入れてよい」を返す前に書いた通す中身（NULL・空は、いまの承認ではまだ返していない）、`land_delivered` はその「入れてよい」を委譲先が受け取ったと分かっているか（既定 0）。終わりを持ち越している行（state が終わりで ended_at が空）は、次の反映の段が委譲先の `status` を呼ばず、この行の状態・要約から判定する |
+| `contract_run` | id, challenge_id, connector_id, external_run_id, start_run_id, state, summary, requested_kind・requested_decider・requested_text・requested_resolvable_by, cost_usd, max_budget_usd, wait_hold_id, held_success, started_at, observed_at, ended_at, work_dir, kind・operation_id・requested_options・content_ref・facts・facts_unmet_count・land_ref・land_delivered（S3a） | `form: cli` の接続ツールの run（契約の実行 ID）を周をまたいで持つ（0019）。`cost_usd` は契約が報告した累計で、run の費用には前回との差分だけを記録する。終わっていない行は課題ごとに高々 1 つ。`wait_hold_id` は契約の `waiting` を写した保留の ID（0020）で、保留への答えを `resume` で返すとき、その保留の答えだけを返すために使い、返す前に NULL にして二重に返さない。`held_success` は課題が保留の間に契約の run が `succeeded` まで進んだ印（0021）で、答えの後の周で resume も start も呼ばずに検証中へ進めたら 0 に戻す（[M3 の機能仕様](features/m3-invoker-delegation.md) §委譲の流れ（`form: cli`））。`work_dir` は `start` を実行した作業ディレクトリ（0023）で、`status`・`resume`・`cancel` は決め直さずにこれを使う（NULL の既存の行はワークスペース）。`requested_resolvable_by` は最後に読んだ求めの `resolvable_by`（0024。NULL は項目なし＝`answer`）で、`terminal` の待ちへの回答では `resume` を呼ばない判定に使う。反映の段が読んだ終わり（succeeded・failed・cancelled）は、反映の試行の結果（待つ以外）を書くまで ended_at を入れず、その間は終わっていない行として数える。結果を書く前に、対応する承認済みの反映の操作が無くなったら（試行が競合で閉じた・別の反映の操作の反映の段が読んだ）、結果を書かずに ended_at を入れる（区切り S3a）。S3a で足した列: `kind` は契約の実行の種類（`task`〔既定〕・`reflect`＝反映の依頼・`spec`＝下書きづくり〔タスクも計画も持たない。要求から計画まで S2b-1〕）、`operation_id` は反映の依頼が結び付く反映の操作（task は NULL）、`requested_options` は最後に読んだ求めの選択肢、`content_ref` は最後に読んだ求めの中身の識別、`facts` は最後に読んだ状態の facts、`facts_unmet_count` は facts を満たさなかった回数（既定 0）、`land_ref` は「入れてよい」を返す前に書いた通す中身（NULL・空は、いまの承認ではまだ返していない）、`land_delivered` はその「入れてよい」を委譲先が受け取ったと分かっているか（既定 0）。終わりを持ち越している行（state が終わりで ended_at が空）は、次の反映の段が委譲先の `status` を呼ばず、この行の状態・要約から判定する |
+| `spec_draft` | challenge_id（主キー）, path, base_path, repo, reason, state（`pending`・`running`・`awaiting_owner`・`done`・`skipped`）, attempts, questions, answers, hold_id, hold_reason, created_at, updated_at | 下書きづくりの記録（要求から計画まで S2b-1。§7「計画を作る判断点」）。課題ごとに高々 1 件。`questions` はいま残っている問いだけ、`answers` は追記だけ。対応する契約の実行は、種類 `spec` の `contract_run` |
 | `slot` | id, repo, provider（clone / worktree / container）, path, state | 実行環境の払い出し（claude-flywheel#154・§11） |
 | `activity` | id, at, actor, channel, entity, entity_id, action, before, after | 作業ログ（D4）。全ての状態変更を core が自動で記録する |
 | `lock` | name, holder, acquired_at, heartbeat_at | サイクルの並走排他 |
@@ -288,6 +289,8 @@ stateDiagram-v2
 >
 > **保留を課題に重ねて持つ（区切り S4c-3）**: 保留は、止める範囲（タスクか課題）を持つ（`hold.scope`。NULL は課題を止める保留）。遷移 T11 に、人間対応待ちからの行を足した（条件: 開いている保留が、どれもタスクを止める保留で、戻り先が着手中。新しい保留も、開いている保留の無い別のタスクを止める保留。遷移先は人間対応待ち）。回答 T12 と T20 は、ほかの開いている保留が残っていれば、遷移先を人間対応待ちにする（残っていなければ、保留の戻り先。重ねられる保留の戻り先はどれも着手中で、最後に閉じた保留の戻り先が課題の戻り先になる）。遷移の表はストアを読まない。重ねられる条件は、保留の行を作る共通の所が同じ書き込みの中で確かめ、T12・T20 の遷移先は、閉じる書き込みの中でほかの開いている保留を数えて決める。課題を止める保留とタスクを止める保留が同時に開かないことも、索引ではなくこの確かめで保つ。計画を作り直す回答（T12）とスーパーバイザーの手 replan（T20）は、ほかの開いている保留を回答なしで閉じる。取り下げ（T16）は、止める範囲によらず開いている保留をすべて閉じる。
 
+> **下書きづくりの保留を閉じる遷移 `spec_draft_unhold`（T21。要求から計画まで S2b-1）**: 下書きづくりの途中の課題に仕様の文書の場所を付ける `edit --spec` が、開いている下書きづくりの保留を回答なしで閉じ、人間対応待ちから分類済へ戻すときだけ使う、制限つきの行（本人確認は要らない。回答でも承認でもない）。定義は [M1 の機能仕様](features/m1-core.md) の遷移の表を正とする。
+
 ### カードの段階の欄と論点の段（D20・M4 の S4）
 
 - J1（分類）が「一言で」「位置づけ」を書く。サイズ M 以上の課題では、J2（計画）の前に、論点 3〜5 個（選択肢・推奨・例）を保留の問いとしてオーナーへ出し、選んだ結果をカードの論点欄に残す。
@@ -297,9 +300,17 @@ stateDiagram-v2
 
 ### 計画を作る判断点（J2）: 分解は 1 回・受入基準の網羅を検査する
 
-仕様は [features/request-to-plan.md](features/request-to-plan.md)（この節の内容は、その区切り S1 と S2a）。
+仕様は [features/request-to-plan.md](features/request-to-plan.md)（区切り S1 と S2a）と、[features/request-to-plan-s2b.md](features/request-to-plan-s2b.md)（区切り S2b-1。下書きづくりへ回す判定）。
 
 **分解は計画を作る判断点の 1 回だけ**にする。課題をタスクに分けるのはこの判断点で、その前に同じ中身を別の所で分けない。委譲先の分解のスキル（実装の Issue に分けるスキル）は呼ばず、タスクごとの Issue も作らない。分解の正本は計画のタスクで、判断点のエージェントは 1 体のまま。分け方は 3 つの観点（依存を最小にする・機能を縦に切る・層ごとに分ける）で比べてから 1 つに決め、決めた分け方と理由を方針に書く（指示文の規律）。計画の作り直しと、承認の後に「足す」の形でタスクを足すことは、同じ判断点の呼び出しである。
+
+**下書きづくりへ回す**（区切り S2b-1）。計画を作る判断点は、仕様の文書の追加・改修が要る課題を見分けると、計画を作らずに判定 `needs_spec` を返し、根の `spec_draft`（対象のリポジトリ `repo`・置き換える元の文書の場所 `base_path`・回す理由 `reason`）を書く。core は計画を登録せず、課題を分類済のまま、下書きづくりの記録（表 `spec_draft`。課題ごとに高々 1 件）を作る。同じ回りの委譲の段で、組み込みのフロー `spec-draft` を始める（ステップは、下書きを書く `write` と、プラグインの批評役を 3 つの観点で呼んで修正役に直させる `critique` の 2 つ。人を待たず、下書きと残った問いを返して終わる）。
+
+- **回せる課題**: 仕様の文書の場所と下書きづくりの記録のどちらも持たず、着手したタスクが無く、対象にできるリポジトリ（組み込みのフローの委譲先を使う、作業ツリーの形のもの）がある課題。計画の差し戻しの後の作り直しでも、条件を満たせば回せる。回せるかと、回せない理由は、core が入力の区画「仕様の下書きづくり」に書く。回せない課題の `needs_spec` と、「足す」の形の出力の `needs_spec` は不正な出力にする。記録が途中（実行待ち・実行中・オーナーの回答待ち）の課題は、判断点の対象から外す。
+- **起動の形**: 契約の実行の種類 `spec` として、タスクにも計画にも結び付けず、承認なしで始める。予算の枠も `spec`。作業ディレクトリは `.flywheel/specs/` で、対象のリポジトリの元のクローンと文面の置き場は、読める場所として足す。Issue の本文は core が文面のファイルに入れる。2 つのステップの道具は、読む・書く・エージェントを呼ぶものに絞る。種類 `spec` の実行は、タスクと反映の依頼の経路を通さない（成果物・レビュー待ち・検証中への遷移は起きない）。
+- **歯止め**: 実行は 1 つの課題で 3 回まで。1 回の上限額は core が決め、開始のコマンドに `--budget-usd` で渡す。終わった後に、元のクローンで変わっているパスが増えていないかを確かめる（増えていれば失敗。自動では戻さない）。どれも OS の囲いではない（残る危うさは仕様の「作業ディレクトリ」）。
+- **終わった後**: 問いが無く、下書きに受入基準が 1 件以上あれば、課題に下書きの場所を書いて記録を済みにする。次の回りで、判断点が下書きから計画を作る（下書きをリポジトリへ入れるタスクのリポジトリは、記録の対象と同じことを検査する。違えば `spec landing repo mismatch`）。問いが残る・失敗・回数の上限は、課題を止める保留（戻り先は分類済）でオーナーに聞く。保留の理由は記録に持ち（`spec_question`・`spec_failed`・`spec_attempt_limit`）、止まり方は渡さないので、スーパーバイザーは呼ばない。選択肢は、理由に合う `answer`・`proceed`・`retry`・`skip`。
+- **費用**: 課題の予算に数えず、仕様づくりの費用に足す。サイクルの費用には数える。
 
 **受入基準の網羅の検査**は core が行う。突き合わせる一覧は判断点の出力から作らず、課題が指す仕様の文書の `## 受入基準` の節を core が読んで作る（読むのは、そのときのワークスペースの作業ツリーのファイル）。
 
@@ -310,7 +321,7 @@ stateDiagram-v2
 - **仕様の文書が無い・読めない**: 仕様の文書の場所を持たない課題では検査せず、検査していない旨を計画の本文に出す。場所を持つのに文書を読めない課題は、判断点を呼ばず、「着手しなかった」の理由 `spec_unreadable` にする。
 - **承認の後**: 「足す」の形では、一覧に無い識別と、1 つのタスクの中の重なりを退け、漏れは検査しない。委譲の段と回答の段の検査し直しは、計画に書き足した一覧と突き合わせ、仕様の文書を読み直さない。タスクが受け持つ基準の文は、委譲へ渡すタスクの文面に出す（完了の検証の入力は変えない）。
 
-**仕様の文書づくりは「計画の前」のステップ**にする（区切り S2a）。計画の中のタスクにはせず、「タスクを足す」仕組みにも乗せない（最初の計画の承認が大きさも予算も分からないままになり、分解が 2 回になるため）。成果は使い捨ての下書きとして flywheel の中の置き場 `.flywheel/specs/` に置き（この区切りで下書きを作る道は対話の欄だけ）、リポジトリへ入れることは計画のタスクが受け持つ。文書のためだけの PR を、実装の前に通さなくてよい。
+**仕様の文書づくりは「計画の前」のステップ**にする（区切り S2a）。計画の中のタスクにはせず、「タスクを足す」仕組みにも乗せない（最初の計画の承認が大きさも予算も分からないままになり、分解が 2 回になるため）。成果は使い捨ての下書きとして flywheel の中の置き場 `.flywheel/specs/` に置き（下書きを作る道は、対話の欄と、下の下書きづくり）、リポジトリへ入れることは計画のタスクが受け持つ。文書のためだけの PR を、実装の前に通さなくてよい。
 
 - **下書きの見分けと中身**: 課題の仕様の文書の場所が `.flywheel/specs/` の下を指せば下書きで、場所から見分ける。下書きは常に全文にする（既存の文書を直すときは写してから直し、置き換える元の文書の場所を課題に持たせる。入れるときは丸ごと置き換える）。計画を作る判断点の入力の区画「受入基準」には、下書きであることと、置き換える元の文書の場所か新しい文書であることを足す（済みのタスクが入れた後は、その旨の行に替える）。計画の受入基準は下書きから読む。
 - **入れるタスクの検査**: 計画の出力のタスクは、下書きをリポジトリへ入れるかを `lands_spec`（真偽。省略と `null` は偽）で書く。下書きを持つ課題の計画では、入れるタスク（`lands_spec` が真の新しいタスクと、`lands_spec` を記録した済みのタスク）がちょうど 1 件あることと、ほかの新しいタスクがその後に並ぶ（前提をたどると届く）ことを core が検査する。下書きを持たない課題の指定と、「足す」の形の出力の指定は、不正な出力にする。この検査は計画を登録するときだけ掛け、承認の後の検査し直しでは掛けない。
@@ -514,6 +525,8 @@ UI サーバが落ちていても、端末の CLI で承認できる（P6 を保
 > **フローの移植の区切り S1 で実装済み（2026-11-24 の決定。D7 の改訂・D35）**: 宣言に、4 つ目の形「組み込みのフロー」（`form: flow`）を足した。flywheel が、フローの定義と進める仕組み（claude-harness の runtime から写したもの。`internal/flow/`）を自分で持ち、core が自分の実行ファイルの `flywheel flow start|status|resume|cancel` を契約のコマンドとして組み立て、`cli` の形と同じ起動の口で呼ぶ。`flow` の形の `commands` は書けず、反映の依頼の口は宣言に書かなくても持つ。操作ごとに進めるフローの名前（S1 は `ticket`）を `flow` に書き、`permission_mode` を `--permission-mode` で進める側へ渡す（S1 は、`models`〔フロー名 → 変数 → 値〕も `--model <変数>=<値>` で渡したが、S2 で外した。下の注記）。契約（版 1 のまま）に、任意の欄 `flow`（フローの名前）と `steps`（ステップの一覧。形が合わなければ全体を「無い」として扱う）を足した。既存の 3 つの形（`plugin`・`cli`・`brief`）と、これらの欄を返さない外部の委譲先は、変えない。詳細: [features/flow-port.md](features/flow-port.md)・契約の欄は [M3 の機能仕様](features/m3-invoker-delegation.md)の契約の節。
 
 > **フローの移植の区切り S2 で実装済み（2026-11-24 の決定）— 操作の `flow` に書ける値**: `flow` の形の委譲先の操作の `flow` に書ける値は、`ticket`（標準の実装フロー）と `ticket-light`（簡略なフロー）。計画を作る判断点（J2）がタスクごとに操作を選び、理由をタスクの `flow_reason` に書く。計画の承認で認めた操作のフロー（`planned_flow`）を記録し、委譲はそのフローで始める（承認の後に宣言の操作の `flow` を書き換えても変えない。フローを選ぶ前に承認したタスクは、そのときの宣言の操作の `flow` で始める）。承認したフローがあるのに、いまの委譲先が `flow` の形でなければ、起動せずオーナーへの保留にする。1 つの委譲先に、フローの違う操作を並べて書ける。
+
+> **下書きづくりのフロー（要求から計画まで S2b-1）**: 組み込みのフロー `spec-draft` は、操作の `flow` に書ける値に入れない。core が、対象のリポジトリが使う `flow` の形の委譲先で、タスクを持たない契約の実行（種類 `spec`）として始める（§7「計画を作る判断点」）。`flow` の形の委譲先の宣言には、任意のキー `spec_draft_budget_usd`（下書きづくり 1 回の上限額）を足した。
 
 > **フローの移植の区切り S2 で実装済み（2026-11-24 の決定）— `models` を外した**: モデル・effort・Codex のレビューを使うかは、フローの定義（埋め込んだ YAML と指示文）に書いて固定し、委譲先の宣言では差し替えない。S1 で入れた宣言の `models` と `flywheel flow start` の `--model` は外した（どちらも誤りになる。宣言は設定の誤り、`--model` は使い方の誤り）。フローの定義の中の変数 `models`・`efforts` は残す（最上位の `efforts` の値は `low`・`medium`・`high`・`xhigh`・`max` の 5 つで、ステップは `$efforts.<名前>` で指し、指せるのは `llm` のステップだけ）。標準のフロー `ticket` の実装のステップは、Codex のレビューを `/self-review` と並べて走らせる（Codex の費用は flywheel の費用・予算に数えない。Codex が使えなくても止めない）。変えたいときは、値を差し替えずにフローを使い分ける。契約（版 1 のまま）の `steps` の要素には、任意の欄 `effort` を足した。
 

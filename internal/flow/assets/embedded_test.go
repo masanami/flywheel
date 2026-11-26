@@ -298,3 +298,25 @@ func TestReadmeNamesTheSource(t *testing.T) {
 		}
 	}
 }
+
+// AC-133: 埋め込んだ ticket・ticket-light・reflect のどのステップも tools を持たない。
+func TestEmbeddedFlowsDeclareNoTools(t *testing.T) {
+	l, err := assets.Ensure(assets.FS, filepath.Join(t.TempDir(), "runtime", "test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"ticket", "ticket-light", "reflect"} {
+		wf, err := workflow.Load(filepath.Join(l.WorkflowDir, id+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(wf.Steps) == 0 {
+			t.Fatalf("%s has no steps", id)
+		}
+		for _, s := range wf.Steps {
+			if s.Tools != nil {
+				t.Errorf("%s: step %s has tools %v", id, s.ID, s.Tools)
+			}
+		}
+	}
+}

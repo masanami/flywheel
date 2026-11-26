@@ -33,6 +33,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
             （--hold＝回答する保留の ID。開いている保留が 2 つ以上の課題では必須。ID は flywheel show・status に出る）
             （--option＝選択肢つきの問いの、選ぶ選択肢の識別。選んだ見出しが回答の文になる（--answer も付けると、見出しの後に改行してその文が続く）。--replan とは併用できない）
             （--choice・--text＝計画の承認待ちの問いへの答え。推奨と違う選択肢か文の答えがあれば、課題を分類済へ戻して計画を作り直す）
+            （下書きの問いの保留へは --option answer。推奨と違う答えは --choice・--text を付ける: --option answer [--choice <Q番号>=<選択肢の番号>]... [--text <Q番号>=<文>]... [--hold <H-ID>]。付けない問いは推奨を答える）
             （--replan＝範囲・方針・達成条件が変わる回答の印。委譲を再開せず、計画を作り直して計画の承認待ちへ戻す。着手中・検証中の保留だけ）
   approve <ID> [--hold-release | --reopen] [--relayed --session <s> --quote <q>]
             （--reopen＝OP-ID だけ。検証の後に動いた head が取り込みだけとも中身の変更とも確かめられず人間待ちの release について、
@@ -68,7 +69,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   export --out <path>
   import --in <path>
   serve [--port <n>] [--fleet <path>]
-  flow start --permission-mode <default|acceptEdits|auto> --delegated-run <id> [--input <名前>=<値>]... <フローの名前>   （内部向け。組み込みのフローを始める。標準出力は接続契約（版 1）の JSON）
+  flow start --permission-mode <default|acceptEdits|auto> --delegated-run <id> [--input <名前>=<値>]... [--budget-usd <額>] <フローの名前>   （内部向け。組み込みのフローを始める。--budget-usd は spec-draft だけ。標準出力は接続契約（版 1）の JSON）
   flow status <実行の識別>   （内部向け）
   flow resume [--unit <u>] [--input <選んだもの>] [--note <文>] [--approved-ref <コミット>] --permission-mode <default|acceptEdits|auto> --delegated-run <id> <実行の識別>   （内部向け）
   flow cancel <実行の識別>   （内部向け）

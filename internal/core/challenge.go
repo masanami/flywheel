@@ -265,10 +265,12 @@ type ChallengeDetail struct {
 	SupervisorHandsTaken map[SupervisorHand]int
 	// SupervisorQuestions はスーパーバイザーが答えた子の問い（結果が executed の対処の記録の questions。古い順。無ければ空のスライス）。
 	SupervisorQuestions []SupervisorQuestion
-	// SpecCostUSD は仕様づくりの費用（対話の欄の返事のうち、この課題に数えた分の合計）。課題の予算には数えない。
+	// SpecCostUSD は仕様づくりの費用（対話の欄の返事のうちこの課題に数えた分と、下書きづくりの実行の費用の合計）。課題の予算には数えない。
 	SpecCostUSD float64
 	// ChatSessions は課題に紐づいた会話（無ければ空）。
 	ChatSessions []ChallengeChatSession
+	// SpecDraft は下書きづくりの記録（無ければ nil）。
+	SpecDraft *SpecDraft
 }
 
 // ChallengeChatSession は課題に紐づいた対話の欄の会話。
@@ -322,6 +324,10 @@ type EditInput struct {
 	Spec *string
 	// SpecBase は置き換える元の文書の場所。空文字は NULL にする。
 	SpecBase *string
+	// SpecDraftCancel は、Spec で場所を付けるときに終わっていない下書きづくりの実行を取り消す材料（宣言と契約のコマンドの
+	// 起動の口。ChallengeID と WorkDir は使わない）を組み立てる。取り消す実行があるときだけ呼ぶ。nil なら取り消せないので、
+	// 取り消す実行がある編集は ErrConflict。
+	SpecDraftCancel func() (ContractCancelInput, error)
 	// Headline・Context・Figure は文字列、Expected・Actual・NonGoals は JSON の配列の
 	// 文字列（欄の形は stages.go）。空文字は NULL にする。
 	Headline *string
@@ -1051,6 +1057,9 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 		if detail.SupervisorHandsTaken, err = countExecutedSupervisorHands(ctx, tx, cid); err != nil {
 			return err
 		}
+		if detail.SpecDraft, err = loadSpecDraft(ctx, tx, cid); err != nil {
+			return err
+		}
 		if detail.SpecCostUSD, detail.ChatSessions, err = loadChallengeSpec(ctx, tx, cid); err != nil {
 			return err
 		}
@@ -1189,8 +1198,19 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 		return nil, ErrNotFound
 	}
 
+	// 場所を付けるときは、下書きづくりを止める。取り消しは、何かを書く前に行う。
+	attaching := newSpec != nil
+	if attaching {
+		if err := s.cancelSpecDraftRunsBeforeEdit(ctx, cid, in.SpecDraftCancel); err != nil {
+			return nil, err
+		}
+	}
+
 	var result *Challenge
+	var actor string
+	discardDraft := false
 	err = s.mutate(ctx, ch, func(tx *sql.Tx, rec *activityRecorder) error {
+		actor = rec.actor
 		current, err := loadChallenge(ctx, tx, cid)
 		if err != nil {
 			return err
@@ -1245,7 +1265,24 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 
 		newStage := current.applyPatch(patch, before, after)
 
-		if len(after) == 0 {
+		var draft *SpecDraft
+		if attaching {
+			if draft, err = loadSpecDraft(ctx, tx, cid); err != nil {
+				return err
+			}
+		}
+		skipDraft := draft != nil && draft.State.blocksPlanning()
+		if skipDraft {
+			if err := requireNoOpenSpecDraftRun(ctx, tx, cid); err != nil {
+				return err
+			}
+		}
+		// 記録の下書きは、記録を省くときと、済んだ記録の課題の場所を変えるときに、付けた場所と違えば消す。
+		if draft != nil && (skipDraft || (draft.State == SpecDraftStateDone && !reflect.DeepEqual(current.SpecPath, newSpec))) {
+			discardDraft = !sameSpecFile(s.workspace, draft.Path, *newSpec)
+		}
+
+		if len(after) == 0 && !skipDraft {
 			result = current
 			return nil
 		}
@@ -1299,10 +1336,22 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 			SpecPath:     newSpecPath,
 			SpecBasePath: newSpecBasePath,
 		}
+		if skipDraft {
+			if err := s.skipSpecDraftByEdit(ctx, tx, rec, ch, cid, draft); err != nil {
+				return err
+			}
+			// 保留を閉じると、状態と版がもう一度変わる。
+			if result, err = loadChallenge(ctx, tx, cid); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if discardDraft {
+		s.discardSpecDraft(ctx, cid, actor)
 	}
 	return result, nil
 }

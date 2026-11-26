@@ -94,6 +94,8 @@ type WorkflowRecord struct {
 type FactSource struct {
 	Step  string   `json:"step"`
 	Field []string `json:"field"`
+	// Array は欄が出力の型で配列であること。値は JSON の文字列にする。偽なら欄は文字列。
+	Array bool `json:"array,omitempty"`
 }
 
 // RunStarted は run の開始。

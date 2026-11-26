@@ -483,6 +483,7 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
   task_status: "タスクの状態が変わった",
   task_verify: "タスクを検証した",
   integration_ref_set: "統合先を記録した",
+  spec_draft_requested: "下書きづくりへ回した",
   classify: "分類した",
   withdraw: "取り下げた",
   dep_add: "前提を足した",

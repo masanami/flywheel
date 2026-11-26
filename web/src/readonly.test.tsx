@@ -180,6 +180,7 @@ function awaitingApproval(): Record<string, unknown> {
     dependents: [],
     chat_sessions: [],
     spec_cost_usd: 0,
+    spec_draft: null,
     description: "説明",
     done_criteria: "完了条件",
     id: "C-1",

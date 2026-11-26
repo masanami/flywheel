@@ -26,29 +26,50 @@ func (s *Store) HasOpenContractRun(ctx context.Context, challengeID string) (boo
 	if !ok {
 		return false, ErrValidation
 	}
+	n, err := s.countOpenContractRuns(ctx, cid, "")
+	return n > 0, err
+}
+
+// countOpenContractRuns は課題の終わっていない契約の実行の数。kind が空でなければ、その種類だけを数える。
+func (s *Store) countOpenContractRuns(ctx context.Context, cid int64, kind string) (int, error) {
 	var n int
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL`, cid).Scan(&n)
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE challenge_id = ? AND ended_at IS NULL AND (? = '' OR kind = ?)`,
+			cid, kind, kind).Scan(&n)
 	})
-	return n > 0, classifyReadWriteErr(err)
+	return n, classifyReadWriteErr(err)
 }
 
 // CancelOpenContractRuns は、課題の終わっていない契約の run を宣言の commands.cancel で止め、止めた数を返す。
 // 開いた run が無ければ何もしない（Client・宣言は不要）。止められなかった（コマンドの失敗・止めた後も終端でない）ときは
 // ErrConflict で返し、呼び出し元は取り下げへ進まない。
 func (s *Store) CancelOpenContractRuns(ctx context.Context, in ContractCancelInput) (int, error) {
-	open, err := s.HasOpenContractRun(ctx, in.ChallengeID)
-	if err != nil || !open {
+	return s.cancelOpenContractRunsOfKind(ctx, in, "")
+}
+
+// CancelOpenSpecDraftRuns は CancelOpenContractRuns と同じ扱いで、下書きづくりの実行（種類 spec）だけを止める。
+// タスクの実行と反映の依頼は止めない。
+func (s *Store) CancelOpenSpecDraftRuns(ctx context.Context, in ContractCancelInput) (int, error) {
+	return s.cancelOpenContractRunsOfKind(ctx, in, contractRunKindSpec)
+}
+
+// cancelOpenContractRunsOfKind は課題の終わっていない契約の実行（kind が空でなければ、その種類だけ）を止め、止めた数を返す。
+func (s *Store) cancelOpenContractRunsOfKind(ctx context.Context, in ContractCancelInput, kind string) (int, error) {
+	cid, ok := parseChallengeID(in.ChallengeID)
+	if !ok {
+		return 0, ErrValidation
+	}
+	open, err := s.countOpenContractRuns(ctx, cid, kind)
+	if err != nil || open == 0 {
 		return 0, err
 	}
 	if in.Client == nil || in.AgentDecl == nil || in.ConnDecl == nil {
 		return 0, ErrValidation
 	}
-	cid, _ := parseChallengeID(in.ChallengeID)
 	var rows []*contractRunRow
 	bindings := map[*contractRunRow]*sourceBinding{}
 	err = s.db.Read(ctx, func(tx *sql.Tx) error {
-		rs, err := tx.QueryContext(ctx, contractRunSelect+` WHERE ended_at IS NULL AND challenge_id = ? ORDER BY id`, cid)
+		rs, err := tx.QueryContext(ctx, contractRunSelect+` WHERE ended_at IS NULL AND challenge_id = ? AND (? = '' OR kind = ?) ORDER BY id`, cid, kind, kind)
 		if err != nil {
 			return err
 		}

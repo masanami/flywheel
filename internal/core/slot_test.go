@@ -32,6 +32,9 @@ type fakeSlotGit struct {
 	switchErr   map[string]error
 	// branchSwitchErr は、ブランチへの checkout（req.Branch が空でない SwitchTree）だけを失敗させる。
 	branchSwitchErr map[string]error
+	// changedPaths・changedErr は ChangedPaths が返す値（changedPaths はパスごと）。
+	changedPaths map[string][]string
+	changedErr   error
 }
 
 // SlotSwitchCall は fakeSlotGit が記録した SwitchTree の呼び出し。
@@ -73,6 +76,13 @@ func (f *fakeSlotGit) EnsureWorktree(_ context.Context, req WorktreeRequest) (bo
 	f.states[req.Path] = f.provisioned
 	f.added = append(f.added, req.Path)
 	return true, nil
+}
+
+// ChangedPaths は changedPaths・changedErr を返す。
+func (f *fakeSlotGit) ChangedPaths(_ context.Context, tree SlotTree) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.changedPaths[tree.Path], f.changedErr
 }
 
 // SwitchTree は、Branch があればそのブランチへ、無ければ detach（Branch ""）へ状態を変える。

@@ -30,6 +30,7 @@ export function show(over: Over = {}): ShowCardResponse {
     challenge: {
       chat_sessions: [],
       spec_cost_usd: 0,
+      spec_draft: null,
       spec_base_path: null,
       spec_is_draft: false,
       spec_path: null,

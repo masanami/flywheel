@@ -1,0 +1,56 @@
+# 下書きづくり（組み込みのフロー）。仕様の下書きを書き（write）、3 つの観点で批評して直し（critique）、残った問いを返して終わる。
+# 人を待たない。問いが残っても成功で終わる。
+# 作業ディレクトリは下書きの置き場で、Git の作業ツリーでなくてよい。2 つのステップは、道具を読む・書く・エージェントを呼ぶものに絞る。
+#
+schema: harness.workflow/v1
+id: spec-draft
+description: 仕様の下書きを書き、3 つの観点で批評して直し、残った問いを返す
+inputs:
+  draft_file:   { type: string, required: true }   # 下書きのファイルの名前（作業ディレクトリから見た名前）
+  brief_file:   { type: string, required: true }   # 下書きづくりの文面のファイルの場所
+  brief_dir:    { type: string, required: true }   # 文面のファイルの置き場（読める場所として足す）
+  repo_dir:     { type: string, required: true }   # 対象のリポジトリの元のクローンの場所（読むだけ。読める場所として足す）
+  base_path:    { type: string }                   # 置き換える元の文書の、リポジトリの中の相対のパス（新しい文書なら無し）
+  challenge_id: { type: string, required: true }
+models:
+  main: opus                      # 仮の値（実物の実行を測って決め直す）
+efforts:
+  main: high                      # 仮の値
+limits:
+  budget_usd: 15                  # core の定数 SpecDraftDefaultBudgetUSD と同じ値にする（仮の値）
+facts:
+  spec_questions: [$steps.critique.questions]
+steps:
+  write:
+    kind: llm
+    prompt: prompts/spec-draft-write.md
+    model: $models.main
+    effort: $efforts.main
+    session: new
+    add_dirs: [ $inputs.repo_dir, $inputs.brief_dir ]
+    tools: [Read, Grep, Glob, Write, Edit, Agent]
+    with: { draft_file: $inputs.draft_file, brief_file: $inputs.brief_file, repo_dir: $inputs.repo_dir,
+            base_path: $inputs.base_path, challenge_id: $inputs.challenge_id }
+    output: schemas/spec-draft-write.json
+    budget_usd: 10                # 仮の値
+    timeout: 30m                  # 仮の値
+    on:
+      ok: critique
+      failure: { fail: write_failed }
+
+  critique:
+    kind: llm
+    prompt: prompts/spec-draft-critique.md
+    model: $models.main
+    effort: $efforts.main
+    session: new
+    add_dirs: [ $inputs.repo_dir, $inputs.brief_dir ]
+    tools: [Read, Grep, Glob, Write, Edit, Agent]
+    with: { draft_file: $inputs.draft_file, brief_file: $inputs.brief_file, repo_dir: $inputs.repo_dir,
+            base_path: $inputs.base_path, challenge_id: $inputs.challenge_id }
+    output: schemas/spec-draft-critique.json
+    budget_usd: 10                # 仮の値
+    timeout: 45m                  # 仮の値
+    on:
+      ok: { done: drafted }
+      failure: { fail: critique_failed }

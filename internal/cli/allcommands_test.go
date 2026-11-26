@@ -536,37 +536,43 @@ var runLevelUsageErrorCases = [][]string{
 	{"serve", "--port", "abc"},                                     // --port が 0〜65535 の整数でない（bind する前に拒否する）
 	{"serve", "--port", "0", "--fleet", "/nonexistent/fleet.json"}, // --fleet と --workspace の同時指定（この列挙は --workspace を足して呼ぶ）
 	{"edit", "C-1"}, // 変更する項目が 1 つも無い
-	{"followup", "done", "F-1", "F-1", "--note", "n"},           // 同じ ID を 2 度指定した（drop も同じ関数。S2b）
-	{"followup", "list", "--status", "bogus"},                   // --status が open・done・dropped・all のいずれでもない（S2b）
-	{"plan", "C-1", "--file", "/nonexistent/flywheel-plan.txt"}, // --file が読めない
-	{"verify", "C-1", "--result", "met", "--question", "q"},     // met と --question の同時指定
-	{"approve", "OP-1", "--hold-release"},                       // 不可逆操作の ID への --hold-release
-	{"approve", "C-2", "--hold-release"},                        // 計画承認待ちの課題への --hold-release
-	{"approve", "C-2", "--reopen"},                              // 課題の ID への --reopen（不可逆操作の ID にだけ指定できる）
-	{"classify", "--priority", "P0"},                            // --priority に課題の ID が無い（#84。--auto は ID を省略できるため MinPositional では表せない）
-	{"plan", "--stdin"},                                         // --file／--stdin に課題の ID が無い（#85。--auto は ID を省略できるため MinPositional では表せない）
-	{"budget", "C-1", "--impl-usd", "x"},                        // --impl-usd が数でない（#105）
-	{"budget", "C-1"},                                           // --impl-usd も --limit も無い（S4c-1）
-	{"verify", "--result", "met"},                               // --result に課題の ID が無い（--auto は ID を省略できるため MinPositional では表せない）
-	{"verify", "--auto", "--question", "q"},                     // --auto と --question の同時指定（J5 は問いを自分で作る）
-	{"approve", "C-2", "--session", "s"},                        // --relayed なしの --session・--quote（M4P26）
-	{"approve", "C-2", "--relayed", "--quote", "q"},             // --relayed に --session が無い（空白だけも同じ）
-	{"approve", "C-2", "--relayed", "--session", "s"},           // --relayed に --quote が無い（空白だけも同じ）
-	{"reject", "OP-1", "--reason", "r", "--field", "issues"},    // 不可逆操作の ID への --field（M4P36）
-	{"metrics", "--since", "2026-3-1"},                          // --since・--until が YYYY-MM-DD の日付でない（M4.5 S3）
-	{"metrics", "--compare", "C-1", "--since", "2026-03-01"},    // --compare と --since・--until の同時指定（M4.5 S4）
-	{"dep", "add", "C-1", "C-1"},                                // 自分自身を依存先にした（core が ErrSelfDependency を返し usage_error に写る。M4.5 S2）
-	{"withdraw", "C-1", "--reason", " "},                        // --reason が空白だけ（M4.5 S4。無いときは必須フラグの欠落）
-	{"answer", "C-1", "--choice", "Q1=1", "--answer", "a"},      // --choice・--text と --answer・--replan の同時指定
-	{"answer", "C-1"},                                           // --answer・--choice・--text のどれも無い
-	{"answer", "C-1", "--choice", "Q1"},                         // --choice・--text に = と値が無い
-	{"answer", "C-1", "--choice", "Qx=1"},                       // 問いの番号が Q1 か 1 の形でない
-	{"answer", "C-1", "--choice", "Q1=1", "--choice", "1=2"},    // 同じ問いの番号を 2 度指定した
-	{"answer", "C-1", "--choice", "Q1=x"},                       // 選択肢の番号が 1 以上の整数でない
-	{"answer", "C-1", "--option", " "},                          // --option の識別が空
-	{"flow", "start", "--delegated-run", "R-1", "ticket"},       // flow の --permission-mode が無い（flowLaunchFlags）
+	{"followup", "done", "F-1", "F-1", "--note", "n"},                                               // 同じ ID を 2 度指定した（drop も同じ関数。S2b）
+	{"followup", "list", "--status", "bogus"},                                                       // --status が open・done・dropped・all のいずれでもない（S2b）
+	{"plan", "C-1", "--file", "/nonexistent/flywheel-plan.txt"},                                     // --file が読めない
+	{"verify", "C-1", "--result", "met", "--question", "q"},                                         // met と --question の同時指定
+	{"approve", "OP-1", "--hold-release"},                                                           // 不可逆操作の ID への --hold-release
+	{"approve", "C-2", "--hold-release"},                                                            // 計画承認待ちの課題への --hold-release
+	{"approve", "C-2", "--reopen"},                                                                  // 課題の ID への --reopen（不可逆操作の ID にだけ指定できる）
+	{"classify", "--priority", "P0"},                                                                // --priority に課題の ID が無い（#84。--auto は ID を省略できるため MinPositional では表せない）
+	{"plan", "--stdin"},                                                                             // --file／--stdin に課題の ID が無い（#85。--auto は ID を省略できるため MinPositional では表せない）
+	{"budget", "C-1", "--impl-usd", "x"},                                                            // --impl-usd が数でない（#105）
+	{"budget", "C-1"},                                                                               // --impl-usd も --limit も無い（S4c-1）
+	{"verify", "--result", "met"},                                                                   // --result に課題の ID が無い（--auto は ID を省略できるため MinPositional では表せない）
+	{"verify", "--auto", "--question", "q"},                                                         // --auto と --question の同時指定（J5 は問いを自分で作る）
+	{"approve", "C-2", "--session", "s"},                                                            // --relayed なしの --session・--quote（M4P26）
+	{"approve", "C-2", "--relayed", "--quote", "q"},                                                 // --relayed に --session が無い（空白だけも同じ）
+	{"approve", "C-2", "--relayed", "--session", "s"},                                               // --relayed に --quote が無い（空白だけも同じ）
+	{"reject", "OP-1", "--reason", "r", "--field", "issues"},                                        // 不可逆操作の ID への --field（M4P36）
+	{"metrics", "--since", "2026-3-1"},                                                              // --since・--until が YYYY-MM-DD の日付でない（M4.5 S3）
+	{"metrics", "--compare", "C-1", "--since", "2026-03-01"},                                        // --compare と --since・--until の同時指定（M4.5 S4）
+	{"dep", "add", "C-1", "C-1"},                                                                    // 自分自身を依存先にした（core が ErrSelfDependency を返し usage_error に写る。M4.5 S2）
+	{"withdraw", "C-1", "--reason", " "},                                                            // --reason が空白だけ（M4.5 S4。無いときは必須フラグの欠落）
+	{"answer", "C-1", "--choice", "Q1=1", "--answer", "a"},                                          // --choice・--text と --answer・--replan の同時指定
+	{"answer", "C-1"},                                                                               // --answer・--choice・--text のどれも無い
+	{"answer", "C-1", "--choice", "Q1"},                                                             // --choice・--text に = と値が無い
+	{"answer", "C-1", "--choice", "Qx=1"},                                                           // 問いの番号が Q1 か 1 の形でない
+	{"answer", "C-1", "--choice", "Q1=1", "--choice", "1=2"},                                        // 同じ問いの番号を 2 度指定した
+	{"answer", "C-1", "--choice", "Q1=x"},                                                           // 選択肢の番号が 1 以上の整数でない
+	{"answer", "C-1", "--option", " "},                                                              // --option の識別が空
+	{"answer", "C-1", "--choice", "1=1", "--hold", "H-1"},                                           // --option の無い --choice に --hold
+	{"answer", "C-1", "--option", "answer", "--choice", "1=1", "--hold", " "},                       // --choice に空の --hold
+	{"answer", "C-1", "--option", "answer", "--choice", "1=1"},                                      // --option と --choice の相手が下書きの問いの保留でない
+	{"answer", "C-3", "--choice", "1=1"},                                                            // 下書きの問いの保留への --option の無い --choice
+	{"flow", "start", "--delegated-run", "R-1", "ticket"},                                           // flow の --permission-mode が無い（flowLaunchFlags）
 	{"flow", "start", "--permission-mode", "bypassPermissions", "--delegated-run", "R-1", "ticket"}, // --permission-mode が 3 値の外
 	{"flow", "resume", "--permission-mode", "auto", "RUN-1"},                                        // flow の --delegated-run が無い
+	{"flow", "start", "--permission-mode", "auto", "--delegated-run", "R-1", "--budget-usd", "8", "ticket"},     // --budget-usd は spec-draft だけ
+	{"flow", "start", "--permission-mode", "auto", "--delegated-run", "R-1", "--budget-usd", "0", "spec-draft"}, // --budget-usd が正の数でない
 }
 
 // TestRunLevelUsageErrorCases_CoverEveryRunLevelUsageErrorSite は、cli.go（引数の
@@ -605,7 +611,10 @@ func TestAllCommands_UnknownFlagAndMissingRequiredArgumentAreUsageErrorAndLeaveS
 	ws := initializedWorkspace(t)
 	c1 := createForCase(t, ws) // C-1 を実在させ、欠落以外の引数が妥当な状態で検査する
 	runJSON(t, ws, "op", "add", c1, "--kind", "release", "--summary", "s")
-	createPlannedForCase(t, ws) // C-2（計画承認待ち）
+	createPlannedForCase(t, ws)                            // C-2（計画承認待ち）
+	c3 := challengeIDToInternalID(t, createForCase(t, ws)) // C-3（下書きの問いの保留）
+	coretest.InsertSpecDraftHold(t, ws, c3, "spec_question", saQuestionsJSON, saQuestionOptions)
+	coretest.SetChallengeStatus(t, ws, c3, "awaiting_human")
 	dbPath := filepath.Join(ws, ".flywheel", "flywheel.db")
 	before, err := os.ReadFile(dbPath)
 	if err != nil {

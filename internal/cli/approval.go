@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -307,12 +308,19 @@ func runAnswer(a Args) (any, error) {
 	_, hasAnswer := a.Values["answer"]
 	replan := a.Bools["replan"]
 	option, hasOption := a.Values["option"]
-	planItems := len(a.Multi["choice"]) + len(a.Multi["text"])
-	if planItems > 0 {
-		if _, hasHold := a.Values["hold"]; hasAnswer || replan || hasOption || hasHold {
-			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan・--option・--hold と同時に指定できません")
+	holdArg, hasHold := a.Values["hold"]
+	// --choice・--text は、--option が無ければ計画の問いへの答え、あれば下書きの問いの保留への問いごとの答え。
+	perQuestion := len(a.Multi["choice"])+len(a.Multi["text"]) > 0
+	if perQuestion {
+		if hasAnswer || replan {
+			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan と同時に指定できません")
 		}
-		return runPlanAnswer(a, id)
+		if !hasOption {
+			if hasHold {
+				return nil, NewError(CodeUsageError, "--choice・--text と --hold は、下書きの問いの保留へ --option answer を付けて答えるときだけ同時に指定できます")
+			}
+			return runPlanAnswer(a, id)
+		}
 	}
 	if !hasAnswer && !hasOption && !replan {
 		return nil, NewError(CodeUsageError, "--answer か --option（保留への回答）、または --choice・--text（計画の問いへの答え）のどれかを指定してください")
@@ -321,18 +329,28 @@ func runAnswer(a Args) (any, error) {
 		return nil, NewError(CodeUsageError, "--option には選択肢の識別を指定してください")
 	}
 	answer := a.Values["answer"]
+	var items []core.PlanAnswerItem
+	if perQuestion {
+		// 番号の範囲と同じ問いの重複は、答える保留の問いに照らして core が検査する。
+		var err error
+		if items, err = readAnswerItems(a.Multi["choice"], a.Multi["text"], false); err != nil {
+			return nil, err
+		}
+	}
 
 	verifier, err := verifierFor(a)
 	if err != nil {
 		return nil, err
 	}
-	holdArg, hasHold := a.Values["hold"]
 	if hasHold && strings.TrimSpace(holdArg) == "" {
+		if perQuestion {
+			return nil, NewError(CodeUsageError, "--hold には保留の ID を指定してください")
+		}
 		return nil, mapCoreErr(fmt.Errorf("%w: --hold must look like H-<number>", core.ErrValidation))
 	}
-	preview, err := a.Store.PrepareAnswerHold(context.Background(), id, holdArg, answer, option, replan)
+	preview, err := a.Store.PrepareAnswerWithItems(context.Background(), id, holdArg, answer, option, replan, items)
 	if err != nil {
-		return nil, mapCoreErr(err)
+		return nil, mapAnswerErr(err)
 	}
 
 	if replan && !core.ReplanAllowedFrom(preview.FromStatus) {
@@ -351,11 +369,12 @@ func runAnswer(a Args) (any, error) {
 		Answer:          answer,
 		Replan:          replan,
 		Option:          option,
+		Items:           items,
 		// 確かめた保留で照合する（ほかのタスクの保留が立った・閉じたことで課題の版が進んだだけでは断らない）。
 		HoldID: preview.HoldID, HoldQuestion: preview.Question, HoldOptions: preview.Options, HoldOptionRequired: preview.OptionRequired,
 	}, att)
 	if err != nil {
-		return nil, mapCoreErr(err)
+		return nil, mapAnswerErr(err)
 	}
 	if hold.Reissued {
 		// 足した後の見込みが、選択肢の説明の額と変わっていた。回答は成立せず、問いは新しい額で出し直してある（保留・上限は変わらない）。
@@ -380,9 +399,22 @@ func reissuedAnswerText(c *core.Challenge, hold *core.Hold) string {
 	return b.String()
 }
 
-// parsePlanAnswerItems は --choice <問い>=<選択肢の番号>・--text <問い>=<文> を答えの一覧へ読む。問いは Q1 でも 1 でも受ける。
-// `=` と値が無い・番号の形が不正・同じ問いの重複は usage_error。
+// mapAnswerErr は保留への回答の誤りを CLI のエラーにする。--choice・--text を受けられない相手への回答は、使い方の誤り。
+func mapAnswerErr(err error) *Error {
+	if errors.Is(err, core.ErrSpecAnswersNotAccepted) {
+		return NewError(CodeUsageError, "--choice・--text を --option と同時に指定できるのは、下書きの問いの保留への回答だけです: "+err.Error())
+	}
+	return mapCoreErr(err)
+}
+
+// parsePlanAnswerItems は計画の問いへの答えを読む。番号は 1 以上で、同じ問いの重複は usage_error。
 func parsePlanAnswerItems(choices, texts []string) ([]core.PlanAnswerItem, error) {
+	return readAnswerItems(choices, texts, true)
+}
+
+// readAnswerItems は --choice <問い>=<選択肢の番号>・--text <問い>=<文> を答えの一覧へ読む。問いは Q1 でも 1 でも受ける。
+// `=` と値が無い・番号が整数でないものは usage_error。strict なら、1 未満の番号と同じ問いの重複も usage_error。
+func readAnswerItems(choices, texts []string, strict bool) ([]core.PlanAnswerItem, error) {
 	var items []core.PlanAnswerItem
 	seen := map[int64]bool{}
 	parse := func(flag, raw string, isChoice bool) error {
@@ -391,17 +423,17 @@ func parsePlanAnswerItems(choices, texts []string) ([]core.PlanAnswerItem, error
 			return NewError(CodeUsageError, fmt.Sprintf("--%s は <問いの番号>=<値> の形で指定してください: %q", flag, raw))
 		}
 		n, err := strconv.ParseInt(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(q), "Q"), "q"), 10, 64)
-		if err != nil || n < 1 {
+		if err != nil || (strict && n < 1) {
 			return NewError(CodeUsageError, fmt.Sprintf("--%s の問いの番号は Q1 か 1 の形で指定してください: %q", flag, raw))
 		}
-		if seen[n] {
+		if strict && seen[n] {
 			return NewError(CodeUsageError, fmt.Sprintf("問い Q%d への答えが 2 回指定されています", n))
 		}
 		seen[n] = true
 		it := core.PlanAnswerItem{Question: n}
 		if isChoice {
 			c, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
-			if err != nil || c < 1 {
+			if err != nil || (strict && c < 1) {
 				return NewError(CodeUsageError, fmt.Sprintf("--choice の選択肢の番号は 1 以上の整数で指定してください: %q", raw))
 			}
 			it.Choice = &c
@@ -436,6 +468,9 @@ func runPlanAnswer(a Args, id string) (any, error) {
 		return nil, err
 	}
 	preview, err := a.Store.PreparePlanAnswer(context.Background(), id, items)
+	if errors.Is(err, core.ErrSpecQuestionNeedsOption) {
+		return nil, NewError(CodeUsageError, "開いている保留は下書きの問いの保留です。--option answer を付けて --choice・--text を指定してください")
+	}
 	if err != nil {
 		return nil, mapCoreErr(err)
 	}
@@ -799,6 +834,13 @@ func answerSummaryText(p *core.AnswerPreview, replan bool) string {
 	} else {
 		fmt.Fprintf(&b, "回答:     %s\n", p.Answer)
 	}
+	if len(p.SpecAnswers) > 0 {
+		// 選んだ見出しは推奨のままと読めるので、記録する答えを問いごとに出す。
+		b.WriteString("問いごとの答え:\n")
+		for i, a := range p.SpecAnswers {
+			fmt.Fprintf(&b, "  Q%d. %s\n      → %s\n", i+1, escapeControl(a.Question), escapeControl(a.Answer))
+		}
+	}
 	if replan {
 		b.WriteString("範囲が変わる: 委譲を再開せず、計画を作り直して承認待ちへ戻す（既存の PR・ブランチは引き継ぐ）\n")
 	}
@@ -835,22 +877,30 @@ func cancelOpenContractRuns(a Args, id string) (int, error) {
 	if !open {
 		return 0, nil
 	}
-	ws := a.Store.Workspace()
-	decl, err := core.LoadAgentDeclaration(ws)
+	in, err := contractCancelInput(a)
 	if err != nil {
 		return 0, mapCoreErr(err)
 	}
-	conn, err := core.LoadConnectorsDeclaration(ws)
-	if err != nil {
-		return 0, mapCoreErr(err)
-	}
-	n, err := a.Store.CancelOpenContractRuns(ctx, core.ContractCancelInput{
-		ChallengeID: id, AgentDecl: decl, ConnDecl: conn, Client: invoker.NewLauncherWithLookPath(a.LookPath),
-	})
+	in.ChallengeID = id
+	n, err := a.Store.CancelOpenContractRuns(ctx, in)
 	if err != nil {
 		return n, mapCoreErr(err)
 	}
 	return n, nil
+}
+
+// contractCancelInput は契約の実行を止める口へ渡す材料（宣言と、契約のコマンドの起動）を組み立てる。対象の課題は呼び出し元が決める。
+func contractCancelInput(a Args) (core.ContractCancelInput, error) {
+	ws := a.Store.Workspace()
+	decl, err := core.LoadAgentDeclaration(ws)
+	if err != nil {
+		return core.ContractCancelInput{}, err
+	}
+	conn, err := core.LoadConnectorsDeclaration(ws)
+	if err != nil {
+		return core.ContractCancelInput{}, err
+	}
+	return core.ContractCancelInput{AgentDecl: decl, ConnDecl: conn, Client: invoker.NewLauncherWithLookPath(a.LookPath)}, nil
 }
 
 // rejectReleaseNotes は完了の差し戻しで取り消した本番反映と、実行中のため止めなかった本番反映を伝える行

@@ -335,6 +335,31 @@ func lockDir(ctx context.Context, dir string) (func(), error) {
 	}
 }
 
+// ChangedPaths は core.SlotGit の実装。名前の変更は追わず（--no-renames）、元と先の 2 つのパスとして返す。
+func (*Git) ChangedPaths(ctx context.Context, tree core.SlotTree) ([]string, error) {
+	gitDir := filepath.Join(tree.Path, ".git")
+	if tree.BaseClone != "" {
+		admin, problem := verifyWorktreePointer(tree.BaseClone, tree.Path)
+		if problem != "" {
+			return nil, fmt.Errorf("git: %s", problem)
+		}
+		gitDir = admin
+	}
+	// -z は、パスを引用せずに NUL で区切る。
+	out, err := run(ctx, gitDir, tree.Path, "status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, entry := range strings.Split(out, "\x00") {
+		// 1 件は「状態の 2 文字・空白・パス」。
+		if len(entry) > 3 {
+			paths = append(paths, entry[3:])
+		}
+	}
+	return paths, nil
+}
+
 // SwitchTree は core.SlotGit の実装。強制せず（`-f`・reset を使わず）、ネットワークも使わない。
 func (*Git) SwitchTree(ctx context.Context, tree core.SlotTree, req core.SlotSwitch) error {
 	gitDir := filepath.Join(tree.Path, ".git")

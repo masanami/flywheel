@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"strconv"
 )
 
 // contractCmd は契約のコマンドの種類。
@@ -13,6 +14,8 @@ const (
 	contractCmdResume  contractCmd = "resume"
 	contractCmdCancel  contractCmd = "cancel"
 	contractCmdReflect contractCmd = "reflect"
+	// contractCmdSpec は下書きづくりの開始。form: flow の委譲先だけが持つ（form: cli の commands にキーは無い）。
+	contractCmdSpec contractCmd = "spec"
 )
 
 // delegatedRunPlaceholder は form: flow のコマンドの `--delegated-run` の値の仮の印。run の行を作る前に引数を組み立てる呼び出し元が
@@ -50,6 +53,9 @@ func (s *Store) contractCommandArgs(c *Connector, cmd contractCmd, f contractFil
 	}
 	if c.Form == ConnectorFormFlow {
 		return s.flowCommandArgs(c, cmd, f)
+	}
+	if cmd == contractCmdSpec {
+		return nil, fmt.Errorf("%w: connector %q (form %s) cannot start a spec draft", ErrValidation, c.ID, c.Form)
 	}
 	if c.Commands == nil {
 		return nil, fmt.Errorf("%w: connector %q has no commands", ErrValidation, c.ID)
@@ -100,6 +106,24 @@ func (s *Store) flowCommandArgs(c *Connector, cmd contractCmd, f contractFill) (
 			"--input", "challenge_id="+challengeID,
 			"reflect")
 		return args, nil
+	case contractCmdSpec:
+		sp := f.Spec
+		if sp == nil {
+			return nil, fmt.Errorf("%w: the values of the spec draft are required", ErrValidation)
+		}
+		args := append(append(append(base, "start"), ws...), perm...)
+		args = append(args,
+			"--input", "draft_file="+sp.DraftFile,
+			"--input", "brief_file="+sp.BriefFile,
+			"--input", "brief_dir="+sp.BriefDir,
+			"--input", "repo_dir="+sp.RepoDir)
+		if sp.BasePath != "" {
+			args = append(args, "--input", "base_path="+sp.BasePath)
+		}
+		return append(args,
+			"--input", "challenge_id="+challengeID,
+			"--budget-usd", strconv.FormatFloat(microsToUSD(sp.BudgetMicros), 'f', -1, 64),
+			specDraftFlowName), nil
 	case contractCmdStatus:
 		return append(append(append(base, "status"), ws...), f.RunID), nil
 	case contractCmdCancel:

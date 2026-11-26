@@ -479,7 +479,7 @@ func (s *Store) startIntegrationReflect(ctx context.Context, in DelegateInput, c
 		cycleIDInt = &n
 	}
 	maxMicros := usdToMicros(agent.MaxRunBudgetUSD)
-	runIDInt, err := s.beginContractRunMarked(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, nil, nil, true)
+	runIDInt, err := s.beginContractRunMarked(ctx, cid, cycleIDInt, planVersion, sessionID, maxMicros, true, nil, nil, true, budgetBucketImpl)
 	switch {
 	case errors.Is(err, ErrBudgetExceeded):
 		return nil, notStarted(NotStartedCycleBudget, ""), nil

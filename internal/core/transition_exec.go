@@ -109,7 +109,7 @@ type runTransitionParams struct {
 	// att は本人確認つきの遷移（attested）の Attestation。経路 chat の印の検査と種類の絞りに使う。
 	att Attestation
 	// restricted は、遷移表の制限つきの行を LookupRestricted で引くこと。立てるのは、その行の専用の書き込みだけ
-	// （いまはスーパーバイザーの手の supervisor_resolve〔T20〕だけ。終端から出る T18 は、終端の検査が先に断るのでこの道を通らない）。本人確認の要る行は、これを立てても本人確認つきの呼び出しだけが通る。
+	// （スーパーバイザーの手の supervisor_resolve〔T20〕と、仕様の文書の場所を付けた編集の spec_draft_unhold〔T21〕だけ。終端から出る T18 は、終端の検査が先に断るのでこの道を通らない）。本人確認の要る行は、これを立てても本人確認つきの呼び出しだけが通る。
 	restricted bool
 	// holdCheck が非 nil のとき、版の照合の代わりに呼ぶ（回答だけ。確かめた保留が開いたままで問いと選択肢が同じかを、書き込みの中で確かめる）。
 	// 遷移表の検査より前に呼ぶ（保留が閉じていれば、状態の食い違いではなくコンフリクトで断る）。
@@ -150,6 +150,9 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 	// 完了・取り下げへ進む遷移は、すべてここを通る（transitionInTx を直接呼ぶ経路は、終端の状態へ進まない）。
 	if result.Status == StatusDone || result.Status == StatusWithdrawn {
 		s.cleanupSpecDraft(ctx, cid, p.actor)
+	}
+	if result.Status == StatusWithdrawn {
+		s.discardWithdrawnSpecDraft(ctx, cid, p.actor)
 	}
 	return result, nil
 }

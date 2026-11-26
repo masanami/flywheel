@@ -254,7 +254,10 @@ type ContractPollInput struct {
 	// 入った中身の確かめに使う上流の取得の口（GET だけ）。nil なら、その確かめができないので「入れてよい」を返さない。
 	Checks  UpstreamCheckSource
 	Compare UpstreamCompareSource
-	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。
+	// Git は、下書きづくりの実行が終わった後に、対象のリポジトリの元のクローンの変わっているパスを読む口。nil なら確かめられないので、
+	// 下書きづくりは失敗にする。
+	Git SlotGit
+	// WorkDir が空なら課題のリポジトリの作業ディレクトリ（決められなければワークスペース）。下書きづくりの実行には使わない。
 	WorkDir string
 	// Judgment は判断点の起動の実行者。非 nil で、宣言の supervisor が真なら、回答を待つ契約の run（kind が answer で、ターミナルで解く待ちでない。
 	// 答える者は問わない）をスーパーバイザーへ回す（それ以外はオーナーの保留へ写す）。Cycle は周の枠超過の共有（nil なら共有しない）。
@@ -317,7 +320,7 @@ type contractRunRow struct {
 	WorkDir string
 	// TaskID は結び付くタスクの内部整数 ID（0026。nil は NULL）。
 	TaskID *int64
-	// Kind は契約の実行の種類（task | reflect）。OperationID は反映の依頼が結び付く反映の操作（task は nil）。
+	// Kind は契約の実行の種類（task | reflect | spec）。OperationID は反映の依頼が結び付く反映の操作（task は nil）。
 	Kind        string
 	OperationID *int64
 	// LandRef は「入れてよい」を返す前に書いた通す中身（NULL・空は、いまの承認ではまだ返していないこと）。
@@ -348,6 +351,8 @@ func contractKindOrTask(kind string) string {
 const (
 	contractRunKindTask    = "task"
 	contractRunKindReflect = "reflect"
+	// contractRunKindSpec は下書きづくりの実行。タスクも計画も持たない。
+	contractRunKindSpec = "spec"
 )
 
 // contractReviewWaitingOpenTx は、課題のタスク taskID の、開いている（終わっていない）契約のレビュー待ちの実行があるかを、
@@ -409,6 +414,8 @@ type contractFill struct {
 	Flow string
 	// ArtifactRef は reflect の {artifact_ref}（反映の操作の参照）。反映の依頼を始める反映の段だけが入れる（それ以外は空）。
 	ArtifactRef string
+	// Spec は下書きづくりの開始（contractCmdSpec）の値。ほかのコマンドでは nil。
+	Spec *specContractFill
 }
 
 // fillContractArgs は契約のコマンドの引数の差し込みを、取り込み元が無いときに空の文字列で埋めない形で埋める
@@ -426,7 +433,7 @@ func (s *Store) fillCommandArgs(connector *Connector, cmd contractCmd, challenge
 // fillRowCommandArgs は契約の実行 row のコマンドの引数を埋める。反映の依頼（上げる依頼を含む）は取り込み元を持たないので、
 // 取り込み元の差し込みを空の文字列で埋める。それ以外は fillCommandArgs と同じ。
 func (s *Store) fillRowCommandArgs(connector *Connector, row *contractRunRow, cmd contractCmd, challengeID string, sb *sourceBinding, answer contractAnswer) ([]string, error) {
-	if row.Kind == contractRunKindReflect {
+	if row.Kind == contractRunKindReflect || row.Kind == contractRunKindSpec { // 取り込み元を読まない
 		return s.contractCommandArgs(connector, cmd, contractFill{ChallengeID: challengeID, EmptySource: true, RunID: row.ExternalRunID, Answer: answer})
 	}
 	return s.fillCommandArgs(connector, cmd, challengeID, sb, row.ExternalRunID, answer)
@@ -600,9 +607,10 @@ func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration
 
 // existingContractWorkDir は既存の契約の run へのコマンド（status・resume・cancel）の作業ディレクトリ。決め直さず、
 // start で記録した作業ディレクトリ（contract_run.work_dir）を使う。記録の無い run（記録を足す前に始めたもの）は
-// ワークスペース（contractWorkDir の既定）で実行する。呼び出し元が WorkDir を明示したときはそれを使う。
+// ワークスペース（contractWorkDir の既定）で実行する。呼び出し元が WorkDir を明示したときはそれを使う（下書きづくりの実行は、
+// いつも記録した作業ディレクトリ）。
 func existingContractWorkDir(row *contractRunRow, explicit string) string {
-	if explicit != "" {
+	if explicit != "" && row.Kind != contractRunKindSpec {
 		return explicit
 	}
 	return row.WorkDir
@@ -799,12 +807,12 @@ func (s *Store) beginContractRun(ctx context.Context, cid int64, cycleID, planVe
 // operationID が非 nil なら、反映の操作のために呼んだ run として印を付ける（run.operation_id。反映の段・完了から戻す前の読み・
 // 片付けだけが渡す。印の付いた run は、課題の最後の委譲の run・最後の契約のコマンドを読む所から外れる）。
 func (s *Store) beginContractRunForTask(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64) (int64, error) {
-	return s.beginContractRunMarked(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, taskID, operationID, false)
+	return s.beginContractRunMarked(ctx, cid, cycleID, planVersion, sessionID, maxMicros, isStart, taskID, operationID, false, budgetBucketImpl)
 }
 
 // beginContractRunMarked は beginContractRunForTask に、反映の依頼の印（run.reflect）を足したもの。reflect が真なら、反映の操作が無い
-// 反映の依頼（上げる依頼）の run にも印を付ける（課題の使った額・最後の委譲の実行の読みから外すため）。
-func (s *Store) beginContractRunMarked(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64, reflect bool) (int64, error) {
+// 反映の依頼（上げる依頼）の run にも印を付ける（課題の使った額・最後の委譲の実行の読みから外すため）。bucket は run の予算の枠。
+func (s *Store) beginContractRunMarked(ctx context.Context, cid int64, cycleID, planVersion *int64, sessionID string, maxMicros int64, isStart bool, taskID, operationID *int64, reflect bool, bucket budgetBucket) (int64, error) {
 	host, _ := os.Hostname()
 	now := s.currentTime()
 	var runIDInt int64
@@ -875,7 +883,7 @@ func (s *Store) beginContractRunMarked(ctx context.Context, cid int64, cycleID, 
 		row, err := insertRun(ctx, tx, cid, insertRunInput{
 			CycleID: cycleID, Kind: runKindContract, ChallengeVersion: int64(cur.Version), PlanVersion: planVersion,
 			SessionID: sessionID, PID: int64(os.Getpid()), Host: host, HeartbeatAt: now, StartedAt: now,
-			MaxBudgetUSD: maxMicros, BudgetBucket: budgetBucketImpl, TaskID: runTask, Repo: taskRepo, OperationID: operationID, Reflect: reflect,
+			MaxBudgetUSD: maxMicros, BudgetBucket: bucket, TaskID: runTask, Repo: taskRepo, OperationID: operationID, Reflect: reflect,
 		})
 		if err != nil {
 			return err
@@ -931,6 +939,11 @@ type contractCall struct {
 	HoldEnd bool
 	// HoldSuccessEnd は、succeeded だけは ended_at を入れないとき真（failed・cancelled は、「入れてよい」を返し済みの実行〔landedStop〕以外は終わった記録にする）。
 	HoldSuccessEnd bool
+}
+
+// isSpec は、下書きづくりの実行の呼び出し（開始と、既にある実行へのコマンド）か。
+func (c contractCall) isSpec() bool {
+	return c.Kind == contractRunKindSpec || (c.Existing != nil && c.Existing.Kind == contractRunKindSpec)
 }
 
 // landedStop は、状態 st が失敗・中止で、「入れてよい」を返し済み（land_ref がある）の統合先を使う課題のタスクの実行か。
@@ -1081,6 +1094,17 @@ func (s *Store) finishContractCall(ctx context.Context, c contractCall) (*Contra
 	report.CostDeltaUSD, report.CostTotalUSD = microsToUSD(delta), microsToUSD(newTotal)
 	if status == nil && c.Existing != nil {
 		report.State, report.Summary = c.Existing.State, c.Existing.Summary
+	}
+	if c.isSpec() {
+		// 下書きづくりの実行は、タスクの契約の実行の保留を作らない。開始の失敗だけを、下書きづくりの保留にする。
+		if c.Existing == nil {
+			held, herr := s.holdFailedSpecDraftStart(ctx, c, status, reclaimed, result, errSummary)
+			if herr != nil {
+				return nil, herr
+			}
+			report.Held = held
+		}
+		return report, nil
 	}
 	if question := contractHoldQuestion(c, status, out.Status, reclaimed, result, errSummary); question != "" && !c.ReleaseStage &&
 		(status == nil || !c.landedStop(status.State)) {
@@ -1283,6 +1307,13 @@ func (s *Store) recordContractStatus(ctx context.Context, tx *sql.Tx, c contract
 	report.Facts = st.Facts
 	if err := s.writeContractRunRecord(ctx, tx, c, st, rk, rd, rt, rb, totalMicros, now, endedAt, report); err != nil {
 		return err
+	}
+	// 下書きづくりの実行は、状態を写すだけで、タスク・成果物・課題の遷移に触れない。始まったら、同じ書き込みで記録へ写す。
+	if c.isSpec() {
+		if c.Existing == nil {
+			return s.markSpecDraftRunning(ctx, tx, c.ChallengeIDInt)
+		}
+		return nil
 	}
 	// 「入れてよい」を返し済みの実行の失敗・取り消しは、統合先へ入ったかを上流で確かめるまで、通す中身もタスクも変えない
 	// （確かめの結果で、済み・保留・着手中へ戻すのどれかを 1 つの書き込みで決める。afterContractRead が扱う）。
@@ -1546,9 +1577,9 @@ func (s *Store) PollContractRuns(ctx context.Context, in ContractPollInput) ([]C
 	planVersions := map[int64]*int64{}
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		// 読むのはタスクの実行と、着手中・検証中・保留中の課題の上げる依頼（kind が reflect。保留中も状態・費用を読み続ける。受け取りは保留が解けてから）で、課題が完了でないものだけ（完了の課題の実行と
-		// 反映の依頼は反映の段が読む）。
+		// 反映の依頼は反映の段が読む）と、取り下げでない課題の下書きづくりの実行（kind が spec。分類済・人間対応待ちでも読む）。
 		q := contractRunSelect + ` WHERE ended_at IS NULL AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'done')
-			AND (kind = 'task' OR (kind = 'reflect' AND (challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying', 'awaiting_human'))
+			AND (kind = 'task' OR (kind = 'spec' AND challenge_id NOT IN (SELECT id FROM challenge WHERE status = 'withdrawn')) OR (kind = 'reflect' AND (challenge_id IN (SELECT id FROM challenge WHERE status IN ('in_progress', 'verifying', 'awaiting_human'))
 				OR operation_id IN (SELECT id FROM operation WHERE state = 'closed' AND closed_reason IN ('superseded', 'challenge_rejected')))))`
 		args := []any{}
 		if only != nil {
@@ -1652,13 +1683,13 @@ func (s *Store) sameTaskRunOpen(ctx context.Context, row *contractRunRow) (bool,
 
 // reclaimedContractStartWhere は、回収された（interrupted）か回収以外で失敗した契約の start の run で、まだ保留に
 // 写していないものを選ぶ条件（run を r、課題を c と別名にした副問い合わせの本体）。start の run は、契約の run（contract_run）を
-// 作る前に回収されると contract_run を持たない。status の run との区別は「その課題の、先に始まった契約の run が
+// 作る前に回収されると contract_run を持たない。下書きづくりの開始（予算の枠 spec）は選ばない（下書きづくりの経路が扱う）。status の run との区別は「その課題の、先に始まった契約の run が
 // その run の開始時点で終わっていなかった」ことで行う。終わりと同じ時刻（ミリ秒）の run は start の run として扱う:
 // 契約の run を終わらせるのは成功した契約のコマンドの run（start・status・resume・cancel）で、成功以外の run は
 // 終わらせない。この条件は成功以外の run だけを選ぶから。run のタスクを進めてよくなければ選ばない（述語 taskMayProceedSQL。
 // 選ぶのは、課題が着手中か、タスクを止める保留だけが開いた人間対応待ちで、そのタスクに開いている保留が無いとき。
 // 課題を止める保留・そのタスクの保留が開いている・取り下げ・完了は選ばない）。
-var reclaimedContractStartWhere = `r.kind = 'contract' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND ` + taskMayProceedSQL("c", "r.task_id") + `
+var reclaimedContractStartWhere = `r.kind = 'contract' AND r.budget_bucket <> 'spec' AND r.operation_id IS NULL AND r.result IS NOT NULL AND r.result <> 'succeeded' AND ` + taskMayProceedSQL("c", "r.task_id") + `
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.start_run_id = r.id)
 	AND NOT EXISTS (SELECT 1 FROM contract_run k WHERE k.challenge_id = r.challenge_id AND COALESCE(k.task_id, 0) = COALESCE(r.task_id, 0) AND k.start_run_id < r.id
 		AND (k.ended_at IS NULL OR k.ended_at > r.started_at))

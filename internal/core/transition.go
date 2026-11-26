@@ -41,6 +41,9 @@ const (
 	// 保留を閉じる手の実行（スーパーバイザーの段）だけが使う。人の回答（OpAnswer。T12）とは別の行で、本人確認を要さない。
 	// CLI のコマンド・サーバーの経路には、この操作を起こす口を作らない。
 	OpSupervisorResolve Operation = "supervisor_resolve"
+	// OpSpecDraftUnhold は、オーナーが仕様の文書の場所を付けた編集が、開いている下書きづくりの保留を回答なしで閉じる操作（T21）。
+	// 編集の書き込み（EditChallenge）だけが使う。CLI の操作には対応しない。
+	OpSpecDraftUnhold Operation = "spec_draft_unhold"
 )
 
 // TransitionTarget は遷移先の表現。T1〜T11・T13〜T15 は固定の状態を持つが、
@@ -119,7 +122,7 @@ func (tt TransitionTarget) ResolveForReplan(table []Transition, preceding Status
 	return "", fmt.Errorf("core: replan is not allowed for a hold raised from %q", preceding)
 }
 
-// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T20）を指す。
+// Transition は遷移表1行分。ID は docs/features/m1-core.md の表番号（T1〜T21）を指す。
 // T11 は遷移元が5つあるため、物理的には ID="T11" の行が5つ存在する。
 type Transition struct {
 	ID                   string
@@ -127,12 +130,12 @@ type Transition struct {
 	Op                   Operation
 	Target               TransitionTarget
 	RequiresVerification bool
-	// Restricted が true の行は、専用の core の書き込みだけが使う（T18・T20）。Lookup・OutgoingFrom・IsTerminal には現れず、
+	// Restricted が true の行は、専用の core の書き込みだけが使う（T18・T20・T21）。Lookup・OutgoingFrom・IsTerminal には現れず、
 	// LookupRestricted だけが引く。通常の操作から見た状態の終端（完了）は変わらない。
 	Restricted bool
 }
 
-// Table は遷移表 T1〜T20 の正本。docs/features/m1-core.md §状態機械 の
+// Table は遷移表 T1〜T21 の正本。docs/features/m1-core.md §状態機械 の
 // 遷移表と1対1に対応する（T11 は遷移元5つに展開して5行として持つ）。
 // この表に無い（状態, 操作）の組はすべて不可（Lookup が ok=false を返す）。
 var Table = []Transition{
@@ -190,6 +193,9 @@ var Table = []Transition{
 	// 同じ先〔分類済〕）。本人確認は要さない（承認ではない。人の回答 T12 の本人確認つきの行と登録簿は変えない）。制限つきの行で、
 	// 通常の操作（Lookup・OutgoingFrom）には現れない。通す実行は、スーパーバイザーの段の手の実行だけ（対象は supervisor_state が pending の保留）。
 	{ID: "T20", From: StatusAwaitingHuman, Op: OpSupervisorResolve, Target: TransitionTarget{ReturnToPrecedingHoldStatus: true, IfReplan: StatusClassified}, Restricted: true},
+	// T21: 仕様の文書の場所を付けた編集が、開いている下書きづくりの保留を閉じて、分類済へ戻す。本人確認は要さない（edit は
+	// 本人確認の無い操作で、回答でも承認でもない）。制限つきの行で、通常の操作には現れない。
+	{ID: "T21", From: StatusAwaitingHuman, Op: OpSpecDraftUnhold, Target: TransitionTarget{Fixed: StatusClassified}, Restricted: true},
 }
 
 // Lookup は (from, op) から遷移表の行を引く。表に無い組は ok=false を返す
@@ -203,7 +209,7 @@ func Lookup(from Status, op Operation) (Transition, bool) {
 	return Transition{}, false
 }
 
-// LookupRestricted は (from, op) から制限つきの行（T18・T20）を引く。通常の行は返さない。
+// LookupRestricted は (from, op) から制限つきの行（T18・T20・T21）を引く。通常の行は返さない。
 func LookupRestricted(from Status, op Operation) (Transition, bool) {
 	for _, tr := range Table {
 		if tr.From == from && tr.Op == op && tr.Restricted {

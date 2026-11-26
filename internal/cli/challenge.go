@@ -138,6 +138,9 @@ func runEdit(a Args) (any, error) {
 		return nil, NewError(CodeUsageError, "edit には --title / --description / --done-criteria / --urgency / --headline / --context / --expected / --actual / --non-goals / --figure / --spec / --spec-base のいずれか1つ以上を指定してください")
 	}
 
+	// 下書きづくりの途中の課題に場所を付けるときだけ、core が呼ぶ。
+	in.SpecDraftCancel = func() (core.ContractCancelInput, error) { return contractCancelInput(a) }
+
 	c, err := a.Store.EditChallenge(context.Background(), core.ChannelCLI, a.Positional[0], in)
 	if err != nil {
 		return nil, mapCoreErr(err)
@@ -232,6 +235,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	}
 	if c.SpecBasePath != nil {
 		fmt.Fprintf(&b, "置き換える元の文書の場所: %s\n", escapeControl(*c.SpecBasePath))
+	}
+	if sd := d.SpecDraft; sd != nil {
+		fmt.Fprintf(&b, "下書きづくり:  %s (%s)・実行 %d 回（上限 %d 回）\n", sd.State.Label(), sd.State, sd.Attempts, core.SpecDraftMaxAttempts)
 	}
 	fmt.Fprintf(&b, "作成:          %s\n", FormatTimestamp(c.CreatedAt))
 	fmt.Fprintf(&b, "更新:          %s\n", FormatTimestamp(c.UpdatedAt))

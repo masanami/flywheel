@@ -132,6 +132,7 @@ export function createMockApi(
       challenge: {
         ...m.c,
         ...chat.challengeChat(name, id),
+        spec_draft: m.specDraft ?? null,
         dependencies: [],
         uses_integration: t?.uses_integration ?? null,
         dependents: extra.dependents ?? [],

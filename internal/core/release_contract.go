@@ -60,7 +60,7 @@ func (r *releaseRun) route() string {
 // 課題のタスクの実行。統合先を使う課題のタスクの実行と、完了でない課題の反映の依頼（上げる依頼）は、委譲の段の先頭の状態の確認が
 // 進めるので、反映の段は扱わない。
 const releaseStageRunWhere = `((kind = 'reflect' AND EXISTS (SELECT 1 FROM challenge ch WHERE ch.id = contract_run.challenge_id AND ch.status = 'done'))
-	OR (kind <> 'reflect' AND NOT EXISTS (SELECT 1 FROM challenge ch WHERE ch.id = contract_run.challenge_id AND ch.uses_integration = 1)))`
+	OR (kind = 'task' AND NOT EXISTS (SELECT 1 FROM challenge ch WHERE ch.id = contract_run.challenge_id AND ch.uses_integration = 1)))`
 
 // loadOpenRunInTx は課題 cid の、終わっていない契約の実行（課題ごとに高々 1 本。無ければ nil）を、取り込み元の結び付き・
 // 承認済みの計画の版つきで読む。対応するかは決めない（corresponds は偽）。

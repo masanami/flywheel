@@ -15,6 +15,7 @@ import type {
   Operation,
   PlanDetail,
   Run,
+  SpecDraft,
   StagePair,
   Stages,
   StatusResponse,
@@ -74,6 +75,8 @@ export interface MockChallenge {
   approvals: Approval[];
   runs: Run[];
   flags: Flags;
+  // 下書きづくりの記録（無ければ課題の詳細の spec_draft は null）
+  specDraft?: SpecDraft;
 }
 
 export interface MockWorkspace {
@@ -120,6 +123,7 @@ export function mk(
     runs,
     flags,
     stages,
+    specDraft,
     ...rest
   } = p;
   return {
@@ -152,6 +156,7 @@ export function mk(
     approvals: approvals ?? [],
     runs: runs ?? [],
     flags: flags ?? {},
+    specDraft,
   };
 }
 
@@ -244,6 +249,133 @@ const taskHold = (
 });
 
 const LONG = `${"この値はカードに全文を出すと幅 320px の列で何行にも伸びる。".repeat(8)}\n2 行目: 外部の Issue 本文をそのまま取り込んだ想定の長い説明。`;
+
+// 下書きづくりの問いの保留を持つ課題（下書きづくりの保留の画面の通しの試験が使う）。
+function specQuestionChallenge(): MockChallenge {
+  const holdId = "H-1";
+  const option = (id: string, label: string) => ({
+    id,
+    label,
+    description: "",
+    button: true,
+  });
+  return mk("C-4", "予約の取り消しを足す", "awaiting_human", {
+    priority: "P1",
+    headline: "利用者が自分で予約を取り消せるようにする",
+    specDraft: {
+      answers: [],
+      attempts: 1,
+      base_path: null,
+      hold_id: holdId,
+      hold_reason: "spec_question",
+      max_attempts: 3,
+      path: ".flywheel/specs/c-4.md",
+      questions: [
+        {
+          question: "取り消しは、実行中の処理にも効かせますか",
+          options: [
+            { label: "実行中にも効かせる" },
+            { label: "待ちの処理だけ" },
+          ],
+          recommended: 1,
+          reason: "課題の説明が、すぐ止めたいと書いているため",
+        },
+      ],
+      reason: "新しい機能で、複数のタスクに分かれる",
+      repo: "app",
+      state: "awaiting_owner",
+    },
+    holds: [
+      {
+        hold_id: holdId,
+        scope: "challenge",
+        answer: null,
+        answer_option: null,
+        answered_at: null,
+        answered_by: null,
+        answered_channel: null,
+        answered_verification: null,
+        closed_at: null,
+        relay_quote: null,
+        relay_session: null,
+        replan: false,
+        from_status: "classified",
+        from_status_label: "分類済",
+        kind: "human",
+        check: "seed-spec-h1",
+        options: [
+          option("answer", "推奨のまま進める"),
+          option("proceed", "いまの下書きで計画へ進む"),
+          option("skip", "仕様の文書なしで計画する"),
+        ],
+        question: "仕様の下書きに、決めないと進まない問いが 1 件残りました。",
+        raised_at: iso(20),
+        run_id: null,
+        stop_kind: null,
+        supervisor_findings: null,
+        supervisor_recommendation: null,
+        supervisor_state: null,
+        task_id: null,
+      },
+    ],
+  });
+}
+
+// 下書きづくりの失敗の保留を持つ課題（問いの保留の課題を元に、理由・回数・選択肢を変える）。
+function specFailedChallenge(): MockChallenge {
+  const base = specQuestionChallenge();
+  return {
+    ...base,
+    c: { ...base.c, id: "C-5", title: "予約の変更を足す" },
+    specDraft: base.specDraft && {
+      ...base.specDraft,
+      hold_reason: "spec_failed",
+      path: ".flywheel/specs/c-5.md",
+      questions: [],
+    },
+    holds: base.holds.map((h) => ({
+      ...h,
+      check: "seed-spec-failed",
+      question: "仕様の下書きづくりが失敗しました。",
+      options: [
+        { id: "retry", label: "やり直す", description: "", button: true },
+        ...h.options.filter((o) => o.id !== "answer"),
+      ],
+    })),
+  };
+}
+
+// 回数の上限の保留と、下書きづくりでない保留を 1 つずつ持つ課題。
+function specAttemptLimitChallenge(): MockChallenge {
+  const base = specQuestionChallenge();
+  const [spec] = base.holds as [Hold];
+  return {
+    ...base,
+    c: { ...base.c, id: "C-6", title: "予約の通知を足す" },
+    specDraft: base.specDraft && {
+      ...base.specDraft,
+      attempts: 3,
+      hold_id: "H-2",
+      hold_reason: "spec_attempt_limit",
+      path: ".flywheel/specs/c-6.md",
+    },
+    holds: [
+      {
+        ...spec,
+        check: undefined,
+        options: [],
+        question: "通知の送り先はどこにしますか。",
+      },
+      {
+        ...spec,
+        hold_id: "H-2",
+        check: "seed-spec-limit",
+        question: "仕様の下書きづくりが、回数の上限に達しました。",
+        options: spec.options.filter((o) => o.id !== "answer"),
+      },
+    ],
+  };
+}
 
 export function seed(): Record<string, MockWorkspace> {
   const depSeeds = seedDeps();
@@ -712,6 +844,9 @@ export function seed(): Record<string, MockWorkspace> {
         op("O-2", "C-3", "notify", "pending", "運用チームへ変更を通知"),
       ],
     }),
+    specQuestionChallenge(),
+    specFailedChallenge(),
+    specAttemptLimitChallenge(),
   ];
   const ok = (name: string): Workspace => ({
     error: null,
