@@ -219,6 +219,11 @@ type j2ValidationContext struct {
 	// 偽のとき（承認済みの計画を委譲の段で読み直すとき）は、受け持ちを検査しない。
 	CheckCriteria bool
 	Criteria      *planAcceptanceCriteria
+	// RecheckCriteria が真のとき（承認済みの計画を委譲の段で読み直すとき）は、data が持つ一覧（登録のときに書き足した
+	// acceptance_criteria）と受け持ちを突き合わせる。仕様の文書は読まない。一覧を持たない計画は受け持ちを検査しない。
+	RecheckCriteria bool
+	// DoneCovers は済みのタスクが受け持つ識別（受け持ちの検査で漏れに数えない）。
+	DoneCovers map[string]bool
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -657,8 +662,19 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 		if raw.AcceptanceCriteria != nil {
 			return nil, "acceptance_criteria must not be in the output"
 		}
-		if reason := checkPlanCoverage(tasks, raw.DeferredCriteria, vc.Criteria); reason != "" {
+		if reason := checkPlanCoverage(tasks, raw.DeferredCriteria, vc.Criteria, vc.DoneCovers); reason != "" {
 			return nil, reason
+		}
+	}
+	if vc.RecheckCriteria {
+		list, err := loadPlanAcceptanceCriteria(string(data))
+		if err != nil {
+			return nil, j2ReasonBadShape
+		}
+		if list != nil {
+			if reason := checkPlanCoverage(tasks, raw.DeferredCriteria, list, vc.DoneCovers); reason != "" {
+				return nil, reason
+			}
 		}
 	}
 
@@ -1200,6 +1216,8 @@ type j2Prepared struct {
 	KeptBudgets []taskBudget
 	// Criteria は区画「受入基準」を作った一覧（仕様の文書の場所を持たない課題は nil。出力の検査に使う）。
 	Criteria *planAcceptanceCriteria
+	// DoneCovers は区画「済みのタスク」に出るタスクが受け持つ識別（出力の検査で漏れに数えない）。
+	DoneCovers map[string]bool
 	// Read が非 nil のときだけ、計画を登録した後に読んだ記録を付けてよい
 	// （取り込み元の対応があり、最新のコメントをすべて入力へ含めた場合）。値は
 	// J2 の直前の取得で得たコメント数と更新日時（ストアの観測値ではない）。
@@ -1322,7 +1340,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		criteria = &planAcceptanceCriteria{Path: *ch.SpecPath, Items: items}
 	}
 
-	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0, KeptBudgets: keptBudgets, Criteria: criteria}
+	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0, KeptBudgets: keptBudgets, Criteria: criteria, DoneCovers: doneTaskCovers(doneTasks)}
 	seenDoneRepo := map[string]bool{}
 	for _, t := range doneTasks {
 		if !seenDoneRepo[t.Repo] {
@@ -1384,7 +1402,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	if replan != nil && replan.Reason == string(holdReasonChallengeCheckNotMet) {
 		sections = append(sections, JudgmentDataSection{Label: ChallengeCheckFindingsSectionLabel, Content: formatChallengeCheckFindingsSection(replan)})
 	}
-	if t := formatDoneTasksSection(doneTasks); t != "" {
+	if t := formatDoneTasksSection(doneTasks, criteria); t != "" {
 		sections = append(sections, JudgmentDataSection{Label: DoneTasksSectionLabel, Content: t})
 	}
 	if criteria != nil {
@@ -2058,7 +2076,7 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
-			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, CheckLimit: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos, KeptBudgets: prepared.KeptBudgets, CheckCriteria: true, Criteria: prepared.Criteria},
+			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, CheckLimit: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos, KeptBudgets: prepared.KeptBudgets, CheckCriteria: true, Criteria: prepared.Criteria, DoneCovers: prepared.DoneCovers},
 			Read:       prepared.Read,
 		})
 		if err != nil {

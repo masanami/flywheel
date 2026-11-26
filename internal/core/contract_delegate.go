@@ -563,8 +563,12 @@ func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration
 	var plan approvedPlan
 	var planOK bool
 	var binding *sourceBinding
+	var doneCovers map[string]bool
 	err := s.db.Read(ctx, func(tx *sql.Tx) (err error) {
 		if plan, planOK, err = loadApprovedPlanAnySpec(ctx, tx, cid); err != nil || !planOK {
+			return err
+		}
+		if doneCovers, err = loadDoneTaskCovers(ctx, tx, cid); err != nil {
 			return err
 		}
 		binding, err = loadSourceBindingByChallengeID(ctx, tx, cid)
@@ -576,7 +580,7 @@ func (s *Store) contractRepoWorkDir(ctx context.Context, agent *AgentDeclaration
 	if !planOK || conn == nil {
 		return "", false, nil
 	}
-	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: agent, Conn: conn, HasSource: binding != nil, SkipFlowReason: true})
+	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: agent, Conn: conn, HasSource: binding != nil, SkipFlowReason: true, RecheckCriteria: true, DoneCovers: doneCovers})
 	if !vok {
 		return "", false, nil
 	}
