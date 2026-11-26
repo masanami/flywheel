@@ -877,22 +877,30 @@ func cancelOpenContractRuns(a Args, id string) (int, error) {
 	if !open {
 		return 0, nil
 	}
-	ws := a.Store.Workspace()
-	decl, err := core.LoadAgentDeclaration(ws)
+	in, err := contractCancelInput(a)
 	if err != nil {
 		return 0, mapCoreErr(err)
 	}
-	conn, err := core.LoadConnectorsDeclaration(ws)
-	if err != nil {
-		return 0, mapCoreErr(err)
-	}
-	n, err := a.Store.CancelOpenContractRuns(ctx, core.ContractCancelInput{
-		ChallengeID: id, AgentDecl: decl, ConnDecl: conn, Client: invoker.NewLauncherWithLookPath(a.LookPath),
-	})
+	in.ChallengeID = id
+	n, err := a.Store.CancelOpenContractRuns(ctx, in)
 	if err != nil {
 		return n, mapCoreErr(err)
 	}
 	return n, nil
+}
+
+// contractCancelInput は契約の実行を止める口へ渡す材料（宣言と、契約のコマンドの起動）を組み立てる。対象の課題は呼び出し元が決める。
+func contractCancelInput(a Args) (core.ContractCancelInput, error) {
+	ws := a.Store.Workspace()
+	decl, err := core.LoadAgentDeclaration(ws)
+	if err != nil {
+		return core.ContractCancelInput{}, err
+	}
+	conn, err := core.LoadConnectorsDeclaration(ws)
+	if err != nil {
+		return core.ContractCancelInput{}, err
+	}
+	return core.ContractCancelInput{AgentDecl: decl, ConnDecl: conn, Client: invoker.NewLauncherWithLookPath(a.LookPath)}, nil
 }
 
 // rejectReleaseNotes は完了の差し戻しで取り消した本番反映と、実行中のため止めなかった本番反映を伝える行

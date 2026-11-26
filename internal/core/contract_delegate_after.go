@@ -630,7 +630,11 @@ func (s *Store) runExistingContractCommandWith(ctx context.Context, client Contr
 		}
 	}
 	// コマンド 1 回ごとの run の行も、契約の run が結び付くタスクに結び付ける（過去の行は nil のまま）。
-	runIDInt, err := s.beginContractRunMarked(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false, row.TaskID, releaseOp, row.Kind == contractRunKindReflect)
+	bucket := budgetBucketImpl
+	if row.Kind == contractRunKindSpec {
+		bucket = budgetBucketSpec
+	}
+	runIDInt, err := s.beginContractRunMarked(ctx, row.ChallengeID, cycleID, planVersion, sessionID, row.MaxBudget, false, row.TaskID, releaseOp, row.Kind == contractRunKindReflect, bucket)
 	if err != nil {
 		return nil, err
 	}
