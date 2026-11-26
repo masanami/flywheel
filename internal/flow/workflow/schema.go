@@ -99,6 +99,32 @@ func (o *OutputSchema) outcomeEnum(field string) ([]string, error) {
 
 // FieldType は出力のフィールドパスが指す値の型を返す。パスがスキーマに無い・型が 1 つに決まらない場合はエラー。
 func (o *OutputSchema) FieldType(path []string) (*Type, error) {
+	node, err := o.field(path)
+	if err != nil {
+		return nil, err
+	}
+	return schemaType(node)
+}
+
+// FieldTypeName は出力のフィールドパスが指す欄の型の名前を返す（配列の要素の型は調べない）。
+// パスがスキーマに無い・型が 1 つに決まらない場合はエラー。
+func (o *OutputSchema) FieldTypeName(path []string) (string, error) {
+	node, err := o.field(path)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := node["$ref"]; ok {
+		return "", fmt.Errorf("cannot follow $ref in output schema for static checks")
+	}
+	name, ok := node["type"].(string)
+	if !ok {
+		return "", fmt.Errorf("field must declare a single type")
+	}
+	return name, nil
+}
+
+// field は出力のフィールドパスが指すスキーマの節を返す。
+func (o *OutputSchema) field(path []string) (map[string]any, error) {
 	node := o.raw
 	for i, name := range path {
 		if _, ok := node["$ref"]; ok {
@@ -111,7 +137,7 @@ func (o *OutputSchema) FieldType(path []string) (*Type, error) {
 		}
 		node = next
 	}
-	return schemaType(node)
+	return node, nil
 }
 
 // FieldEnum は出力のフィールドパスが指す string の enum を返す（select 種類の outcome になる）。

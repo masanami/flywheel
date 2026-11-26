@@ -2,9 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/flow"
@@ -74,8 +76,32 @@ func flowLaunchFlags(a Args) (mode, delegated string, err *Error) {
 	return mode, delegated, nil
 }
 
+// flowBudgetFlag は start の --budget-usd を検査して返す（無ければ 0＝定義の値）。受け付けるのはフロー spec-draft だけで、
+// 正の有限の数でなければ使い方の誤り。
+func flowBudgetFlag(a Args) (float64, *Error) {
+	raw, ok := a.Values["budget-usd"]
+	if !ok {
+		return 0, nil
+	}
+	if a.Positional[0] != flow.SpecDraftFlow {
+		return 0, NewError(CodeUsageError, fmt.Sprintf("--budget-usd はフロー %s のときだけ指定できます", flow.SpecDraftFlow))
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || !(v > 0) || math.IsInf(v, 0) {
+		return 0, NewError(CodeUsageError, fmt.Sprintf("--budget-usd は正の数を指定してください: %q", raw))
+	}
+	return v, nil
+}
+
+// flowStart は flow.Start（試験が引数の写しを確かめるために差し替える）。
+var flowStart = flow.Start
+
 func runFlowStart(a Args) (any, error) {
 	mode, delegated, uerr := flowLaunchFlags(a)
+	if uerr != nil {
+		return nil, uerr
+	}
+	budget, uerr := flowBudgetFlag(a)
 	if uerr != nil {
 		return nil, uerr
 	}
@@ -83,7 +109,7 @@ func runFlowStart(a Args) (any, error) {
 	if cerr != nil {
 		return nil, cerr
 	}
-	return rawExit{flow.Start(env, flow.StartOptions{Name: a.Positional[0], Inputs: a.Multi["input"], PermissionMode: mode, DelegatedRun: delegated})}, nil
+	return rawExit{flowStart(env, flow.StartOptions{Name: a.Positional[0], Inputs: a.Multi["input"], PermissionMode: mode, DelegatedRun: delegated, BudgetUSD: budget})}, nil
 }
 
 func runFlowStatus(a Args) (any, error) {
@@ -140,6 +166,7 @@ func flowCommands() []Command {
 				// 権限モードと、委譲の子の目印に使う run の ID。必須化と使い道は後続のタスクが足す（いまは受けるだけ）。
 				{Name: "permission-mode", HasValue: true},
 				{Name: "delegated-run", HasValue: true},
+				{Name: "budget-usd", HasValue: true},
 			},
 			Run: runFlowStart,
 		},

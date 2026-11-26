@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,6 +68,8 @@ type StartParams struct {
 	WorkflowDir string
 	Cwd         string
 	Origin      string
+	// BudgetUSD は正なら、定義の limits.budget_usd の代わりにその run の上限額にする。
+	BudgetUSD float64
 	// Models は解決したモデルの変数（定義の models の値）。run_started に記録する。
 	Models map[string]string
 	// Efforts は effort の変数（定義の efforts）。run_started に記録する。
@@ -76,8 +79,31 @@ type StartParams struct {
 	Embedded   bool
 }
 
+// arrayField は facts の参照 r が指す欄が、段の出力の型で配列かを返す。
+func arrayField(wf *workflow.Workflow, r *workflow.Ref) (bool, error) {
+	step := wf.Step(r.Step)
+	if step == nil || step.OutputSchema == nil {
+		return false, errors.New("the step has no output schema (the workflow is not validated)")
+	}
+	name, err := step.OutputSchema.FieldTypeName(r.Path)
+	return name == "array", err
+}
+
 // Start は run ディレクトリを作り、run_started とラウンド 1 の開始を記録する。
 func Start(p StartParams) (*Engine, error) {
+	var facts map[string][]runstate.FactSource
+	for _, d := range p.WF.Facts {
+		if facts == nil {
+			facts = map[string][]runstate.FactSource{}
+		}
+		for _, r := range d.Refs {
+			array, err := arrayField(p.WF, r)
+			if err != nil {
+				return nil, fmt.Errorf("facts.%s: %s: %w", d.Name, r.Raw, err)
+			}
+			facts[d.Name] = append(facts[d.Name], runstate.FactSource{Step: r.Step, Field: r.Path, Array: array})
+		}
+	}
 	id := NewRunID(time.Now())
 	run, err := runstate.Create(p.RunsDir, id)
 	if err != nil {
@@ -87,17 +113,11 @@ func Start(p StartParams) (*Engine, error) {
 	for _, l := range p.WF.Limits {
 		limits[l.Name] = l.Value
 	}
+	if p.BudgetUSD > 0 {
+		limits[workflow.BudgetLimit] = p.BudgetUSD
+	}
 	if len(limits) == 0 {
 		limits = nil
-	}
-	var facts map[string][]runstate.FactSource
-	for _, d := range p.WF.Facts {
-		if facts == nil {
-			facts = map[string][]runstate.FactSource{}
-		}
-		for _, r := range d.Refs {
-			facts[d.Name] = append(facts[d.Name], runstate.FactSource{Step: r.Step, Field: r.Path})
-		}
 	}
 	overrides, err := copyOverrides(run, p.WF)
 	if err != nil {

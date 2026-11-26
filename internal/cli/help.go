@@ -66,7 +66,7 @@ const usageText = `flywheel - flywheel の core を操作する CLI
   export --out <path>
   import --in <path>
   serve [--port <n>] [--fleet <path>]
-  flow start --permission-mode <default|acceptEdits|auto> --delegated-run <id> [--input <名前>=<値>]... <フローの名前>   （内部向け。組み込みのフローを始める。標準出力は接続契約（版 1）の JSON）
+  flow start --permission-mode <default|acceptEdits|auto> --delegated-run <id> [--input <名前>=<値>]... [--budget-usd <額>] <フローの名前>   （内部向け。組み込みのフローを始める。--budget-usd は spec-draft だけ。標準出力は接続契約（版 1）の JSON）
   flow status <実行の識別>   （内部向け）
   flow resume [--unit <u>] [--input <選んだもの>] [--note <文>] [--approved-ref <コミット>] --permission-mode <default|acceptEdits|auto> --delegated-run <id> <実行の識別>   （内部向け）
   flow cancel <実行の識別>   （内部向け）

@@ -126,3 +126,71 @@ func TestFactsSurviveTheStateRoundTrip(t *testing.T) {
 		t.Fatalf("round trip = %s", b)
 	}
 }
+
+// 配列と宣言した欄（FactSource.Array）の値は JSON の文字列にする。要素とキーは出力の順で、空白は入れない。
+var questionsDecl = map[string][]FactSource{"spec_questions": {
+	{Step: "critique", Field: []string{"detail", "questions"}, Array: true},
+	{Step: "revise", Field: []string{"detail", "questions"}, Array: true},
+}}
+
+func TestArrayFactsAreSerializedAsJSONStrings(t *testing.T) {
+	for _, c := range []struct{ name, output, want string }{
+		{"AC-124", `{"outcome":"ok","detail":{"questions":[{"a":1},{"a":2}]}}`, `[{"a":1},{"a":2}]`},
+		{"AC-125 empty", `{"outcome":"ok","detail":{"questions":[]}}`, `[]`},
+		{"the order of keys and elements is the output's, without spaces", `{"outcome":"ok","detail":{"questions": [ {"z": 2, "a": 1}, "x" ]}}`, `[{"z":2,"a":1},"x"]`},
+		{"numbers are kept as written", `{"outcome":"ok","detail":{"questions":[12345678901234567890,1.50]}}`, `[12345678901234567890,1.50]`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := factsOf(t, factsEvents(questionsDecl, factStep{step: "critique", outcome: "ok", output: c.output}))
+			if len(got) != 1 || got["spec_questions"] != c.want {
+				t.Fatalf("facts = %v, want spec_questions=%s", got, c.want)
+			}
+		})
+	}
+}
+
+// 配列と宣言した欄が null・欠けている・配列でないときは値なし（前の段の値も残さない）。
+func TestArrayFactsHaveNoValueUnlessTheFieldIsAnArray(t *testing.T) {
+	first := factStep{step: "critique", outcome: "ok", output: `{"outcome":"ok","detail":{"questions":[1]}}`}
+	for _, c := range []struct{ name, output string }{
+		{"AC-126 null", `{"outcome":"ok","detail":{"questions":null}}`},
+		{"AC-127 a string", `{"outcome":"ok","detail":{"questions":"[1]"}}`},
+		{"missing", `{"outcome":"ok","detail":{}}`},
+		{"the parent is not an object", `{"outcome":"ok","detail":3}`},
+		{"a number", `{"outcome":"ok","detail":{"questions":3}}`},
+		{"an object", `{"outcome":"ok","detail":{"questions":{}}}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := factsOf(t, factsEvents(questionsDecl, factStep{step: "critique", outcome: "ok", output: c.output})); len(got) != 0 {
+				t.Errorf("alone: facts = %v, want none", got)
+			}
+			if got := factsOf(t, factsEvents(questionsDecl, first, factStep{step: "revise", outcome: "ok", output: c.output})); len(got) != 0 {
+				t.Errorf("after an array: facts = %v, want none", got)
+			}
+		})
+	}
+}
+
+// 失敗（予約値）で終わった段と、宣言に無い段は、配列の値を変えない。
+func TestArrayFactsAreNotChangedByReservedOutcomesOrOtherSteps(t *testing.T) {
+	first := factStep{step: "critique", outcome: "ok", output: `{"outcome":"ok","detail":{"questions":[1]}}`}
+	for _, next := range []factStep{
+		{step: "revise", outcome: "invalid_output", output: `{"detail":{}}`, reserved: true},
+		{step: "write", outcome: "ok", output: `{"outcome":"ok"}`},
+	} {
+		if got := factsOf(t, factsEvents(questionsDecl, first, next)); got["spec_questions"] != "[1]" {
+			t.Errorf("after %s: facts = %v", next.step, got)
+		}
+	}
+}
+
+// 文字列だけの宣言の写しの JSON は、配列の対応の前と同じ形（キーを足さない）。
+func TestStringFactSourcesKeepTheirRecordShape(t *testing.T) {
+	b, err := json.Marshal(FactSource{Step: "implement", Field: []string{"self_review"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `{"step":"implement","field":["self_review"]}` {
+		t.Fatalf("record = %s", b)
+	}
+}
