@@ -71,8 +71,19 @@ func TestInstructions_J2DescribesCoversAndDeferredCriteria(t *testing.T) {
 	line := promptLine(t, promptSection(t, j2Instructions(t), "## 判断"), "   - 受け持つ受入基準")
 	requirePhrases(t, "the covers rule", line,
 		"covers", "そのまま写す", "作らない", "deferred_criteria", "理由（reason", "2000 文字以内",
-		"どれにも無い基準があると不正", "区画に無い識別", "区画が無いときは",
-		"済みのタスクの受け持ちは件数しか出ない", "確かめられない基準は covers か deferred_criteria に入れる")
+		"どれにも無い基準があると不正", "区画に無い識別", "区画が無いときは")
+}
+
+// 受け持ち済みの基準は、済みの印で見分け、covers にも deferred_criteria にも書かなくてよい。
+func TestInstructions_J2DescribesTheDoneMark(t *testing.T) {
+	line := promptLine(t, promptSection(t, j2Instructions(t), "## 判断"), "   - 受け持つ受入基準")
+	requirePhrases(t, "the covers rule", line,
+		"印「済み」の付いた基準は受け持ち済み", "済みの印の基準は covers にも deferred_criteria にも書かなくてよい")
+	for _, old := range []string{"件数しか出ない", "確かめられない基準", "区画「承認した計画」に出る識別"} {
+		if strings.Contains(j2Instructions(t), old) {
+			t.Errorf("j2.md still contains %q", old)
+		}
+	}
 }
 
 // 仕様の文書は読むだけで、直しはタスクにする。
@@ -81,10 +92,10 @@ func TestInstructions_J2OnlyReadsTheSpecDocument(t *testing.T) {
 	requirePhrases(t, "the spec document rule", line, "読むだけ", "タスクにする以外の形で直さない")
 }
 
-// 「足す」の形の呼び出しの節も covers を述べる。
+// 「足す」の形の呼び出しの節は、区画「受入基準」を読み、covers の識別をそこから写すことを述べる。
 func TestInstructions_J2ExpandSectionDescribesCovers(t *testing.T) {
 	sec := promptSection(t, j2Instructions(t), "## 足す形の呼び出し")
-	requirePhrases(t, "the section 足す形の呼び出し", sec, "covers", "区画「承認した計画」に出る識別だけをそのまま写す", "推測で作らず")
+	requirePhrases(t, "the section 足す形の呼び出し", sec, "「受入基準」（あるときだけ）", "covers には、区画「受入基準」の識別をそのまま写す", "区画が無ければ空")
 }
 
 // j2.md の上限は、本文に余白を足した値以下で、19 KiB を超えない（本文が上限以下であることは

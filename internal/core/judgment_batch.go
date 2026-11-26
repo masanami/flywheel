@@ -25,6 +25,9 @@ const NotStartedCycleBudget NotStartedReason = "cycle_budget"
 // 取得に失敗したら、J2 を起動せず、その課題の結果に失敗として示す」）。
 const NotStartedUpstreamFetchFailed NotStartedReason = "upstream_fetch_failed"
 
+// NotStartedSpecUnreadable は、課題の仕様の文書を読めないため J2 を起動しなかったことを示す。Detail は文書の場所と読めなかった訳。
+const NotStartedSpecUnreadable NotStartedReason = "spec_unreadable"
+
 // NotStartedSlotUnavailable は、委譲の候補のリポジトリに使えるスロットが無く起動しなかった
 // ことを表す（S2。`run` の NotStarted だけが使う）。`cycle` の not_started の閉集合
 // （NotStartedReasonValues）に含まれる。
@@ -66,6 +69,7 @@ var notStartedReasonValues = []NotStartedReason{
 	NotStartedFailureLimit,
 	NotStartedReworkLimit,
 	NotStartedUpstreamFetchFailed,
+	NotStartedSpecUnreadable,
 	NotStartedWaitingExternal,
 	NotStartedPlanUnavailable,
 	NotStartedInProgress,

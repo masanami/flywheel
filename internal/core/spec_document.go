@@ -28,8 +28,8 @@ var (
 
 // acceptanceCriterion は仕様の文書の受入基準 1 件。Text は空白を正規化した文。
 type acceptanceCriterion struct {
-	ID   string
-	Text string
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // acceptanceCriterionID は、空白を正規化した文から基準の識別を作る。
