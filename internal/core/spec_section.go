@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -41,9 +43,8 @@ func loadPlanAcceptanceCriteria(spec string) (*planAcceptanceCriteria, error) {
 	return out.AcceptanceCriteria, nil
 }
 
-// formatAcceptanceCriteriaSection は区画「受入基準」の本文。tasks のうち済みのタスクが受け持つ基準の行に、済みの印を付ける。
-// 基準の文は先頭だけを入れ、切っても印を付けない。
-func formatAcceptanceCriteriaSection(list planAcceptanceCriteria, tasks []Task) string {
+// doneTaskCovers は、tasks のうち済みのタスクが受け持つ識別の集合を返す。
+func doneTaskCovers(tasks []Task) map[string]bool {
 	done := map[string]bool{}
 	for _, t := range tasks {
 		if t.Status != TaskStatusDone {
@@ -53,6 +54,22 @@ func formatAcceptanceCriteriaSection(list planAcceptanceCriteria, tasks []Task) 
 			done[id] = true
 		}
 	}
+	return done
+}
+
+// loadDoneTaskCovers は課題 cid の済みのタスク（計画の版を問わない）が受け持つ識別の集合を読む。
+func loadDoneTaskCovers(ctx context.Context, tx *sql.Tx, cid int64) (map[string]bool, error) {
+	all, err := listTasks(ctx, tx, cid)
+	if err != nil {
+		return nil, err
+	}
+	return doneTaskCovers(all), nil
+}
+
+// formatAcceptanceCriteriaSection は区画「受入基準」の本文。tasks のうち済みのタスクが受け持つ基準の行に、済みの印を付ける。
+// 基準の文は先頭だけを入れ、切っても印を付けない。
+func formatAcceptanceCriteriaSection(list planAcceptanceCriteria, tasks []Task) string {
+	done := doneTaskCovers(tasks)
 	var b strings.Builder
 	fmt.Fprintf(&b, "仕様の文書: %s\n件数: %d\n", oneLine(list.Path), len(list.Items))
 	for _, c := range list.Items {

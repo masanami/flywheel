@@ -501,12 +501,24 @@ func formatTaskSection(t Task) string {
 	return fmt.Sprintf("題名: %s\n\n何をするか:\n%s\n\n完了条件:\n%s\n\nやらないこと: %s", t.Title, t.Body, t.DoneCriteria, nonGoals)
 }
 
+// formatBriefTaskSection は J3 の入力の区画「タスク」の本文。formatTaskSection（完了の検証と共有する）の後ろに、
+// タスクが受け持つ受入基準の節を足す（受け持つ基準が無ければ足さない）。list は承認した計画に書き足した一覧。
+func formatBriefTaskSection(t Task, list *planAcceptanceCriteria) string {
+	s := formatTaskSection(t)
+	if lines := formatCoveredCriteria(list, t.Covers); lines != "" {
+		s += "\n\n" + coveredCriteriaHeading + ":\n" + strings.TrimSuffix(lines, "\n")
+	}
+	return s
+}
+
 // taskDocPlan は、タスクの文面の「背景」に入れる、承認済みの計画の中身。
 type taskDocPlan struct {
 	Summary  string
 	Topics   []taskDocTopic
 	Expected []StageExpected
 	NonGoals []string
+	// Criteria は計画に書き足した受入基準の一覧（一覧を持たない計画は nil）。タスクが受け持つ基準の節に使う。
+	Criteria *planAcceptanceCriteria
 }
 
 // taskDocTopic は論点 1 つ（題名・どう決めたか・問いと記録した答え）。
@@ -526,7 +538,7 @@ type taskDocQuestion struct {
 
 // formatTaskDocument は起動するタスクの文面（UTF-8 の Markdown）を組み立てる。LLM も判断の呼び出しの口も使わない。
 // 上から、背景（承認済みの計画の、方針・論点ごとの問いと答え・完了したら見えるもの・やらないこと）、このタスク
-// （題名・何をするか・完了条件・やらないこと・対応する取り込み元〔タスクが子に対応するときだけ。取り込みのときに記録した
+// （題名・何をするか・完了条件・受け持つ受入基準〔あるときだけ〕・やらないこと・対応する取り込み元〔タスクが子に対応するときだけ。取り込みのときに記録した
 // 子の題名・URL・本文。上流は読み直さない〕）、ほかのタスク（題名の一覧と、範囲外の明記）の順。ほかのタスクの
 // 「何をするか」は入れない。others は呼び出し側が取りやめを除いて渡す。
 func formatTaskDocument(plan taskDocPlan, task Task, source *SourceChild, others []Task) string {
@@ -560,7 +572,11 @@ func formatTaskDocument(plan taskDocPlan, task Task, source *SourceChild, others
 	b.WriteString("\n## やらないこと\n\n")
 	b.WriteString(bulletList(plan.NonGoals))
 	b.WriteString("\n# このタスク\n\n")
-	fmt.Fprintf(&b, "題名: %s\n\n## 何をするか\n\n%s\n\n## 完了条件\n\n%s\n\n## やらないこと\n\n%s\n", task.Title, task.Body, task.DoneCriteria, bulletList(task.NonGoals))
+	fmt.Fprintf(&b, "題名: %s\n\n## 何をするか\n\n%s\n\n## 完了条件\n\n%s\n\n", task.Title, task.Body, task.DoneCriteria)
+	if lines := formatCoveredCriteria(plan.Criteria, task.Covers); lines != "" {
+		fmt.Fprintf(&b, "## %s\n\n%s\n", coveredCriteriaHeading, lines)
+	}
+	fmt.Fprintf(&b, "## やらないこと\n\n%s\n", bulletList(task.NonGoals))
 	if source != nil {
 		fmt.Fprintf(&b, "\n## 対応する取り込み元\n\n題名: %s\n\nURL: %s\n\n本文:\n\n%s\n", source.Title, source.URL, source.Body)
 	}
@@ -612,7 +628,11 @@ func loadTaskDocument(ctx context.Context, tx *sql.Tx, cid int64, plan approvedP
 	for _, a := range answers {
 		byQuestion[a.QuestionNumber] = a
 	}
-	doc := taskDocPlan{Expected: raw.Expected, NonGoals: raw.NonGoals}
+	criteria, err := loadPlanAcceptanceCriteria(plan.Spec)
+	if err != nil {
+		return "", fmt.Errorf("%w: the approved plan spec is malformed", ErrValidation)
+	}
+	doc := taskDocPlan{Expected: raw.Expected, NonGoals: raw.NonGoals, Criteria: criteria}
 	if raw.Summary != nil {
 		doc.Summary = *raw.Summary
 	}

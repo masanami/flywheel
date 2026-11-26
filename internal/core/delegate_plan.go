@@ -60,6 +60,7 @@ func (s *Store) loadPlanCandidates(ctx context.Context, in DelegateInput, cid in
 	var planOK bool
 	var binding *sourceBinding
 	var sel *launchSelection
+	var doneCovers map[string]bool
 	err = s.db.Read(ctx, func(tx *sql.Tx) error {
 		var err error
 		if ch, err = loadChallenge(ctx, tx, cid); err != nil {
@@ -71,6 +72,9 @@ func (s *Store) loadPlanCandidates(ctx context.Context, in DelegateInput, cid in
 		if sel, err = selectLaunchTasks(ctx, tx, in.ConnDecl, formatChallengeID(cid), cid); err != nil {
 			return err
 		}
+		if doneCovers, err = loadDoneTaskCovers(ctx, tx, cid); err != nil {
+			return err
+		}
 		binding, err = loadSourceBindingByChallengeID(ctx, tx, cid)
 		return err
 	})
@@ -80,7 +84,7 @@ func (s *Store) loadPlanCandidates(ctx context.Context, in DelegateInput, cid in
 	if ch == nil || !planOK {
 		return nil, false, "承認済みの計画を引けない", nil
 	}
-	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: binding != nil, SkipFlowReason: true})
+	validated, vok := validateJ2Output([]byte(plan.Spec), j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: binding != nil, SkipFlowReason: true, RecheckCriteria: true, DoneCovers: doneCovers})
 	if !vok {
 		return nil, false, "承認済みの計画の構造化した出力が今の宣言と合わない", nil
 	}

@@ -19,28 +19,49 @@ type j2RawDeferred struct {
 	Reason string `json:"reason"`
 }
 
+// knownCriteria は一覧 criteria（nil は一覧なし）の識別の集合を返す。
+func knownCriteria(criteria *planAcceptanceCriteria) map[string]bool {
+	known := map[string]bool{}
+	if criteria != nil {
+		for _, c := range criteria.Items {
+			known[c.ID] = true
+		}
+	}
+	return known
+}
+
+// checkTaskCovers は 1 つのタスク（理由の文に出す位置は i）の受け持ち covers が、一覧の識別 known だけからなり、重なりが無いことを確かめる。
+// 通れば空、落ちれば理由の文を返す。
+func checkTaskCovers(i int, covers []string, known map[string]bool) string {
+	own := map[string]bool{}
+	for _, id := range covers {
+		if !known[id] {
+			return fmt.Sprintf("tasks[%d].covers has an unknown criterion", i)
+		}
+		if own[id] {
+			return fmt.Sprintf("tasks[%d].covers has a duplicate criterion", i)
+		}
+		own[id] = true
+	}
+	return ""
+}
+
 // checkPlanCoverage は計画の受け持ちを一覧 criteria と突き合わせる。criteria が nil（区画「受入基準」を渡していない計画）のときは、
-// 識別が 1 件でもあれば不正で、漏れは無い。通れば空、落ちれば理由の文を返す（識別も基準の文も、出力の中身も写さない）。
-func checkPlanCoverage(tasks []j2Task, deferred []j2RawDeferred, criteria *planAcceptanceCriteria) string {
+// 識別が 1 件でもあれば不正で、漏れは無い。done は済みのタスクが受け持つ識別で、漏れに数えない（一覧に無い識別は何にも当たらない）。
+// 通れば空、落ちれば理由の文を返す（識別も基準の文も、出力の中身も写さない）。
+func checkPlanCoverage(tasks []j2Task, deferred []j2RawDeferred, criteria *planAcceptanceCriteria, done map[string]bool) string {
 	var items []acceptanceCriterion
 	if criteria != nil {
 		items = criteria.Items
 	}
-	known := make(map[string]bool, len(items))
-	for _, c := range items {
-		known[c.ID] = true
-	}
+	known := knownCriteria(criteria)
 	covered := map[string]bool{}
 	for i, t := range tasks {
-		own := map[string]bool{}
+		if reason := checkTaskCovers(i, t.Covers, known); reason != "" {
+			return reason
+		}
 		for _, id := range t.Covers {
-			if !known[id] {
-				return fmt.Sprintf("tasks[%d].covers has an unknown criterion", i)
-			}
-			if own[id] {
-				return fmt.Sprintf("tasks[%d].covers has a duplicate criterion", i)
-			}
-			own[id], covered[id] = true, true
+			covered[id] = true
 		}
 	}
 	skipped := map[string]bool{}
@@ -58,7 +79,7 @@ func checkPlanCoverage(tasks []j2Task, deferred []j2RawDeferred, criteria *planA
 	}
 	missing := 0
 	for _, c := range items {
-		if !covered[c.ID] && !skipped[c.ID] {
+		if !covered[c.ID] && !done[c.ID] && !skipped[c.ID] {
 			missing++
 		}
 	}
@@ -66,6 +87,28 @@ func checkPlanCoverage(tasks []j2Task, deferred []j2RawDeferred, criteria *planA
 		return fmt.Sprintf("criteria not covered: %d of %d", missing, len(items))
 	}
 	return ""
+}
+
+// coveredCriteriaHeading は、委譲へ渡すタスクの文面で、タスクが受け持つ受入基準を出す節の名前。
+const coveredCriteriaHeading = "受け持つ受入基準"
+
+// formatCoveredCriteria は、受け持ち covers の基準を、計画に書き足した一覧 list の順に 1 基準 1 行（文の全文と、括弧に入れた識別）にする。
+// 一覧に無い識別は出さない。出す基準が無ければ（covers が空・一覧を持たない計画）空。
+func formatCoveredCriteria(list *planAcceptanceCriteria, covers []string) string {
+	if list == nil {
+		return ""
+	}
+	own := make(map[string]bool, len(covers))
+	for _, id := range covers {
+		own[id] = true
+	}
+	var b strings.Builder
+	for _, c := range list.Items {
+		if own[c.ID] {
+			fmt.Fprintf(&b, "- %s（%s）\n", c.Text, c.ID)
+		}
+	}
+	return b.String()
 }
 
 // addAcceptanceCriteria は検査済みの出力の JSON（空白を除いた spec のオブジェクト）の根の末尾へ、検査に使った一覧
