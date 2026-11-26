@@ -95,6 +95,8 @@ type j2RawTask struct {
 	FlowReason *string `json:"flow_reason"`
 	// Covers はこのタスクが受け持つ受入基準の識別（無い・null は空）。
 	Covers []string `json:"covers,omitempty"`
+	// LandsSpec はこのタスクが仕様の下書きをリポジトリへ入れるか（無い・null は偽）。
+	LandsSpec *bool `json:"lands_spec,omitempty"`
 }
 
 // j2Topic は検査済みの論点 1 つ。
@@ -126,6 +128,8 @@ type j2Task struct {
 	FlowReason string
 	// Covers は受け持つ受入基準の識別（出力の値）。一覧との突き合わせは checkPlanCoverage が行う。
 	Covers []string
+	// LandsSpec は仕様の下書きをリポジトリへ入れるタスクか（出力の値。無い・null は偽）。数と順は checkPlanSpecLanding が検査する。
+	LandsSpec bool
 }
 
 // j2ValidatedOutput は core の閉集合・必須の組・宣言との突き合わせを通った J2 の
@@ -176,6 +180,8 @@ type j2ValidatedOutput struct {
 	// DeferredCriteria は出力の受け持たない基準。
 	Criteria         *planAcceptanceCriteria
 	DeferredCriteria []j2RawDeferred
+	// DoneSpecLanding は下書きを入れた済みのタスクの題名（無ければ nil）。計画の本文に出す。
+	DoneSpecLanding *string
 }
 
 // soleTask は計画のタスクがちょうど 1 件のときそのタスクを返す。委譲（見直しの途中のつなぎ）は、
@@ -217,6 +223,7 @@ type j2ValidationContext struct {
 	// CheckCriteria が真のとき、受け持ちを Criteria と突き合わせ、一覧を spec へ書き足す（J2 の出力の確定だけが立てる）。
 	// Criteria が nil なら区画「受入基準」を渡していない計画で、識別が 1 件でもあれば不正。
 	// 偽のとき（承認済みの計画を委譲の段で読み直すとき）は、受け持ちを検査しない。
+	// 下書きをリポジトリへ入れるタスクの数と順（checkPlanSpecLanding）も、真のとき（計画の登録）だけ検査する。
 	CheckCriteria bool
 	Criteria      *planAcceptanceCriteria
 	// RecheckCriteria が真のとき（承認済みの計画を委譲の段で読み直すとき）は、data が持つ一覧（登録のときに書き足した
@@ -224,6 +231,8 @@ type j2ValidationContext struct {
 	RecheckCriteria bool
 	// DoneCovers は済みのタスクが受け持つ識別（受け持ちの検査で漏れに数えない）。
 	DoneCovers map[string]bool
+	// DoneSpecLanding は下書きを入れた済みのタスク（計画の版と、統合先を使うかを問わない）の題名。無ければ nil。
+	DoneSpecLanding *string
 }
 
 // j2OutputSchema は J2 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -306,6 +315,7 @@ func j2OutputSchema() []byte {
 				"budget_impl_usd":   nullableNumber,
 				"budget_review_usd": nullableNumber,
 				"expand_after":      map[string]any{"type": []string{"boolean", "null"}},
+				"lands_spec":        map[string]any{"type": []string{"boolean", "null"}},
 			},
 			"required":             []string{"key", "title", "body", "done_criteria", "non_goals", "depends_on", "repo", "operation"},
 			"additionalProperties": false,
@@ -665,6 +675,9 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 		if reason := checkPlanCoverage(tasks, raw.DeferredCriteria, vc.Criteria, vc.DoneCovers); reason != "" {
 			return nil, reason
 		}
+		if reason := checkPlanSpecLanding(tasks, vc.Criteria, vc.DoneSpecLanding != nil); reason != "" {
+			return nil, reason
+		}
 	}
 	if vc.RecheckCriteria {
 		list, err := loadPlanAcceptanceCriteria(string(data))
@@ -709,6 +722,7 @@ func validateJ2OutputReason(data []byte, vc j2ValidationContext) (*j2ValidatedOu
 	}
 	if vc.CheckCriteria {
 		v.Criteria, v.DeferredCriteria = vc.Criteria, raw.DeferredCriteria
+		v.DoneSpecLanding = vc.DoneSpecLanding
 		if vc.Criteria != nil {
 			v.Spec = addAcceptanceCriteria(v.Spec, *vc.Criteria)
 		}
@@ -850,7 +864,8 @@ func validateJ2TaskFields(t j2RawTask, vc j2ValidationContext, requireBudgets bo
 		BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD,
 		ExpandAfter: t.ExpandAfter != nil && *t.ExpandAfter,
 		Flow:        flow, FlowReason: flowReason,
-		Covers: t.Covers,
+		Covers:    t.Covers,
+		LandsSpec: t.LandsSpec != nil && *t.LandsSpec,
 	}, ""
 }
 
@@ -1074,6 +1089,9 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 	b.WriteString("\n## タスク\n\n")
 	for i, t := range v.Tasks {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(t.Title))
+		if t.LandsSpec {
+			b.WriteString("   - " + specLandingTaskLine + "\n")
+		}
 		b.WriteString("   - 対象リポジトリ: " + t.Repo + "\n")
 		b.WriteString("   - 操作: " + t.Operation + "\n")
 		if t.Flow != "" {
@@ -1107,7 +1125,7 @@ func formatJ2PlanBody(v *j2ValidatedOutput) string {
 			b.WriteString("- " + oneLine(k) + "\n")
 		}
 	}
-	writePlanCoverageSection(&b, v.Criteria, v.DeferredCriteria)
+	writePlanCoverageSection(&b, v.Criteria, v.DeferredCriteria, specLandingTitle(v.Tasks, v.DoneSpecLanding))
 	if s := strings.TrimSpace(v.Summary); s != "" {
 		b.WriteString("\n## 方針\n\n" + s + "\n")
 	}
@@ -1222,6 +1240,8 @@ type j2Prepared struct {
 	// （取り込み元の対応があり、最新のコメントをすべて入力へ含めた場合）。値は
 	// J2 の直前の取得で得たコメント数と更新日時（ストアの観測値ではない）。
 	Read *readValues
+	// DoneSpecLanding は下書きを入れた済みのタスクの題名（無ければ nil）。
+	DoneSpecLanding *string
 }
 
 // parseExternalKey は "<owner>/<name>#<番号>" を repo と番号へ分ける。
@@ -1257,6 +1277,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	var planAnswersText string
 	var doneTasks []Task
 	var keptBudgets []taskBudget
+	var doneSpecLanding *string
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		all, err := listTasks(ctx, tx, cid)
 		if err != nil {
@@ -1266,6 +1287,8 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		if err != nil {
 			return err
 		}
+		// 下書きを入れた済みのタスクは、統合先を使うかに関わらず数える。
+		doneSpecLanding = doneSpecLandingTitle(all)
 		for _, b := range bs {
 			if b.Status == TaskStatusDone {
 				keptBudgets = append(keptBudgets, b)
@@ -1337,10 +1360,13 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		if err != nil {
 			return nil, &NotStarted{ChallengeID: ch.ID, Reason: NotStartedSpecUnreadable, Detail: err.Error()}, nil
 		}
-		criteria = &planAcceptanceCriteria{Path: *ch.SpecPath, Items: items}
+		criteria = &planAcceptanceCriteria{Path: *ch.SpecPath, Items: items, Draft: ch.SpecIsDraft()}
+		if criteria.Draft {
+			criteria.BasePath = ch.SpecBasePath
+		}
 	}
 
-	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0, KeptBudgets: keptBudgets, Criteria: criteria, DoneCovers: doneTaskCovers(doneTasks)}
+	prepared := &j2Prepared{HasSource: sb != nil, HasDoneTasks: len(doneTasks) > 0, KeptBudgets: keptBudgets, Criteria: criteria, DoneCovers: doneTaskCovers(doneTasks), DoneSpecLanding: doneSpecLanding}
 	seenDoneRepo := map[string]bool{}
 	for _, t := range doneTasks {
 		if !seenDoneRepo[t.Repo] {
@@ -1407,7 +1433,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 	}
 	if criteria != nil {
 		// 済みの印は、区画「済みのタスク」に出るタスクの受け持ちに付ける。
-		sections = append(sections, JudgmentDataSection{Label: AcceptanceCriteriaSectionLabel, Content: formatAcceptanceCriteriaSection(*criteria, doneTasks)})
+		sections = append(sections, JudgmentDataSection{Label: AcceptanceCriteriaSectionLabel, Content: formatPlanAcceptanceCriteriaSection(*criteria, doneTasks, doneSpecLanding)})
 	}
 	if stagesText := formatJ2StagesSection(ch); stagesText != "" {
 		sections = append(sections, JudgmentDataSection{Label: "いまの予想・やらないこと・図", Content: stagesText})
@@ -2076,7 +2102,7 @@ func (s *Store) runJ2Once(ctx context.Context, in J2AutoInput, jc *JudgmentCycle
 	item := J2AutoItem{ChallengeID: res.ChallengeID, RunID: res.RunID, Result: res.Result}
 	if res.Result == RunResultSucceeded {
 		fin, err := s.finalizeJ2Output(ctx, res.RunID, res.ChallengeID, res.StructuredOutput, j2Finalize{
-			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, CheckLimit: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos, KeptBudgets: prepared.KeptBudgets, CheckCriteria: true, Criteria: prepared.Criteria, DoneCovers: prepared.DoneCovers},
+			Validation: j2ValidationContext{Agent: in.AgentDecl, Conn: in.ConnDecl, HasSource: prepared.HasSource, CheckSource: true, CheckLimit: true, OpenChildKeys: prepared.OpenChildKeys, HasDoneTasks: prepared.HasDoneTasks, DoneRepos: prepared.DoneRepos, KeptBudgets: prepared.KeptBudgets, CheckCriteria: true, Criteria: prepared.Criteria, DoneCovers: prepared.DoneCovers, DoneSpecLanding: prepared.DoneSpecLanding},
 			Read:       prepared.Read,
 		})
 		if err != nil {

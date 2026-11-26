@@ -35,7 +35,7 @@ func (f *igLandFixture) launchTaskIDs(t *testing.T) []string {
 	cid, _ := parseChallengeID(f.cid)
 	var sel *launchSelection
 	if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
-		sel, err = selectLaunchTasks(context.Background(), tx, f.conn, f.cid, cid)
+		sel, err = selectLaunchTasks(context.Background(), tx, "", f.conn, f.cid, cid)
 		return err
 	}); err != nil {
 		t.Fatal(err)

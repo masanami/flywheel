@@ -129,6 +129,8 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	spec = append(spec, "integration_unavailable", "no_tasks")
 	// 反映の段（S3a）が足した理由。直前の試行が waiting_outside の反映の操作を、試行の行を増やさず飛ばす。
 	spec = append(spec, "waiting_outside")
+	// 仕様の下書きを入れるタスクの起動の前の読み直し（docs/features/request-to-plan.md の S2a）が足した理由。
+	spec = append(spec, "spec_draft_changed")
 	sort.Strings(spec)
 
 	var impl []string
@@ -155,6 +157,7 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		// cycle の出力には現れない。委譲の段（core）のテストが観測する。
 		"run_budget":              "TestBudget_BelowOneUSDStopsAndExactlyOneLaunches (internal/core/budget_test.go)",
 		"dependency":              "TestDependency_IDOmittedRun_UnmetDependencyNotStartedWithSortedDetail (internal/core/delegate_dependency_test.go)",
+		"spec_draft_changed":      "TestSpecDraftDelegate_DraftChangedSinceThePlan (internal/core/spec_draft_delegate_test.go)",
 		"integration_unavailable": "TestDelegateTask_AC117_TwoTasksReasonIsIntegrationUnavailable (internal/core/delegate_task_test.go)",
 		"no_tasks":                "TestDelegateTask_AC121_NoTasksForAnOldShapePlan (internal/core/delegate_task_test.go)",
 		// チェック待ちは作業中の実行と同じ扱い（止める指示まで回りを繰り返す）なので、cycle --json では終わりまで観測できない。core のテストが観測する。

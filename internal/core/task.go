@@ -66,6 +66,8 @@ type TaskInput struct {
 	FlowReason  string
 	// Covers は受け持つ受入基準の識別（task.covers。空は NULL）。
 	Covers []string
+	// LandsSpec は仕様の下書きをリポジトリへ入れるタスクか（task.lands_spec）。
+	LandsSpec bool
 }
 
 // Task はタスク 1 件（前提のタスクの ID つき）。ID・DependsOn の要素は表示形（"T-<n>"）、ChallengeID は "C-<n>"。
@@ -91,7 +93,9 @@ type Task struct {
 	PlannedFlow string
 	FlowReason  string
 	// Covers は受け持つ受入基準の識別（task.covers）。nil は NULL。
-	Covers    []string
+	Covers []string
+	// LandsSpec は、仕様の下書きをリポジトリへ入れるタスクか（task.lands_spec）。
+	LandsSpec bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	// BudgetImplUSD・BudgetReviewUSD・SpentUSD はタスクの実装の枠・レビュー対応の枠（増額を含む実効値）と、そのタスクの実行の費用の合計（USD）。
@@ -206,12 +210,12 @@ func createTasksWith(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cha
 		}
 		plannedFlow, flowReason := plannedFlowColumns(t.PlannedFlow, t.FlowReason)
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id, planned_flow, flow_reason, covers)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO task (challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, created_at, updated_at, budget_impl_micros, budget_review_micros, expand_after, addition_id, planned_flow, flow_reason, covers, lands_spec)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			challengeID, planVersion, nullableTextColumn(t.Key), t.Title, t.Body, t.DoneCriteria, nonGoals, t.Repo, t.Operation,
 			string(TaskStatusPending), nullableTextColumn(t.SourceKey), nowStr, nowStr,
 			int64PtrColumn(t.BudgetImplMicros), int64PtrColumn(t.BudgetReviewMicros), t.ExpandAfter, int64PtrColumn(opts.AdditionID),
-			plannedFlow, flowReason, covers)
+			plannedFlow, flowReason, covers, t.LandsSpec)
 		if store.IsUniqueViolation(err) {
 			return nil, errDuplicateTaskKey
 		}
@@ -248,7 +252,7 @@ func createTasksWith(ctx context.Context, tx *sql.Tx, rec *activityRecorder, cha
 	return out, nil
 }
 
-const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, expand_after, planned_flow, flow_reason, created_at, updated_at, covers FROM task`
+const taskSelect = `SELECT id, challenge_id, plan_version, key, title, body, done_criteria, non_goals, repo, operation, status, source_key, expand_after, planned_flow, flow_reason, created_at, updated_at, covers, lands_spec FROM task`
 
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var (
@@ -257,16 +261,17 @@ func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 		plannedFlow, flowReason      sql.NullString
 		covers                       sql.NullString
 		status, createdAt, updatedAt string
-		expandAfter                  int64
+		expandAfter, landsSpec       int64
 		t                            Task
 	)
 	if err := row.Scan(&id, &challengeID, &planVersion, &key, &t.Title, &t.Body, &t.DoneCriteria, &nonGoals, &t.Repo, &t.Operation,
-		&status, &sourceKey, &expandAfter, &plannedFlow, &flowReason, &createdAt, &updatedAt, &covers); err != nil {
+		&status, &sourceKey, &expandAfter, &plannedFlow, &flowReason, &createdAt, &updatedAt, &covers, &landsSpec); err != nil {
 		return nil, err
 	}
 	t.ID, t.ChallengeID, t.PlanVersion, t.Key, t.Status = formatTaskID(id), formatChallengeID(challengeID), planVersion, key.String, TaskStatus(status)
 	t.SourceKey = sourceKey.String
 	t.ExpandAfter = expandAfter != 0
+	t.LandsSpec = landsSpec != 0
 	t.PlannedFlow, t.FlowReason = plannedFlow.String, flowReason.String
 	if nonGoals.Valid {
 		if err := json.Unmarshal([]byte(nonGoals.String), &t.NonGoals); err != nil {

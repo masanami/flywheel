@@ -570,6 +570,7 @@ const withChildren = () =>
       {
         added: null,
         covers: [],
+        lands_spec: false,
         flow_reason: null,
         planned_flow: null,
         body: "",
@@ -1221,6 +1222,7 @@ it("AC-147・AC-148 #1182: スーパーバイザーが関わった保留の枠�
 const fullTask = (id: string, p: Partial<Task> = {}): Task => ({
   added: null,
   covers: [],
+  lands_spec: false,
   flow_reason: null,
   planned_flow: null,
   artifacts: [],

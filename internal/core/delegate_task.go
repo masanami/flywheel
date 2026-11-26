@@ -64,6 +64,9 @@ type launchSelection struct {
 	Tasks []Task
 	// NotStarted は起動しなかった理由（課題の単位の理由と、タスクの単位の理由。ChallengeID は課題の ID）。
 	NotStarted []NotStarted
+	// SpecDrafts は、起動するタスクのうち下書きをリポジトリへ入れるものの、選ぶときに読み直した下書きの全文
+	// （キーはタスクの ID。委譲へ渡す全文はこれを使う）。
+	SpecDrafts map[string]string
 	// Busy は、終わっていない実行を持つタスクがあること（起動できるタスクが無くても、理由を出さずに待つ根拠）。
 	Busy bool
 	// Blocked が空でなければ、進めようが無いので保留にする（tasks_blocked）。値は保留の問い。
@@ -119,9 +122,12 @@ func blockedPendingTasks(all []Task, byID map[string]Task) map[string]bool {
 //     委譲先が form: cli のものを起動する。form が cli でない委譲先のタスクは integration_unavailable
 //   - 起動するタスクが無く、進めようが無い（blockedByCancelledTask）なら、保留にする
 //
+// 下書きをリポジトリへ入れるタスクは、ワークスペース workspace の下書きを読み直し、計画の時点と食い違えば選ばない
+// （spec_draft_changed）。
+//
 // 計画の検査（validateJ2Output）はここで掛けない（呼び出し側が、起動できるときだけ後で行う）。
-func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration, challengeID string, cid int64) (*launchSelection, error) {
-	sel, err := selectLaunchTasksOfChallenge(ctx, tx, conn, challengeID, cid)
+func selectLaunchTasks(ctx context.Context, tx *sql.Tx, workspace string, conn *ConnectorsDeclaration, challengeID string, cid int64) (*launchSelection, error) {
+	sel, err := selectLaunchTasksOfChallenge(ctx, tx, workspace, conn, challengeID, cid)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +140,7 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 	}
 	// 人間対応待ちの課題（タスクを止める保留だけが開いているものだけが、ここへ来る）は、進めてよいタスクだけを選ぶ（述語 taskMayProceed）。
 	// 進めようが無い課題の保留（tasks_blocked）は、課題の状態で決めるので、着手中へ戻ってから行う（Blocked を返さない）。
-	out := &launchSelection{Busy: sel.Busy, NotStarted: sel.NotStarted}
+	out := &launchSelection{Busy: sel.Busy, NotStarted: sel.NotStarted, SpecDrafts: sel.SpecDrafts}
 	held := 0
 	for _, t := range sel.Tasks {
 		ok, err := taskMayProceed(ctx, tx, cid, taskIntID(&t))
@@ -156,7 +162,7 @@ func selectLaunchTasks(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclarat
 }
 
 // selectLaunchTasksOfChallenge は selectLaunchTasks の、課題の状態を見ずに、起動できるタスクを選ぶ部分。
-func selectLaunchTasksOfChallenge(ctx context.Context, tx *sql.Tx, conn *ConnectorsDeclaration, challengeID string, cid int64) (*launchSelection, error) {
+func selectLaunchTasksOfChallenge(ctx context.Context, tx *sql.Tx, workspace string, conn *ConnectorsDeclaration, challengeID string, cid int64) (*launchSelection, error) {
 	all, err := listTasks(ctx, tx, cid)
 	if err != nil {
 		return nil, err
@@ -169,9 +175,25 @@ func selectLaunchTasksOfChallenge(ctx context.Context, tx *sql.Tx, conn *Connect
 	if err != nil {
 		return nil, err
 	}
-	sel := &launchSelection{}
+	sel := &launchSelection{SpecDrafts: map[string]string{}}
 	ns := func(r NotStartedReason, detail string) {
 		sel.NotStarted = append(sel.NotStarted, NotStarted{ChallengeID: challengeID, Reason: r, Detail: detail})
+	}
+	draft, err := draftLandingList(ctx, tx, cid)
+	if err != nil {
+		return nil, err
+	}
+	// choose はタスク t を起動するタスクに足す。下書きの読み直しは、委譲の形に依らず、ここだけで行う。
+	choose := func(t Task) {
+		if landsSpecDraft(draft, t) {
+			text, detail := rereadSpecDraft(workspace, *draft)
+			if detail != "" {
+				sel.NotStarted = append(sel.NotStarted, specDraftNotStarted(challengeID, t.ID, detail))
+				return
+			}
+			sel.SpecDrafts[t.ID] = text
+		}
+		sel.Tasks = append(sel.Tasks, t)
 	}
 	if integ == nil || !*integ {
 		var cands []Task
@@ -205,7 +227,7 @@ func selectLaunchTasksOfChallenge(ctx context.Context, tx *sql.Tx, conn *Connect
 			} else if n != nil {
 				sel.NotStarted = append(sel.NotStarted, *n)
 			} else {
-				sel.Tasks = cands
+				choose(cands[0])
 			}
 		}
 		return sel, nil
@@ -302,7 +324,7 @@ func selectLaunchTasksOfChallenge(ctx context.Context, tx *sql.Tx, conn *Connect
 				continue
 			}
 		}
-		sel.Tasks = append(sel.Tasks, t)
+		choose(t)
 	}
 	if len(notCLI) > 0 {
 		ns(NotStartedIntegrationUnavailable, "統合先を使う課題のタスクは、委譲の形が契約の形（form: cli）でない委譲先へは起動しない: "+strings.Join(notCLI, "・"))
@@ -503,10 +525,14 @@ func formatTaskSection(t Task) string {
 
 // formatBriefTaskSection は J3 の入力の区画「タスク」の本文。formatTaskSection（完了の検証と共有する）の後ろに、
 // タスクが受け持つ受入基準の節を足す（受け持つ基準が無ければ足さない）。list は承認した計画に書き足した一覧。
-func formatBriefTaskSection(t Task, list *planAcceptanceCriteria) string {
+// doc は仕様の文書の節（Heading が空なら足さない）。
+func formatBriefTaskSection(t Task, list *planAcceptanceCriteria, doc specTaskSection) string {
 	s := formatTaskSection(t)
 	if lines := formatCoveredCriteria(list, t.Covers); lines != "" {
 		s += "\n\n" + coveredCriteriaHeading + ":\n" + strings.TrimSuffix(lines, "\n")
+	}
+	if doc.Heading != "" {
+		s += "\n\n" + doc.Heading + ":\n" + doc.Body
 	}
 	return s
 }
@@ -519,6 +545,8 @@ type taskDocPlan struct {
 	NonGoals []string
 	// Criteria は計画に書き足した受入基準の一覧（一覧を持たない計画は nil）。タスクが受け持つ基準の節に使う。
 	Criteria *planAcceptanceCriteria
+	// SpecSection は、下書きを持つ計画の、このタスクの仕様の文書の節（Heading が空なら節は無い）。
+	SpecSection specTaskSection
 }
 
 // taskDocTopic は論点 1 つ（題名・どう決めたか・問いと記録した答え）。
@@ -538,7 +566,7 @@ type taskDocQuestion struct {
 
 // formatTaskDocument は起動するタスクの文面（UTF-8 の Markdown）を組み立てる。LLM も判断の呼び出しの口も使わない。
 // 上から、背景（承認済みの計画の、方針・論点ごとの問いと答え・完了したら見えるもの・やらないこと）、このタスク
-// （題名・何をするか・完了条件・受け持つ受入基準〔あるときだけ〕・やらないこと・対応する取り込み元〔タスクが子に対応するときだけ。取り込みのときに記録した
+// （題名・何をするか・完了条件・受け持つ受入基準〔あるときだけ〕・仕様の文書の節〔下書きを持つ計画だけ〕・やらないこと・対応する取り込み元〔タスクが子に対応するときだけ。取り込みのときに記録した
 // 子の題名・URL・本文。上流は読み直さない〕）、ほかのタスク（題名の一覧と、範囲外の明記）の順。ほかのタスクの
 // 「何をするか」は入れない。others は呼び出し側が取りやめを除いて渡す。
 func formatTaskDocument(plan taskDocPlan, task Task, source *SourceChild, others []Task) string {
@@ -575,6 +603,9 @@ func formatTaskDocument(plan taskDocPlan, task Task, source *SourceChild, others
 	fmt.Fprintf(&b, "題名: %s\n\n## 何をするか\n\n%s\n\n## 完了条件\n\n%s\n\n", task.Title, task.Body, task.DoneCriteria)
 	if lines := formatCoveredCriteria(plan.Criteria, task.Covers); lines != "" {
 		fmt.Fprintf(&b, "## %s\n\n%s\n", coveredCriteriaHeading, lines)
+	}
+	if s := plan.SpecSection; s.Heading != "" {
+		fmt.Fprintf(&b, "## %s\n\n%s\n\n", s.Heading, s.Body)
 	}
 	fmt.Fprintf(&b, "## やらないこと\n\n%s\n", bulletList(task.NonGoals))
 	if source != nil {
@@ -654,14 +685,15 @@ func loadTaskDocument(ctx context.Context, tx *sql.Tx, cid int64, plan approvedP
 		}
 		doc.Topics = append(doc.Topics, topic)
 	}
+	all, err := listTasks(ctx, tx, cid)
+	if err != nil {
+		return "", err
+	}
+	doc.SpecSection = specTaskSectionFor(criteria, task, all)
 	var others []Task
 	if latest, ok, err := latestPlanVersion(ctx, tx, cid); err != nil {
 		return "", err
 	} else if ok {
-		all, err := listTasks(ctx, tx, cid)
-		if err != nil {
-			return "", err
-		}
 		for _, t := range all {
 			if t.PlanVersion == latest && t.ID != task.ID && t.Status != TaskStatusCancelled {
 				others = append(others, t)

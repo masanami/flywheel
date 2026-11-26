@@ -518,6 +518,13 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
   "task_addition:create": "タスクを足す依頼を作った",
   "task_addition:add_tasks": "計画の後にタスクを足した",
   "task_addition:state": "タスクを足す依頼の状態が変わった",
+  spec_draft_cleanup_failed: "仕様の下書きを消せなかった",
+};
+
+// 委譲を起動しない（着手しなかった）理由（not_started[].reason）の文言。一部だけの表で、持つのは仕様の下書きの理由だけ
+// （ほかの理由の語は無く、この表を表示する画面もまだ無い）。画面で理由を出すときは、全部の値の語をそろえる。
+export const NOT_STARTED_REASON_LABELS: Record<string, string> = {
+  spec_draft_changed: "仕様の下書きが計画の後に変わった",
 };
 
 // 足す依頼の状態（additions[].state）。開いているのは pending・awaiting_owner。知らない値は値のまま出す。

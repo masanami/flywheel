@@ -13,14 +13,16 @@ const usageText = `flywheel - flywheel の core を操作する CLI
 
 コマンド:
   init
-  create --title <t> [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>] [--spec <パス>]
+  create --title <t> [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>] [--spec <パス>] [--spec-base <パス>]
             （--spec＝仕様の文書の場所。ワークスペースから見た相対のパス。ファイルはまだ無くてもよい）
+            （--spec-base＝仕様の下書き〔.flywheel/specs/ の下〕が置き換える元の文書の場所。リポジトリの中の相対のパス）
   show <ID> [--plan]   （--plan＝最新の計画の方針・問いと推奨・タスクのツリー・予算の見込み・統合先を使うかを出す）
   list [--status <状態>]
   edit <ID> [--title <t>] [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>]
             [--headline <h>] [--context <c>] [--expected <json>] [--actual <json>]
             [--non-goals <json>] [--figure <mermaid>]   （上の 6 つは空文字を渡すとその欄を NULL にする）
             [--spec <パス>]   （仕様の文書の場所。空文字を渡すと消す）
+            [--spec-base <パス>]   （置き換える元の文書の場所。空文字を渡すと消す）
   classify (<ID> --priority <P0|P1|P2> | --auto [<C-ID>])
   plan (<ID> (--file <path> | --stdin) | --auto [<C-ID>])
   submit <ID>

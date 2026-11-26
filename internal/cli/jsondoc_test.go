@@ -191,6 +191,11 @@ func addRequestToPlanShape(t *testing.T, doc *documentedJSON) {
 		t.Fatal("documented shape of show_challenge not found")
 	}
 	doc.entity["show_challenge"]["spec_path"] = true
+	if !strings.Contains(string(data), "課題の詳細に足す値: `spec_is_draft`（真偽）・`spec_base_path`（文字列か `null`）。") {
+		t.Fatal("request-to-plan spec does not document spec_is_draft and spec_base_path")
+	}
+	doc.entity["show_challenge"]["spec_is_draft"] = true
+	doc.entity["show_challenge"]["spec_base_path"] = true
 }
 
 // addChatSessionShape は対話の欄の作り替え（chat-session.md の画面・API設計）が `show --json` の challenge と
