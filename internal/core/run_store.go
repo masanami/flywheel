@@ -176,11 +176,13 @@ const (
 	budgetBucketImpl     budgetBucket = "impl"
 	budgetBucketReview   budgetBucket = "review"
 	budgetBucketPredict  budgetBucket = "predict"
+	// budgetBucketSpec は下書きづくりの実行の枠。費用は課題の予算に数えず、仕様づくりの費用に数える。
+	budgetBucketSpec budgetBucket = "spec"
 )
 
 func (b budgetBucket) valid() bool {
 	switch b {
-	case budgetBucketJudgment, budgetBucketImpl, budgetBucketReview, budgetBucketPredict:
+	case budgetBucketJudgment, budgetBucketImpl, budgetBucketReview, budgetBucketPredict, budgetBucketSpec:
 		return true
 	}
 	return false

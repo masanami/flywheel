@@ -64,6 +64,12 @@ func loadChallengeSpec(ctx context.Context, tx *sql.Tx, challengeID int64) (floa
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd), 0) FROM chat_message WHERE charged_challenge_id = ?`, challengeID).Scan(&total); err != nil {
 		return 0, nil, err
 	}
+	var drafting int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd), 0) FROM run WHERE challenge_id = ? AND budget_bucket = ?`,
+		challengeID, string(budgetBucketSpec)).Scan(&drafting); err != nil {
+		return 0, nil, err
+	}
+	total += drafting
 	sessions := []ChallengeChatSession{}
 	err := forEachRow(ctx, tx, `SELECT s.engine_session, s.started_at,
 			COALESCE((SELECT body FROM chat_message WHERE session_id = s.id AND role = ? ORDER BY id LIMIT 1), ''),
