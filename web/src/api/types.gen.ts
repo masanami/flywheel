@@ -285,7 +285,9 @@ export interface ShowChallenge {
   integration_ref: string | null;
   priority: string | null;
   reporter: string;
+  spec_base_path: string | null;
   spec_cost_usd: number;
+  spec_is_draft: boolean;
   spec_path: string | null;
   status: string;
   status_label: string;
@@ -545,6 +547,7 @@ export interface Task {
   flow_reason: string | null;
   id: string;
   landing: string | null;
+  lands_spec: boolean;
   non_goals: string[];
   operation: string;
   plan_version: number;

@@ -336,7 +336,7 @@ func sqlValue(v any) (any, error) {
 // Import は Export が書いた JSON を、すべての表に行が無いストアへ読み込む。1 つの書き込みの
 // トランザクションで全表の行と採番の状態（sqlite_sequence）を書き、途中で失敗したら何も残さない。
 // 返す整数は読み込んだ書き出しのスキーマの版。次のいずれかなら何も書かず ErrValidation を返す:
-// 行のある表がある／スキーマの版が違う／外部キーの違反がある／書き出しが表・列の構成と合わない／
+// 行のある表がある／スキーマの版が違い upgradeExport で読み替えられない／外部キーの違反がある／書き出しが表・列の構成と合わない／
 // sequences のキーが tables に無い表の名前／値が整数でない・その表の行の最大の ID より小さい。
 //
 // 外部キーは循環している（challenge.issues_hold_id→hold、hold.challenge_id→challenge、
@@ -375,13 +375,51 @@ func (s *Store) ImportFromFile(ctx context.Context, path string) (*ImportResult,
 	return &ImportResult{Path: abs, SchemaVersion: version}, nil
 }
 
+// exportAddedColumns は、既定の値を持つ列を足すだけの版が、各表に足した列とその値（書き出しの JSON の値の形）。
+// キーはその版の番号。
+var exportAddedColumns = map[int]map[string]map[string]any{
+	43: {
+		"challenge": {"spec_base_path": nil},
+		"task":      {"lands_spec": json.Number("0")},
+	},
+}
+
+// upgradeExport は書き出し p を、版 storeVersion のストアへ読み込める列の構成にする。版が同じなら何もしない。
+// 違う版を読み込めるのは、書き出しの版からストアの版までのすべてが exportAddedColumns にあるときだけで、
+// 足した列を既定の値で埋める。それ以外の版の違いと、足すはずの列を既に持つ行は ErrValidation。
+// p.version（読み込んだ書き出しの版）は変えない。
+func upgradeExport(p *parsedExport, storeVersion int) error {
+	mismatch := importInvalid("schema version %d differs from the store's %d", p.version, storeVersion)
+	if p.version > storeVersion {
+		return mismatch
+	}
+	for v := storeVersion; v > p.version; v-- {
+		if _, ok := exportAddedColumns[v]; !ok {
+			return mismatch
+		}
+	}
+	for v := p.version + 1; v <= storeVersion; v++ {
+		for table, added := range exportAddedColumns[v] {
+			for i, row := range p.tables[table] {
+				for column, value := range added {
+					if _, ok := row[column]; ok || row == nil {
+						return importInvalid("tables[%q][%d] of schema version %d must be an object without the column %q", table, i, p.version, column)
+					}
+					row[column] = value
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func importTx(ctx context.Context, tx *sql.Tx, p *parsedExport) error {
 	var storeVersion int
 	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&storeVersion); err != nil {
 		return err
 	}
-	if p.version != storeVersion {
-		return importInvalid("schema version %d differs from the store's %d", p.version, storeVersion)
+	if err := upgradeExport(p, storeVersion); err != nil {
+		return err
 	}
 	names, err := userTables(tx)
 	if err != nil {

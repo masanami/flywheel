@@ -27,6 +27,8 @@ type Task struct {
 	FlowReason   *string           `json:"flow_reason"`
 	ID           string            `json:"id"`
 	Landing      *string           `json:"landing"`
+	// LandsSpec は仕様の下書きをリポジトリへ入れるタスクか。
+	LandsSpec    bool              `json:"lands_spec"`
 	NonGoals     []string          `json:"non_goals"`
 	Operation    string            `json:"operation"`
 	PlanVersion  int64             `json:"plan_version"`
@@ -147,7 +149,7 @@ func FromTasks(ts []core.Task) []Task {
 			Facts: fromTaskFacts(t.Detail.Facts), Landing: fromTaskLanding(t.Detail.Landing), Verification: fromTaskVerification(t.Detail.Verification),
 			SourceKey: strOrNil(t.SourceKey), PlannedFlow: strOrNil(t.PlannedFlow), FlowReason: strOrNil(t.FlowReason),
 			Body: t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,
-			Covers: append([]string{}, t.Covers...), NonGoals: append([]string{}, t.NonGoals...), Operation: t.Operation, PlanVersion: t.PlanVersion,
+			Covers: append([]string{}, t.Covers...), LandsSpec: t.LandsSpec, NonGoals: append([]string{}, t.NonGoals...), Operation: t.Operation, PlanVersion: t.PlanVersion,
 			Repo: t.Repo, Status: string(t.Status), Title: t.Title,
 			BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD, SpentUSD: t.SpentUSD,
 		})
