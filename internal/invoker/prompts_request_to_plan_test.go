@@ -138,7 +138,7 @@ func TestInstructions_J2DoesNotReadTheLandingFromThePreviousPlanBody(t *testing.
 	}
 }
 
-// AC-118: j2.md の上限は、本文のバイト数に 300 を足した値。
+// AC-118・AC-407: j2.md の上限は、本文のバイト数に 300 を足した値。
 func TestJ2Prompt_LimitIsTheBodySizePlusTheHeadroom(t *testing.T) {
 	size := len(j2Instructions(t))
 	if limit := judgmentPromptLimit["j2.md"]; limit != size+j2HeadroomBytes {
@@ -146,10 +146,10 @@ func TestJ2Prompt_LimitIsTheBodySizePlusTheHeadroom(t *testing.T) {
 	}
 }
 
-// AC-119: j2.md の上限は 20 KiB を超えない。
+// AC-408（docs/features/request-to-plan-s2b.md。S2a の天井 20 KiB を置き換える）: j2.md の上限は 21 KiB を超えない。
 func TestJ2Prompt_LimitIsWithinTheCap(t *testing.T) {
-	if limit := judgmentPromptLimit["j2.md"]; limit > 20480 {
-		t.Errorf("j2.md limit %d bytes, want <= 20480", limit)
+	if limit := judgmentPromptLimit["j2.md"]; limit > 21504 {
+		t.Errorf("j2.md limit %d bytes, want <= 21504", limit)
 	}
 }
 
