@@ -341,7 +341,7 @@ func TestShowAndActionableChallengeCarryEveryChallengeKey(t *testing.T) {
 		got   map[string]bool
 		added []string
 	}{
-		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"chat_sessions", "spec_cost_usd", "dependencies", "dependents", "followup_of", "improvement", "integration_ref", "uses_integration"}},
+		"ShowChallenge":       {tags(view.ShowChallenge{}), []string{"chat_sessions", "spec_cost_usd", "spec_path", "dependencies", "dependents", "followup_of", "improvement", "integration_ref", "uses_integration"}},
 		"ActionableChallenge": {tags(view.ActionableChallenge{}), []string{"unmet_dependencies"}},
 	} {
 		want := map[string]bool{}

@@ -569,6 +569,7 @@ const withChildren = () =>
     tasks: [
       {
         added: null,
+        covers: [],
         flow_reason: null,
         planned_flow: null,
         body: "",
@@ -1219,6 +1220,7 @@ it("AC-147・AC-148 #1182: スーパーバイザーが関わった保留の枠�
 // 足されたタスクの印・スーパーバイザーの記録・足す依頼（区切り S4d-2 の T8）。
 const fullTask = (id: string, p: Partial<Task> = {}): Task => ({
   added: null,
+  covers: [],
   flow_reason: null,
   planned_flow: null,
   artifacts: [],

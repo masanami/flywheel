@@ -13,28 +13,30 @@ import "github.com/masanami/flywheel/internal/core"
 // 値が無いときは artifacts が `[]`、delegate・landing・verification が null、facts が `{}`。
 type Task struct {
 	// Added は計画の後に足されたタスクの印。計画の承認で作ったタスクは null。
-	Added           *TaskAdded        `json:"added"`
-	Artifacts       []TaskArtifact    `json:"artifacts"`
-	Body            string            `json:"body"`
-	BudgetImplUSD   float64           `json:"budget_impl_usd"`
-	BudgetReviewUSD float64           `json:"budget_review_usd"`
-	Delegate        *TaskDelegate     `json:"delegate"`
-	DependsOn       []string          `json:"depends_on"`
-	DoneCriteria    string            `json:"done_criteria"`
-	Facts           map[string]string `json:"facts"`
-	FlowReason      *string           `json:"flow_reason"`
-	ID              string            `json:"id"`
-	Landing         *string           `json:"landing"`
-	NonGoals        []string          `json:"non_goals"`
-	Operation       string            `json:"operation"`
-	PlanVersion     int64             `json:"plan_version"`
-	PlannedFlow     *string           `json:"planned_flow"`
-	Repo            string            `json:"repo"`
-	SourceKey       *string           `json:"source_key"`
-	SpentUSD        float64           `json:"spent_usd"`
-	Status          string            `json:"status"`
-	Title           string            `json:"title"`
-	Verification    *TaskVerification `json:"verification"`
+	Added           *TaskAdded     `json:"added"`
+	Artifacts       []TaskArtifact `json:"artifacts"`
+	Body            string         `json:"body"`
+	BudgetImplUSD   float64        `json:"budget_impl_usd"`
+	BudgetReviewUSD float64        `json:"budget_review_usd"`
+	// Covers は受け持つ受入基準の識別（無ければ `[]`）。
+	Covers       []string          `json:"covers"`
+	Delegate     *TaskDelegate     `json:"delegate"`
+	DependsOn    []string          `json:"depends_on"`
+	DoneCriteria string            `json:"done_criteria"`
+	Facts        map[string]string `json:"facts"`
+	FlowReason   *string           `json:"flow_reason"`
+	ID           string            `json:"id"`
+	Landing      *string           `json:"landing"`
+	NonGoals     []string          `json:"non_goals"`
+	Operation    string            `json:"operation"`
+	PlanVersion  int64             `json:"plan_version"`
+	PlannedFlow  *string           `json:"planned_flow"`
+	Repo         string            `json:"repo"`
+	SourceKey    *string           `json:"source_key"`
+	SpentUSD     float64           `json:"spent_usd"`
+	Status       string            `json:"status"`
+	Title        string            `json:"title"`
+	Verification *TaskVerification `json:"verification"`
 }
 
 // TaskAdded は足されたタスクの印。origin は足す依頼の出どころ（`expand`・`followup`）、followup_id は出どころが followup のとき元のフォローアップの ID（それ以外は null）、origin_task_id は出どころのタスクの ID（無ければ null）、
@@ -145,7 +147,7 @@ func FromTasks(ts []core.Task) []Task {
 			Facts: fromTaskFacts(t.Detail.Facts), Landing: fromTaskLanding(t.Detail.Landing), Verification: fromTaskVerification(t.Detail.Verification),
 			SourceKey: strOrNil(t.SourceKey), PlannedFlow: strOrNil(t.PlannedFlow), FlowReason: strOrNil(t.FlowReason),
 			Body: t.Body, DependsOn: append([]string{}, t.DependsOn...), DoneCriteria: t.DoneCriteria, ID: t.ID,
-			NonGoals: append([]string{}, t.NonGoals...), Operation: t.Operation, PlanVersion: t.PlanVersion,
+			Covers: append([]string{}, t.Covers...), NonGoals: append([]string{}, t.NonGoals...), Operation: t.Operation, PlanVersion: t.PlanVersion,
 			Repo: t.Repo, Status: string(t.Status), Title: t.Title,
 			BudgetImplUSD: t.BudgetImplUSD, BudgetReviewUSD: t.BudgetReviewUSD, SpentUSD: t.SpentUSD,
 		})
