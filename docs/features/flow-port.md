@@ -648,7 +648,7 @@ S2 の分。S1 の分は、下の「機能全体の設計（S1・実装済み）
 
 - 定義は `internal/flow/assets/files/workflows/spec-draft.yaml`。指示文は `prompts/spec-draft-write.md`・`prompts/spec-draft-critique.md`、出力の型は `schemas/spec-draft-write.json`・`schemas/spec-draft-critique.json`（写した元の無い flywheel の資材。`SHA256SUMS` に載せる）。
 - ステップは `llm` の 2 つで、`write`（失敗の理由 `write_failed`）の後に `critique`（`critique_failed`）。どちらもセッションは新しく始め、やり直しの遷移は持たない。`critique` は、プラグインの批評役（`claude-harness:spec-critic`）を 3 つの観点で並べて呼び、修正役（`claude-harness:spec-fixer`）に直させる。問いが残っても成功で終わる。
-- 入力は `draft_file`・`brief_file`・`brief_dir`・`repo_dir`・`base_path`（任意）・`challenge_id`。`facts` は `spec_questions`（`critique` の出力の問いの配列）の 1 つ。
+- 入力は `draft_file`・`brief_file`・`brief_dir`・`repo_dir`・`base_path`（任意）・`challenge_id`。`facts` は、`spec_questions`（`critique` の出力の問いの配列）と `spec_step_summary`（ステップの要約の文字列）の 2 つ。`spec_step_summary` は 2 つのステップの要約を並べて書き（`[$steps.write.summary, $steps.critique.summary]`）、値は、出力を返して最後に終わったステップの要約になる。core が使うのは、最後のステップの結果が `failure` のときの失敗の保留の問いの文だけで、1 行にして 500 文字で切る（区切り S2b-2 で足した）。
 - 2 つのステップは、`add_dirs` に入力 `repo_dir`・`brief_dir` を持ち、`tools` は `Read`・`Grep`・`Glob`・`Write`・`Edit`・`Agent` だけ。
 - 作業ディレクトリは下書きの置き場（`.flywheel/specs/`）で、Git の作業ツリーでなくてよい。
 - `limits.budget_usd` は、core の定数 `SpecDraftDefaultBudgetUSD` と同じ値（試験で一致させる）。モデル・effort・ステップの上限額・時間切れは定義が持つ（2026-11-27 に実物の実行を測って決めた値。1 回あたり 0.90〜1.93 USD・2.5〜6.0 分だった）。
