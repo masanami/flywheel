@@ -120,8 +120,13 @@ func (s *Store) routeChildQuestions(ctx context.Context, p childRouteParams) (ch
 	}
 	req.Output = *out
 	if out.Hand == HandAnswer {
+		// 検査（checkChildAnswers）を通った出力は全部の問いに答えている。委譲先へは、値の並びで返す。
+		answers, err := allAnswered(out.Answers)
+		if err != nil {
+			return childRoute{}, fmt.Errorf("%w: %w", ErrValidation, err)
+		}
 		if p.Prepare != nil {
-			if perr := p.Prepare(out.Answers); perr != nil {
+			if perr := p.Prepare(answers); perr != nil {
 				hand := HandAnswer
 				reason := fmt.Sprintf("%s（%v）", supervisorAnswerNotReturnedHead, perr)
 				id, err := s.recordSupervisorChildFailure(ctx, req, &hand, reason)
@@ -141,7 +146,7 @@ func (s *Store) routeChildQuestions(ctx context.Context, p childRouteParams) (ch
 			// 判断の間に課題が着手中でなくなった。答えを返さず、保留も作らない（保留を作る入口が、着手中でない課題には作らない）。
 			return childRoute{}, nil
 		}
-		return childRoute{Answered: true, Answers: out.Answers}, nil
+		return childRoute{Answered: true, Answers: answers}, nil
 	}
 	id, executed, err := s.recordSupervisorChildEscalate(ctx, req)
 	if err != nil {

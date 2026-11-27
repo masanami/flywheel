@@ -14,7 +14,8 @@ import (
 // Hand は選んだ手、Findings は調べたこと（必須）、Note は手に添える文、Basis は根拠の場所、Recommendation はオーナーへ上げるときの推奨
 // （Hand が escalate のとき必須）、Options はオーナーへ上げるときに付ける選択肢（escalate のときだけ。無くてもよい）、Conditions は
 // フォローアップへ回す条件の番号（入力の「回せる条件」の番号。split_followup のとき 1 件以上）。
-// Answers は子の問いへの答え（Hand が answer のとき 1 件以上。問いの並びの順で、問いごとに 1 件）。
+// Answers は問いへの答え（Hand が answer のとき。問いと同じ件数・同じ並びで、答えない問いの要素は nil〔JSON の null〕。
+// nil でない要素は 1 件以上）。委譲先の問いは全部に答える必要があり、nil を含む出力は checkChildAnswers が不備にする。
 type SVOutput struct {
 	Hand           SupervisorHand    `json:"hand"`
 	Findings       string            `json:"findings"`
@@ -23,10 +24,10 @@ type SVOutput struct {
 	Recommendation string            `json:"recommendation"`
 	Options        []SVOption        `json:"options"`
 	Conditions     []int             `json:"conditions"`
-	Answers        []SVAnswer        `json:"answers"`
+	Answers        []*SVAnswer       `json:"answers"`
 }
 
-// SVAnswer は子の問い 1 件への答え。Answer は、選択肢がある問いでは選んだ選択肢の見出し、無い問いでは回答の文。
+// SVAnswer は問い 1 件への答え。Answer は、選択肢がある問いでは選んだ選択肢の見出し、無い問いでは回答の文。
 // Basis は根拠の場所（core が、ワークスペースの根の下の通常のファイルであることを確かめる）。
 type SVAnswer struct {
 	Answer string            `json:"answer"`
@@ -97,8 +98,9 @@ func svOutputSchema() []byte {
 			"conditions": map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 1}},
 			"answers": map[string]any{
 				"type": "array",
+				// null は「この問いには答えない」。properties・required はオブジェクトの要素にだけ効く。
 				"items": map[string]any{
-					"type": "object",
+					"type": []string{"object", "null"},
 					"properties": map[string]any{
 						"answer": map[string]any{"type": "string"},
 						"basis": map[string]any{
@@ -131,7 +133,8 @@ func SVOutputSchema() []byte { return svOutputSchema() }
 
 // ParseSVOutput はスーパーバイザーの出力の JSON を読んで検査する。allowed は入力に渡した選べる手の一覧で、hand がその外なら誤り。
 // 検査: 未知のキー・手の閉集合の外・空の findings・手ごとの必須（reverify・send_back・replan・defer は note、escalate は recommendation、
-// split_followup は conditions が 1 件以上で重ならない正の整数）・options は escalate のときだけ（選択肢の形は保留の選択肢と同じ決まり）。
+// split_followup は conditions が 1 件以上で重ならない正の整数）・options は escalate のときだけ（選択肢の形は保留の選択肢と同じ決まり）・
+// answers は answer のときだけで、null でない要素が 1 件以上あり、その答えが空でないこと（null の要素は形の誤りにしない）。
 // 誤りは ErrSVOutputInvalid（%w）。
 func ParseSVOutput(data []byte, allowed []SupervisorHand) (*SVOutput, error) {
 	var out SVOutput
@@ -179,16 +182,21 @@ func ParseSVOutput(data []byte, allowed []SupervisorHand) (*SVOutput, error) {
 			seen[n] = true
 		}
 	}
-	switch {
-	case out.Hand == HandAnswer && len(out.Answers) == 0:
-		return nil, fmt.Errorf("%w: at least one answer is required for %s", ErrSVOutputInvalid, out.Hand)
-	case out.Hand != HandAnswer && len(out.Answers) > 0:
-		return nil, fmt.Errorf("%w: answers are only for %s", ErrSVOutputInvalid, HandAnswer)
-	}
+	answered := 0
 	for i, a := range out.Answers {
+		if a == nil {
+			continue
+		}
 		if strings.TrimSpace(a.Answer) == "" {
 			return nil, fmt.Errorf("%w: answer %d is empty", ErrSVOutputInvalid, i+1)
 		}
+		answered++
+	}
+	switch {
+	case out.Hand == HandAnswer && answered == 0:
+		return nil, fmt.Errorf("%w: at least one answer is required for %s", ErrSVOutputInvalid, out.Hand)
+	case out.Hand != HandAnswer && len(out.Answers) > 0:
+		return nil, fmt.Errorf("%w: answers are only for %s", ErrSVOutputInvalid, HandAnswer)
 	}
 	if len(out.Options) > 0 {
 		if out.Hand != HandEscalate {

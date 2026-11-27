@@ -98,11 +98,15 @@ func TestChildQuestion_AC2_OnlyAnswerAndEscalate(t *testing.T) {
 			t.Errorf("hand %s allowed for child_question = %v", h, allowed)
 		}
 	}
-	// answer は、ほかの止まり方では選べない。
+	// answer を選べるのは、委譲先の問いと下書きの問いの 2 つの止まり方だけ。
+	var answering []StopKind
 	for _, k := range StopKindValues() {
-		if k != StopKindChildQuestion && supervisorHandAllowed(k, HandAnswer) {
-			t.Errorf("answer must not be offered for %s", k)
+		if supervisorHandAllowed(k, HandAnswer) {
+			answering = append(answering, k)
 		}
+	}
+	if want := []StopKind{StopKindChildQuestion, StopKindSpecQuestion}; !reflect.DeepEqual(answering, want) {
+		t.Errorf("stop kinds offering answer = %v, want %v", answering, want)
 	}
 }
 

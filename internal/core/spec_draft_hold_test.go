@@ -284,14 +284,14 @@ func TestHoldSpecDraft_RejectsMalformedInput(t *testing.T) {
 
 func TestHoldSpecDraft_ClosedSetsAreUnchanged(t *testing.T) {
 	t.Parallel()
-	if n := len(StopKindValues()); n != 10 { // AC-294
-		t.Errorf("stop kinds = %d, want 10", n)
+	if n := len(StopKindValues()); n != 11 {
+		t.Errorf("stop kinds = %d, want 11", n)
 	}
 	if n := len(HoldKindValues()); n != 2 { // AC-295
 		t.Errorf("hold kinds = %d, want 2", n)
 	}
-	sum := sha256.Sum256(SVOutputSchema()) // AC-296: この区切りの前のスキーマの要約値。
-	if got := hex.EncodeToString(sum[:]); got != "f08c1b55ea117bbc65cb9b734e68d93c6aeb78f3272419e1166b8260a826b60e" {
+	sum := sha256.Sum256(SVOutputSchema()) // answers の要素を、オブジェクトか null にしたスキーマの要約値。
+	if got := hex.EncodeToString(sum[:]); got != "2e56e78a0826bd62a1e6bb0a78a1cec4f88112d5db2a1acf48ca708463d2a0c9" {
 		t.Errorf("supervisor output schema changed: sha256 = %s", got)
 	}
 }

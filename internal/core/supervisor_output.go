@@ -39,7 +39,7 @@ type ChildQuestion struct {
 }
 
 // inspectChildQuestionOutput は子の問い（止まり方 child_question）への判断点の実行の結果を検査する。inspectSupervisorOutput の検査に加え、
-// 手が answer のとき、答えの件数が問いの数と合うこと・選択肢がある問いの答えが選択肢の見出しのどれかであること・
+// 手が answer のとき、答えの件数が問いの数と合うこと・全部の問いに答えていること（null の要素が無い）・選択肢がある問いの答えが選択肢の見出しのどれかであること・
 // 問いごとに根拠として数えられる basis が 1 件以上あること（root はワークスペースの根）を確かめる。不備は BadOutput の flaw。
 func inspectChildQuestionOutput(run *RunJudgmentResult, offered []SupervisorHand, questions []ChildQuestion, root string) (*SVOutput, *svOutputFlaw) {
 	out, flaw := inspectSupervisorOutput(run, offered)
@@ -52,12 +52,28 @@ func inspectChildQuestionOutput(run *RunJudgmentResult, offered []SupervisorHand
 	return out, nil
 }
 
+// allAnswered は、問いごとの答え answers が全部ある（null の要素が無い）ときに、その値の並びを返す。委譲先の問いは、一部の問いにだけ答えられない。
+func allAnswered(answers []*SVAnswer) ([]SVAnswer, error) {
+	out := make([]SVAnswer, len(answers))
+	for i, a := range answers {
+		if a == nil {
+			return nil, fmt.Errorf("問い %d に答えていない（委譲先の問いは、全部に答えるか全部上げる）", i+1)
+		}
+		out[i] = *a
+	}
+	return out, nil
+}
+
 // checkChildAnswers は答え answers が問い questions に対して成り立つかを確かめる。
-func checkChildAnswers(answers []SVAnswer, questions []ChildQuestion, root string) error {
+func checkChildAnswers(answers []*SVAnswer, questions []ChildQuestion, root string) error {
 	if len(answers) != len(questions) {
 		return fmt.Errorf("答えの件数 %d が問いの数 %d と合わない", len(answers), len(questions))
 	}
-	for i, a := range answers {
+	all, err := allAnswered(answers)
+	if err != nil {
+		return err
+	}
+	for i, a := range all {
 		q := questions[i]
 		if len(q.Options) > 0 {
 			found := false

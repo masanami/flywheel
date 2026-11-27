@@ -11,7 +11,7 @@ import (
 // 委譲先へ答えを返す処理は、子の問いの呼び出し元が行う。
 
 // recordSupervisorAnswer は、検査を通った答え（req.Output。手は answer）を、問い questions と合わせて、対処の記録（結果 executed）と
-// 作業ログに 1 つのトランザクションで書き、対処の記録の ID を返す。questions と答えの件数が合わなければ ErrValidation（何も書かない）。
+// 作業ログに 1 つのトランザクションで書き、対処の記録の ID を返す。questions と答えの件数が合わないか、答えていない問い（nil の要素）があれば ErrValidation（何も書かない）。
 // 記録の basis には、答えごとの根拠をまとめて入れる（問いごとの根拠は questions に入る）。保留は指さない（hold_id は NULL）。
 // 判断の間に、そのタスクを進めてよくなくなっていたら（課題の取り下げ・そのタスクの保留など。述語は childQuestionTargetMayProceed）、答えを実行せず、同じ書き込みで断りの記録（rejected・state_changed）を残して
 // executed を偽で返す（呼び出し元は、委譲先へ答えを返さない）。
@@ -20,11 +20,15 @@ func (s *Store) recordSupervisorAnswer(ctx context.Context, req supervisorHandRe
 	if o.Hand != HandAnswer || len(o.Answers) != len(questions) {
 		return 0, false, fmt.Errorf("%w: answers do not match the questions", ErrValidation)
 	}
+	answers, aerr := allAnswered(o.Answers)
+	if aerr != nil {
+		return 0, false, fmt.Errorf("%w: %w", ErrValidation, aerr)
+	}
 	recorded := make([]SupervisorQuestion, len(questions))
 	var basis []SupervisorBasis
 	for i, q := range questions {
-		recorded[i] = SupervisorQuestion{Question: q.Question, Answer: o.Answers[i].Answer, Basis: o.Answers[i].Basis}
-		basis = append(basis, o.Answers[i].Basis...)
+		recorded[i] = SupervisorQuestion{Question: q.Question, Answer: answers[i].Answer, Basis: answers[i].Basis}
+		basis = append(basis, answers[i].Basis...)
 	}
 	in := req.actionInput(HandAnswer, o.Findings, o.Note, basis, ActionExecuted, "")
 	in.HoldID = nil
