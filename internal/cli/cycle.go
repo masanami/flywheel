@@ -234,6 +234,8 @@ func cycleResultText(res *core.CycleRunResult) string {
 				linked += len(it.Linked)
 			}
 			fmt.Fprintf(&b, "  %s: J8 の起動 %d 件・起票 %d 件・紐づけ %d 件・未起動 %d 件\n", p.Phase, len(p.ImproveItems), created, linked, len(p.NotStarted))
+		case p.Phase == core.CyclePhaseSettle:
+			fmt.Fprintf(&b, "  %s: 解決した要求 %d 件\n", p.Phase, len(p.ResolvedRequirements))
 		case p.Phase == core.CyclePhaseSupervise:
 			var hands []string
 			for _, h := range core.SupervisorHandValues() {

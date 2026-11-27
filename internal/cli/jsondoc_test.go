@@ -754,8 +754,8 @@ func addM3CycleShape(t *testing.T, doc *documentedJSON) {
 }
 
 // documentedCyclePhaseNames は cycle の JSON の phase の閉集合（§IF / API「`phase` は
-// `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）・learn・improve、M5 S1 で backup（最後）が加わり、cycle は 10 の段をすべて出す。
-var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "supervise": true, "learn": true, "improve": true, "backup": true}
+// `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）・learn・improve、M5 S1 で backup（最後）が加わり、要求と Issue の前半で settle（release の直後）が加わった。cycle は 11 の段をすべて出す。
+var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "settle": true, "supervise": true, "learn": true, "improve": true, "backup": true}
 
 // assertDocumentedCycle は cycle の成功時の出力 out の内側（周の記録・段・items・not_started・
 // ingest の result）が、文書の例と同じ形であることを検査する（最上位のキーは

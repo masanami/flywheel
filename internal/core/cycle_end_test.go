@@ -38,8 +38,8 @@ func TestRunCycle_End_Settled_RunsEndPhases(t *testing.T) {
 	if f.judgedCount(JudgmentJ6) != 1 || !f.backupRan() {
 		t.Errorf("learn/backup not run: J6=%d backup=%v", f.judgedCount(JudgmentJ6), f.backupRan())
 	}
-	if len(res.Phases) != 10 {
-		t.Errorf("phases = %d, want 10", len(res.Phases))
+	if len(res.Phases) != 11 {
+		t.Errorf("phases = %d, want 11", len(res.Phases))
 	}
 }
 
@@ -175,8 +175,8 @@ func TestRunCycle_End_RateLimitedSkipsLearnAndImprove(t *testing.T) {
 	if f.judgedCount(JudgmentJ6) != 0 || f.judgedCount(JudgmentJ8) != 0 || !f.backupRan() {
 		t.Errorf("judged=%v backup=%v", f.judged, f.backupRan())
 	}
-	if len(res.Phases) != 8 {
-		t.Errorf("phases = %d, want 8 (7 advance + backup)", len(res.Phases))
+	if len(res.Phases) != 9 {
+		t.Errorf("phases = %d, want 9 (8 advance + backup)", len(res.Phases))
 	}
 }
 
@@ -233,8 +233,8 @@ func TestRunCycle_End_PhasesAreOnePerPhaseAcrossRounds(t *testing.T) {
 	for _, p := range res.Phases {
 		seen[p.Phase]++
 	}
-	if len(res.Phases) != 10 {
-		t.Errorf("phases = %d, want 10", len(res.Phases))
+	if len(res.Phases) != 11 {
+		t.Errorf("phases = %d, want 11", len(res.Phases))
 	}
 	for p, n := range seen {
 		if n != 1 {
@@ -286,7 +286,7 @@ func TestRunCycle_End_StopAtAMidRoundBoundaryDoesNotStartTheNextPhase(t *testing
 	if f.judgedCount(JudgmentJ5) != 0 || f.judgedCount(JudgmentJ6) != 0 {
 		t.Errorf("judged = %v, want no verify/learn", f.judged)
 	}
-	if len(res.Phases) != 8 || !f.backupRan() || f.cancels() != 0 {
+	if len(res.Phases) != 9 || !f.backupRan() || f.cancels() != 0 {
 		t.Errorf("phases=%d backup=%v cancels=%d", len(res.Phases), f.backupRan(), f.cancels())
 	}
 }

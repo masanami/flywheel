@@ -38,6 +38,7 @@ export const emptyStatus = {
     stages: {
       classify: 0,
       cleanup: 0,
+      settle: 0,
       improve: 0,
       learn: 0,
       plan: 0,

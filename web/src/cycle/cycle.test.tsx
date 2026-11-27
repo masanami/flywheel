@@ -159,6 +159,7 @@ it("#806: サイクルの状態・結果・段の全部の値に文言がある"
   }
   expect(CYCLE_WORK_STAGES.map((s) => CYCLE_WORK_STAGE_LABELS[s])).toEqual([
     "反映",
+    "要求の片付け",
     "分類",
     "計画",
     "委譲",

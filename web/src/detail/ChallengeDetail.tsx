@@ -13,6 +13,7 @@ import { ChatSessions } from "./ChatSessions.tsx";
 import { History } from "./History.tsx";
 import { Items } from "./Items.tsx";
 import { PlanView } from "./PlanView.tsx";
+import { RequirementSection } from "./RequirementSection.tsx";
 import { SupervisorRecords } from "./SupervisorRecords.tsx";
 import { TreeView } from "./TreeView.tsx";
 import { Waiting, showsSpecDraftHold } from "./Waiting.tsx";
@@ -75,6 +76,12 @@ export function ChallengeDetail({
         </button>
       </p>
       <Items show={show} />
+      {show.requirement !== null ? (
+        <RequirementSection
+          requirement={show.requirement}
+          agentName={agentName}
+        />
+      ) : null}
       {/* 下書きづくりの保留の所があるときは、そちらに出す（画面に 1 つだけ） */}
       {canOpenSpec(show.challenge) && !showsSpecDraftHold(show) ? (
         <SpecDocument

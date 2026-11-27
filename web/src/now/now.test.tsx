@@ -705,6 +705,7 @@ describe("サイクルを回すと進むもの", () => {
         learn: 1,
         improve: 1,
         cleanup: 1,
+        settle: 0,
       },
     });
     const items = within(screen.getByTestId("cycle-stages")).getAllByRole(

@@ -255,7 +255,7 @@ func TestRunStatus_CycleWorkCountsWhatTheCycleCanAdvance(t *testing.T) {
 		t.Fatal("status has no cycle_work object")
 	}
 	stages, _ := cw["stages"].(map[string]any)
-	if cw["total"] != float64(1) || stages["classify"] != float64(1) || len(stages) != 9 {
-		t.Errorf("cycle_work = %v, want total 1 with classify 1 over 9 stages", cw)
+	if cw["total"] != float64(1) || stages["classify"] != float64(1) || len(stages) != 10 {
+		t.Errorf("cycle_work = %v, want total 1 with classify 1 over 10 stages", cw)
 	}
 }

@@ -20,6 +20,7 @@ import type {
   CYCLE_END_REASON_CODES,
   CYCLE_TRIGGER_CODES,
   CycleWorkStages,
+  REQUIREMENT_ORIGIN_CODES,
   SUPERVISOR_HAND_CODES,
   SUPERVISOR_REJECT_REASON_CODES,
   SUPERVISOR_RESULT_CODES,
@@ -177,6 +178,16 @@ export const SPEC_ANSWERER_LABELS = {
   supervisor: "スーパーバイザー",
   owner: "オーナー",
 } as const;
+
+// 要求の記録の出どころ（requirement.origin）の語。issue は後ろに元の Issue の URL のリンクを添える。
+export const REQUIREMENT_ORIGIN_LABELS: Record<
+  (typeof REQUIREMENT_ORIGIN_CODES)[number],
+  string
+> = {
+  issue: "元の Issue:",
+  chat: "チャットの欄の会話",
+  manual: "手で作った",
+};
 
 // 対応の無いコードは生のコードをそのまま出す（欠けても画面は落とさない。対応の網羅はテストが守る）。
 export function label<K extends string>(
@@ -410,6 +421,7 @@ export const NO_SUPERVISOR_ACTIONS_TEXT =
 // 段の件数は core が数え、ここは語と並びだけを持つ（Record の型で、全部のキーに語があることを守る）。
 export const CYCLE_WORK_STAGES = [
   "release",
+  "settle",
   "classify",
   "plan",
   "run",
@@ -423,6 +435,7 @@ export type CycleWorkStage = (typeof CYCLE_WORK_STAGES)[number];
 
 export const CYCLE_WORK_STAGE_LABELS: Record<keyof CycleWorkStages, string> = {
   release: "反映",
+  settle: "要求の片付け",
   classify: "分類",
   plan: "計画",
   run: "委譲",
