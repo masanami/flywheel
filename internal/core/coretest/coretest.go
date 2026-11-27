@@ -1124,6 +1124,9 @@ func FillAllTables(t *testing.T, workspace string) {
 		}{
 			{`INSERT INTO challenge (title, status, reporter, created_at, updated_at) VALUES ('c1', 'in_progress', 'tester', ?, ?)`, []any{at, at}},
 			{`INSERT INTO challenge (title, status, reporter, created_at, updated_at) VALUES ('c2 "quoted" <&>', 'unclassified', 'tester', ?, ?)`, []any{at, at}},
+			{`INSERT INTO requirement (origin, title, external_key, url, origin_challenge_id, evidence_path, created_at, resolved_at)
+			  VALUES ('issue', '要求', 'o/r#1', 'https://example.test/1', 1, '.flywheel/requirements/split-C-1.md', ?, ?)`, []any{at, at}},
+			{`UPDATE challenge SET requirement_id = 1 WHERE id = 2`, nil},
 			{`INSERT INTO challenge_dependency (challenge_id, depends_on_id, created_at) VALUES (2, 1, ?)`, []any{at}},
 			{`INSERT INTO challenge_parent (challenge_id, parent_id, created_at) VALUES (2, 1, ?)`, []any{at}},
 			{`INSERT INTO task_plan (challenge_id, version, body, created_at, spec) VALUES (1, 1, 'plan', ?, '{"size":"M"}')`, []any{at}},
@@ -1131,6 +1134,8 @@ func FillAllTables(t *testing.T, workspace string) {
 			  VALUES (1, 'src', 'o/r#1', 'https://example.test/1', 'fp', 'open', 'in_policy', ?, ?)`, []any{at, at}},
 			{`INSERT INTO hold (challenge_id, question, from_status, raised_at, options, answer_option, option_required)
 			  VALUES (1, 'q', 'verifying', ?, '[{"id":"add","label":"足す","description":"説明"},{"id":"o2","label":"足さない","description":""}]', 'add', 1)`, []any{at}},
+			{`INSERT INTO slice_split (challenge_id, state, classify_reason, proposal, evidence_path, requirement_id, hold_id, created_at, updated_at)
+			  VALUES (1, 'split', '理由', '{"reason":"r","slices":[],"evidence":[]}', '.flywheel/requirements/split-C-1.md', 1, 1, ?, ?)`, []any{at, at}},
 			{`UPDATE challenge SET issues_hold_id = 1 WHERE id = 1`, nil},
 			{`INSERT INTO hold (challenge_id, question, from_status, raised_at, closed_at, kind) VALUES (2, '親が直接行う', 'unclassified', ?, ?, 'parent_direct')`, []any{at, at}},
 			{`INSERT INTO direct_completion (challenge_id, hold_id, note, created_at) VALUES (2, 2, '直接行った', ?)`, []any{at}},
@@ -1603,4 +1608,49 @@ func InsertSupervisorAction(t *testing.T, workspace string, cycleID int64, chall
 	}); err != nil {
 		t.Fatalf("coretest: InsertSupervisorAction: %v", err)
 	}
+}
+
+// ResolveRequirement は要求の記録 id に解決の日時を直接書く（解決済みの要求のフィクスチャ）。
+func ResolveRequirement(t *testing.T, workspace string, id int, at string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE requirement SET resolved_at = ? WHERE id = ?`, at, id)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: resolve requirement: %v", err)
+	}
+}
+
+// ChallengeOrigin は課題 id の出どころ（challenge.origin。公開の読み取りが無い列）を返す。
+func ChallengeOrigin(t *testing.T, workspace string, id int) string {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	var origin string
+	if err := db.Read(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT origin FROM challenge WHERE id = ?`, id).Scan(&origin)
+	}); err != nil {
+		t.Fatalf("coretest: challenge origin: %v", err)
+	}
+	return origin
+}
+
+// InsertSliceSplitHold はテスト専用のフィクスチャとして、課題 challengeID（内部整数 ID）を、区切り 2 つ（2 は 1 の後）の分ける案の
+// 分けるかの保留で待つ取り込んだ課題にする: 取り込み元の対応（externalKey）・優先度 P1・選択肢 split と single の保留・
+// 状態 awaiting_owner の区切りを分ける記録。保留はこの関数が作る。証跡のファイルは作らない。
+func InsertSliceSplitHold(t *testing.T, workspace string, challengeID int, externalKey string) {
+	t.Helper()
+	const at = "2026-11-28T00:00:00.000Z"
+	InsertSourceBinding(t, workspace, challengeID, "src", externalKey, "https://github.com/o/app/issues/1", "fp", "open", "in_policy", at)
+	InsertHoldWithOptions(t, workspace, challengeID, "分けますか", "classified", at,
+		`[{"id":"split","label":"この案で分ける","description":""},{"id":"single","label":"分けずに 1 つの課題で進める","description":""}]`, "")
+	Exec(t, workspace, `UPDATE challenge SET status = 'awaiting_human', priority = 'P1', origin = 'ingest' WHERE id = ?`, challengeID)
+	proposal := `{"reason":"r","slices":[` +
+		`{"title":"区切り A","headline":"h","context":"c","summary":"s","scope":"sc","repo":"app","depends_on":[]},` +
+		`{"title":"区切り B","headline":"h","context":"c","summary":"s","scope":"sc","repo":"app","depends_on":[1]}],"evidence":[]}`
+	Exec(t, workspace, `INSERT INTO slice_split (challenge_id, state, classify_reason, proposal, evidence_path, hold_id, created_at, updated_at)
+		SELECT ?, 'awaiting_owner', 'r', ?, ?, MAX(id), ?, ? FROM hold WHERE challenge_id = ?`,
+		challengeID, proposal, fmt.Sprintf(".flywheel/requirements/split-C-%d.md", challengeID), at, at, challengeID)
 }

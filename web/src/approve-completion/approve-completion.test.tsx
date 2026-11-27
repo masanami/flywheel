@@ -199,6 +199,8 @@ function showBody(o: Over = {}) {
       plans: [],
       runs: [],
       source_binding: null,
+      requirement: null,
+      slice_split: null,
       source_children: [],
       supervisor_actions: [],
       supervisor_hands_taken: {},

@@ -38,7 +38,7 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 }
 
 // runRounds は進める段の回りを、終える条件になるまで繰り返す。段ごとの結果を回りをまたいで足し合わせて *phases へ入れる
-// （進める段の 6 つ。skipped の段も含める）。
+// （進める段のすべて。skipped の段も含める）。
 func (s *Store) runRounds(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle, phases *[]CyclePhaseResult, executed *[]ReleaseExecItem) (CycleEndReason, error) {
 	wait := in.Wait
 	if wait == nil {
@@ -226,7 +226,7 @@ func (s *Store) waitBetweenRounds(ctx context.Context, cycleID string, wait func
 	return false, nil
 }
 
-// padAdvancePhases は、回りの途中で止めて通さなかった進める段を、空の結果で埋める（出力の phases は進める段 7 つを常に持つ）。
+// padAdvancePhases は、回りの途中で止めて通さなかった進める段を、空の結果で埋める（出力の phases は進める段のすべてを常に持つ）。
 func padAdvancePhases(in CycleRunInput, acc []CyclePhaseResult) []CyclePhaseResult {
 	for i := len(acc); i < len(advancePhaseOrder); i++ {
 		p := advancePhaseOrder[i]
@@ -240,7 +240,7 @@ func padAdvancePhases(in CycleRunInput, acc []CyclePhaseResult) []CyclePhaseResu
 }
 
 // advancePhaseOrder は進める段の順。
-var advancePhaseOrder = []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseSupervise}
+var advancePhaseOrder = []CyclePhase{CyclePhaseRelease, CyclePhaseSettle, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseSupervise}
 
 // roundHitCycleBudget は、この回りの段の結果に、起動しなかった理由がサイクルの費用の上限（cycle_budget）のものが 1 件でもあるか。
 // 課題の枠（run_budget）は含めない。
@@ -287,6 +287,7 @@ func mergeRoundPhases(acc, round []CyclePhaseResult) []CyclePhaseResult {
 			a.Ingest = r.Ingest
 		}
 		a.Items = append(a.Items, r.Items...)
+		a.ResolvedRequirements = append(a.ResolvedRequirements, r.ResolvedRequirements...)
 		a.NotStarted = append(a.NotStarted, r.NotStarted...)
 		a.ReleaseItems = append(a.ReleaseItems, r.ReleaseItems...)
 		a.ReleaseTidied = append(a.ReleaseTidied, r.ReleaseTidied...)
@@ -304,7 +305,7 @@ func mergeRoundPhases(acc, round []CyclePhaseResult) []CyclePhaseResult {
 
 // progressFingerprint は「進み」の判定に使う、ストアの状態の指紋を返す。回りの前と後で指紋が変わったことを、進みとする。
 // 見るのは、課題の状態・タスクの進み・契約の実行の記録した状態（終わったかどうかを含む）と「入れてよい」を返した印・
-// 不可逆操作の状態・保留の開閉。失敗や見送りの記録（実行の記録・作業ログ）は見ない（増えただけの回りは、進みに数えない）。
+// 不可逆操作の状態・保留の開閉・区切りを分ける記録の状態。失敗や見送りの記録（実行の記録・作業ログ）は見ない（増えただけの回りは、進みに数えない）。
 func (s *Store) progressFingerprint(ctx context.Context) (string, error) {
 	h := sha256.New()
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
@@ -314,6 +315,7 @@ func (s *Store) progressFingerprint(ctx context.Context) (string, error) {
 			`SELECT 'k', id, state || '|' || COALESCE(ended_at, '') || '|' || land_delivered || '|' || COALESCE(land_ref, '') || '|' || COALESCE(requested_kind, '') || '|' || COALESCE(wait_hold_id, '') || '|' || COALESCE(verified_ref, '') || '|' || COALESCE(fix_verified_ref, '') || '|' || COALESCE(fix_pending_ref, '') || '|' || held_success FROM contract_run ORDER BY id`,
 			`SELECT 'o', id, state FROM operation ORDER BY id`,
 			`SELECT 'h', id, COALESCE(answered_at, '') || '|' || COALESCE(closed_at, '') FROM hold ORDER BY id`,
+			`SELECT 's', challenge_id, state FROM slice_split ORDER BY challenge_id`,
 		}
 		for _, q := range queries {
 			rs, err := tx.QueryContext(ctx, q)

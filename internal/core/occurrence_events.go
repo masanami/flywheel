@@ -67,9 +67,9 @@ func (s *Store) insertRunFailureOccurrence(ctx context.Context, tx *sql.Tx, runI
 	var kind OccurrenceKind
 	switch r.Kind {
 	case runKindJudgment:
-		// 対象は J1〜J5 だけ（許可リスト。J6 の失敗は発生を作らない）。
+		// 対象は J1〜J5 と J10 だけ（許可リスト。J6 の失敗は発生を作らない）。
 		switch r.Judgment {
-		case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5:
+		case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5, judgmentJ10:
 		default:
 			return nil
 		}

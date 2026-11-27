@@ -326,6 +326,33 @@ const ActivityActionOpClose = "op_close"
 // （entity=challenge。after は下書きの場所 path と訳 reason）。
 const ActivityActionSpecDraftCleanupFailed = "spec_draft_cleanup_failed"
 
+// ActivityActionRequirementEvidenceCleanupFailed は、要求の証跡を消せなかったことの作業ログの action
+// （entity は requirement か challenge。after は証跡の場所 path と訳 reason）。
+const ActivityActionRequirementEvidenceCleanupFailed = "requirement_evidence_cleanup_failed"
+
+// ActivityActionRequirementResolved は、要求の記録の解決の日時を書いたことの作業ログの action
+// （entity=requirement。after は解決の日時 resolved_at と証跡の場所 evidence_path）。
+const ActivityActionRequirementResolved = "requirement_resolved"
+
+// ActivityActionSliceSplitRequested は、分類の判断点の結果で課題の区切りを分けると決まったことの作業ログの action
+// （entity=challenge。after は区切りを分ける記録の状態 state）。
+const ActivityActionSliceSplitRequested = "slice_split_requested"
+
+// ActivityActionSliceSplitSingle は、課題を分けずに 1 つの課題で進めると決まったことの作業ログの action
+// （entity=challenge。after の by は決めたもの。区切りを分ける判断点は judgment、オーナーの回答は owner）。
+const ActivityActionSliceSplitSingle = "slice_split_single"
+
+// ActivityActionRequirementCreate は、区切りを分ける回答が要求の記録を作ったことの作業ログの action（entity=requirement）。
+const ActivityActionRequirementCreate = "requirement_create"
+
+// ActivityActionSliceSplitDone は、回答で課題を区切りの課題に分けたことの作業ログの action
+// （entity=challenge。after は記録の状態 state・要求の記録 requirement_id・作った課題 challenge_ids）。
+const ActivityActionSliceSplitDone = "slice_split_done"
+
+// ActivityActionSliceSplitEvidenceFailed は、分ける案の証跡のファイルを書けなかったことの作業ログの action
+// （entity=challenge。after は証跡の場所 path と訳 reason）。
+const ActivityActionSliceSplitEvidenceFailed = "slice_split_evidence_failed"
+
 // ActivityActionSpecDraftRequested は、計画を作る判断点が課題を下書きづくりへ回すと決めたことの作業ログの action
 // （entity=challenge。after は下書きの場所 path・置き換える元 base_path・対象のリポジトリ repo・回した理由 reason）。
 const ActivityActionSpecDraftRequested = "spec_draft_requested"
@@ -521,15 +548,16 @@ func (r ExecutionResult) Counts() bool {
 // ChallengeOrigin は課題の出どころ（challenge.origin。マイグレーション 0011）。
 type ChallengeOrigin string
 
-// ChallengeOrigin の4値。improvement だけが改修の鍵（improvement_layer・improvement_target）を持つ。
+// ChallengeOrigin の5値。split は区切りを分ける回答で作った課題。improvement だけが改修の鍵（improvement_layer・improvement_target）を持つ。
 const (
 	ChallengeOriginIngest      ChallengeOrigin = "ingest"
 	ChallengeOriginManual      ChallengeOrigin = "manual"
 	ChallengeOriginFollowup    ChallengeOrigin = "followup"
 	ChallengeOriginImprovement ChallengeOrigin = "improvement"
+	ChallengeOriginSplit       ChallengeOrigin = "split"
 )
 
-var challengeOriginValues = []ChallengeOrigin{ChallengeOriginIngest, ChallengeOriginManual, ChallengeOriginFollowup, ChallengeOriginImprovement}
+var challengeOriginValues = []ChallengeOrigin{ChallengeOriginIngest, ChallengeOriginManual, ChallengeOriginFollowup, ChallengeOriginImprovement, ChallengeOriginSplit}
 
 // ParseChallengeOrigin は s を課題の出どころとして解釈する。前後の空白を除いた完全一致のみ受理する。
 func ParseChallengeOrigin(s string) (ChallengeOrigin, bool) {

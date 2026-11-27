@@ -28,7 +28,7 @@ func TestJ1OutputSchema_HasHeadlineAndContext(t *testing.T) {
 func TestValidateJ1Output_MineRequiresHeadlineAndContext(t *testing.T) {
 	t.Parallel() // AC-266・267
 	ok := func(h, c *string) bool {
-		_, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: h, Context: c}))
+		_, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", FitsOneSlice: boolPtr(true), Priority: strPtr("P1"), Reason: "r", Headline: h, Context: c}))
 		return ok
 	}
 	if !ok(strPtr("h"), strPtr("c")) {
@@ -111,7 +111,7 @@ func TestClassifyAutoJ1_Mine_WritesTextAndLogsAfter(t *testing.T) {
 	t.Parallel() // AC-266 写像・AC-276
 	s := newStoreForTest(t)
 	id := newUnclassified(t, s)
-	runJ1ForText(t, s, id, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: strPtr("一言で"), Context: strPtr("位置づけ")})
+	runJ1ForText(t, s, id, j1RawOutput{Verdict: "mine", FitsOneSlice: boolPtr(true), Priority: strPtr("P1"), Reason: "r", Headline: strPtr("一言で"), Context: strPtr("位置づけ")})
 	got, err := s.GetChallenge(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestClassifyAutoJ1_MineBadText_InvalidOutputLeavesColumns(t *testing.T) {
 	t.Parallel() // AC-266・267
 	s := newStoreForTest(t)
 	id := newUnclassified(t, s)
-	res := runJ1ForText(t, s, id, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: strPtr("h")})
+	res := runJ1ForText(t, s, id, j1RawOutput{Verdict: "mine", FitsOneSlice: boolPtr(true), Priority: strPtr("P1"), Reason: "r", Headline: strPtr("h")})
 	if res.Items[0].Result != RunResultInvalidOutput {
 		t.Fatalf("Result = %q", res.Items[0].Result)
 	}

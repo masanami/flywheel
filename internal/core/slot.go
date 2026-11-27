@@ -183,9 +183,14 @@ func (s *Store) EnsureSlots(ctx context.Context, repo ConnectorRepo) error {
 }
 
 // ensureWorktreesIgnored は .flywheel/.gitignore に worktrees/ の行が無ければ足す
-// （払い出した作業ツリーを Git で追跡させない。.gitignore が無ければ core の既定の
-// 内容で作る）。
+// （払い出した作業ツリーを Git で追跡させない）。
 func ensureWorktreesIgnored(workspace string) error {
+	return ensureGitignoreDir(workspace, "worktrees")
+}
+
+// ensureGitignoreDir は .flywheel/.gitignore にディレクトリ name の行が無ければ足す
+// （.gitignore が無ければ core の既定の内容で作る）。
+func ensureGitignoreDir(workspace, name string) error {
 	if err := EnsureWorkspaceGitignore(workspace); err != nil {
 		return err
 	}
@@ -195,11 +200,11 @@ func ensureWorktreesIgnored(workspace string) error {
 		return fmt.Errorf("%w: read %s: %w", ErrStoreError, path, err)
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if t := strings.TrimSpace(line); t == "worktrees/" || t == "/worktrees/" || t == "worktrees" {
+		if t := strings.TrimSpace(line); t == name+"/" || t == "/"+name+"/" || t == name {
 			return nil
 		}
 	}
-	add := "worktrees/\n"
+	add := name + "/\n"
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 		add = "\n" + add
 	}

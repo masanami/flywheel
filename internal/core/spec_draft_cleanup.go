@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -158,26 +159,47 @@ func sameSpecFile(workspace, a, b string) bool {
 	return errX == nil && errY == nil && os.SameFile(x, y)
 }
 
-// removeSpecDraft は下書き p のファイルを消す。消すのは、場所のリンクをたどった先が、下書きの置き場の実体の下にある
-// 通常のファイルのときだけ。ファイルがすでに無ければ何もしない。
+// removeSpecDraft は下書き p のファイルを消す。消すのは、下書きの置き場の実体がワークスペースの実体の .flywheel/ の下にあり、
+// 場所のリンクをたどった先がその下にある通常のファイルのときだけ。ファイルがすでに無ければ何もしない。
 func removeSpecDraft(workspace, p string) error {
+	return removeRegularFileUnder(workspace, p, specDraftDir, errSpecDraftOutside, errSpecDraftNotRegular)
+}
+
+// flywheelPlacement は .flywheel の下の置き場 dir（ワークスペースから見た相対のパス）の実体を返す。置き場がまだ無くてもよい。
+// 実体がワークスペースの実体の .flywheel/ の下に無ければ（置き場かその親がシンボリックリンクで外を指すとき）、outside を
+// 含む誤りを返す。
+func flywheelPlacement(workspace, dir string, outside error) (string, error) {
+	root, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", err
+	}
+	if root, err = filepath.EvalSymlinks(root); err != nil {
+		return "", err
+	}
+	base, err := followPath(root, dir)
+	if err != nil {
+		return "", err
+	}
+	if top := filepath.Join(root, flywheelDirName); base == top || !pathInside(top, base) {
+		return "", fmt.Errorf("%w: the directory %s is not under %s of the workspace", outside, dir, flywheelDirName)
+	}
+	return base, nil
+}
+
+// removeRegularFileUnder はワークスペースから見た相対のパス p のファイルを消す。消すのは、置き場 dir の実体がワークスペースの
+// 実体の .flywheel/ の下にあり、p のリンクをたどった先が、その置き場の実体の下にある通常のファイルのときだけ（置き場か p が
+// 外なら outside を含む誤り、通常のファイルでなければ notRegular を返す）。ファイルがすでに無ければ何もしない。
+func removeRegularFileUnder(workspace, p, dir string, outside, notRegular error) error {
+	base, err := flywheelPlacement(workspace, dir, outside)
+	if err != nil {
+		return err
+	}
 	resolved, err := resolveSpecPath(workspace, p)
 	if err != nil {
 		return err
 	}
-	root, err := filepath.Abs(workspace)
-	if err != nil {
-		return err
-	}
-	if root, err = filepath.EvalSymlinks(root); err != nil {
-		return err
-	}
-	dir, err := followPath(root, specDraftDir)
-	if err != nil {
-		return err
-	}
-	if resolved == dir || !pathInside(dir, resolved) {
-		return errSpecDraftOutside
+	if resolved == base || !pathInside(base, resolved) {
+		return outside
 	}
 	info, err := os.Lstat(resolved)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
@@ -187,7 +209,7 @@ func removeSpecDraft(workspace, p string) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return errSpecDraftNotRegular
+		return notRegular
 	}
 	if err := os.Remove(resolved); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err

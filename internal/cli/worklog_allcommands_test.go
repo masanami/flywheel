@@ -194,6 +194,16 @@ var worklogCases = []worklogCase{
 		},
 	},
 	{
+		name: "requirement create", command: "requirement create",
+		setup: func(_ *testing.T, _ string) []string {
+			return []string{"requirement", "create", "--title", "t"}
+		},
+		want: func(string) []wantActivity {
+			return []wantActivity{{"requirement", "RQ-1", "create", nil,
+				map[string]any{"title": "t", "origin": "manual", "evidence_path": ".flywheel/requirements/RQ-1.md"}}}
+		},
+	},
+	{
 		name: "edit", command: "edit",
 		setup: func(t *testing.T, ws string) []string {
 			return []string{"edit", createForCase(t, ws), "--title", "x", "--description", "d1", "--done-criteria", "d2", "--urgency", "低"}

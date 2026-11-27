@@ -14,7 +14,9 @@ import type {
   Ingestable,
   Operation,
   PlanDetail,
+  Requirement,
   Run,
+  SliceSplit,
   SpecDraft,
   StagePair,
   Stages,
@@ -80,6 +82,9 @@ export interface MockChallenge {
   // 仕様の文書の場所（無ければ課題の詳細の spec_path は null）と、本文を返す口が返す本文（無ければ、ファイルがまだ無い）
   specPath?: string;
   specBody?: string;
+  // 要求の記録と区切りを分ける記録（無ければ課題の詳細の requirement・slice_split は null）
+  requirement?: Requirement;
+  sliceSplit?: SliceSplit;
 }
 
 export interface MockWorkspace {
@@ -129,6 +134,8 @@ export function mk(
     specDraft,
     specPath,
     specBody,
+    requirement,
+    sliceSplit,
     ...rest
   } = p;
   return {
@@ -164,6 +171,8 @@ export function mk(
     specDraft,
     specPath,
     specBody,
+    requirement,
+    sliceSplit,
   };
 }
 
@@ -335,6 +344,69 @@ function specQuestionChallenge(): MockChallenge {
         task_id: null,
       },
     ],
+  });
+}
+
+// 区切りを分ける保留を持つ課題（問いの保留の課題の保留を元に、問いと選択肢を変える）。
+function sliceSplitChallenge(): MockChallenge {
+  const option = (id: string, label: string) => ({
+    id,
+    label,
+    description: "",
+    button: true,
+  });
+  const slice = (title: string, depends_on: number[]) => ({
+    context: "通知の機能の一部",
+    depends_on,
+    headline: title,
+    repo: "app",
+    scope: `${title}だけをやる`,
+    summary: `${title}ための区切り`,
+    title,
+  });
+  return mk("C-7", "通知をまとめて受け取れるようにする", "awaiting_human", {
+    priority: "P1",
+    sliceSplit: {
+      evidence_path: ".flywheel/requirements/split-C-7.md",
+      hold_id: "H-1",
+      reason: "設定と送信は、それぞれ単独で出荷できる",
+      slices: [
+        slice("通知の設定を保存する", []),
+        slice("通知をまとめて送る", [1]),
+      ],
+      state: "awaiting_owner",
+    },
+    holds: specQuestionChallenge().holds.map((h) => ({
+      ...h,
+      check: "seed-split-h1",
+      question: "この課題は、区切り 1 つに収まらないと見ました。",
+      options: [
+        option("split", "この案で分ける"),
+        option("single", "分けずに 1 つの課題で進める"),
+      ],
+    })),
+  });
+}
+
+// 要求の記録を指す、完了した区切りの課題（同じ要求の課題が残っているので、要求は解決の前）。
+function requirementChallenge(): MockChallenge {
+  return mk("C-8", "書き出しの期間を指定する", "done", {
+    requirement: {
+      challenges: [
+        { id: "C-4", status: "awaiting_human", title: "予約の取り消しを足す" },
+        { id: "C-8", status: "done", title: "書き出しの期間を指定する" },
+      ],
+      chat_session: null,
+      created_at: iso(500),
+      evidence_path: ".flywheel/requirements/split-C-10.md",
+      external_key: "example/app#41",
+      id: "RQ-1",
+      origin: "issue",
+      origin_challenge_id: "C-10",
+      resolved_at: null,
+      title: "書き出しを使いやすくする",
+      url: "https://github.com/example/app/issues/41",
+    },
   });
 }
 
@@ -899,6 +971,8 @@ export function seed(): Record<string, MockWorkspace> {
     specQuestionChallenge(),
     specFailedChallenge(),
     specAttemptLimitChallenge(),
+    sliceSplitChallenge(),
+    requirementChallenge(),
   ];
   const ok = (name: string): Workspace => ({
     error: null,
@@ -927,6 +1001,7 @@ export function seed(): Record<string, MockWorkspace> {
           plan: 1,
           release: 0,
           run: 1,
+          settle: 0,
           supervise: 0,
           verify: 0,
         },
@@ -954,6 +1029,7 @@ export function seed(): Record<string, MockWorkspace> {
           plan: 0,
           release: 1,
           run: 0,
+          settle: 0,
           supervise: 0,
           verify: 1,
         },
@@ -1135,6 +1211,7 @@ function cycleWorkOf(items: MockChallenge[]): CycleWork {
     plan: n("classified"),
     release: 0,
     run: 0,
+    settle: 0,
     supervise: 0,
     verify: n("verifying"),
   };

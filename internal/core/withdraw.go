@@ -237,42 +237,62 @@ func (s *Store) ExecuteWithdraw(ctx context.Context, req WithdrawRequest, att At
 		return nil, ErrVerificationRejected
 	}
 
-	apply := func(ctx context.Context, tc *transitionCtx) error {
-		stale, err := checkWithdrawable(ctx, tc.tx, tc.id, tc.current, tc.now, false)
-		if err != nil {
-			return err
-		}
-		// 止まった試行は `op exec` の再実行と同じく interrupted として閉じる（executeRelease と同じ扱い）。
-		for _, a := range stale {
-			if err := closeOperationExecution(ctx, tc.tx, a.ID, closeOperationExecutionInput{EndedAt: tc.now, Result: ExecutionResultInterrupted}); err != nil {
-				return err
-			}
-		}
-		if err := rejectOperationsForWithdrawal(ctx, tc, req.Reason, att); err != nil {
-			return err
-		}
-		// 開いている保留は人間対応待ちの課題にだけある。要約（①）が見せる範囲と揃える。
-		if tc.current.Status == StatusAwaitingHuman {
-			if _, err := tc.tx.ExecContext(ctx,
-				`UPDATE hold SET closed_at = ? WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL`,
-				tc.nowStr, tc.id); err != nil {
-				return err
-			}
-		}
-		// 取り下げた課題のタスクのうち、終わっていないものを取りやめる（done は残す）。
-		if err := cancelUnfinishedTasks(ctx, tc.tx, tc.rec, tc.id); err != nil {
-			return err
-		}
-		var lastOccurrence int64
-		if err := tc.tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM occurrence`).Scan(&lastOccurrence); err != nil {
-			return err
-		}
-		tc.after["reason"] = req.Reason
-		tc.after["last_occurrence_id"] = lastOccurrence
-		att.addRelayTo(tc.after)
-		return nil
+	var evidence string
+	apply := func(ctx context.Context, tc *transitionCtx) (err error) {
+		evidence, err = applyWithdrawal(ctx, tc, req.Reason, att)
+		return err
 	}
-	return s.verifiedTransition(ctx, att, req.ChallengeID, req.ExpectedVersion, OpWithdraw, NoStatus, nil, apply)
+	c, err := s.verifiedTransition(ctx, att, req.ChallengeID, req.ExpectedVersion, OpWithdraw, NoStatus, nil, apply)
+	if err != nil {
+		return nil, err
+	}
+	// 分けるかの保留を開いたまま取り下げた課題の証跡は、取り下げが成立した後に消す（消せなくても取り下げは成立している）。
+	if cid, ok := parseChallengeID(c.ID); ok && evidence != "" {
+		s.discardRequirementEvidence(ctx, evidence, "challenge", cid, att.Actor())
+	}
+	return c, nil
+}
+
+// applyWithdrawal は取り下げの遷移（T16）に伴う書き込み。取り下げ（ExecuteWithdraw）と、区切りを分ける回答の元の課題の
+// 取り下げ（applySliceSplit）が同じものを使う。返すのは、取り下げの書き込みが成立した後に消す証跡の場所（無ければ空）。
+func applyWithdrawal(ctx context.Context, tc *transitionCtx, reason string, att Attestation) (string, error) {
+	stale, err := checkWithdrawable(ctx, tc.tx, tc.id, tc.current, tc.now, false)
+	if err != nil {
+		return "", err
+	}
+	// 止まった試行は `op exec` の再実行と同じく interrupted として閉じる（executeRelease と同じ扱い）。
+	for _, a := range stale {
+		if err := closeOperationExecution(ctx, tc.tx, a.ID, closeOperationExecutionInput{EndedAt: tc.now, Result: ExecutionResultInterrupted}); err != nil {
+			return "", err
+		}
+	}
+	if err := rejectOperationsForWithdrawal(ctx, tc, reason, att); err != nil {
+		return "", err
+	}
+	// 開いている保留は人間対応待ちの課題にだけある。要約（①）が見せる範囲と揃える。
+	if tc.current.Status == StatusAwaitingHuman {
+		if _, err := tc.tx.ExecContext(ctx,
+			`UPDATE hold SET closed_at = ? WHERE challenge_id = ? AND answer IS NULL AND closed_at IS NULL`,
+			tc.nowStr, tc.id); err != nil {
+			return "", err
+		}
+	}
+	evidence, err := releaseSliceSplitHold(ctx, tc)
+	if err != nil {
+		return "", err
+	}
+	// 取り下げた課題のタスクのうち、終わっていないものを取りやめる（done は残す）。
+	if err := cancelUnfinishedTasks(ctx, tc.tx, tc.rec, tc.id); err != nil {
+		return "", err
+	}
+	var lastOccurrence int64
+	if err := tc.tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM occurrence`).Scan(&lastOccurrence); err != nil {
+		return "", err
+	}
+	tc.after["reason"] = reason
+	tc.after["last_occurrence_id"] = lastOccurrence
+	att.addRelayTo(tc.after)
+	return evidence, nil
 }
 
 // rejectOperationsForWithdrawal は課題の pending・approved の不可逆操作を rejected にし、操作ごとに

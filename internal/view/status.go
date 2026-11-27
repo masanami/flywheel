@@ -128,6 +128,8 @@ type CycleWorkStages struct {
 	Plan     int `json:"plan"`
 	Release  int `json:"release"`
 	Run      int `json:"run"`
+	// Settle は解決したが、まだ解決の日時を持たない要求の記録の数。
+	Settle int `json:"settle"`
 	// Supervise はスーパーバイザー待ちの保留の数（サイクルが走っていない間に残るもの）。
 	Supervise int `json:"supervise"`
 	Verify    int `json:"verify"`
@@ -148,7 +150,7 @@ func FromCycleWork(w *core.CycleWork) CycleWork {
 	return CycleWork{
 		Stages: CycleWorkStages{
 			Classify: st.Classify, Cleanup: st.Cleanup, Improve: st.Improve, Learn: st.Learn,
-			Plan: st.Plan, Release: st.Release, Run: st.Run, Supervise: st.Supervise, Verify: st.Verify,
+			Plan: st.Plan, Release: st.Release, Run: st.Run, Settle: st.Settle, Supervise: st.Supervise, Verify: st.Verify,
 		},
 		Total: w.Total,
 	}

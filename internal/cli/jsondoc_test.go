@@ -754,8 +754,8 @@ func addM3CycleShape(t *testing.T, doc *documentedJSON) {
 }
 
 // documentedCyclePhaseNames は cycle の JSON の phase の閉集合（§IF / API「`phase` は
-// `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）・learn・improve、M5 S1 で backup（最後）が加わり、cycle は 10 の段をすべて出す。
-var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "supervise": true, "learn": true, "improve": true, "backup": true}
+// `ingest | classify | plan | run | verify` の閉集合」）。M4.5 で release（最初）・learn・improve、M5 S1 で backup（最後）が加わり、要求と Issue の前半で settle（release の直後）が加わった。cycle は 11 の段をすべて出す。
+var documentedCyclePhaseNames = map[string]bool{"ingest": true, "classify": true, "plan": true, "run": true, "verify": true, "release": true, "settle": true, "supervise": true, "learn": true, "improve": true, "backup": true}
 
 // assertDocumentedCycle は cycle の成功時の出力 out の内側（周の記録・段・items・not_started・
 // ingest の result）が、文書の例と同じ形であることを検査する（最上位のキーは
@@ -1702,6 +1702,28 @@ func addCoreRedesignS2aShowShape(t *testing.T, doc *documentedJSON) {
 	addCoreRedesignS3cShowShape(t, doc, string(data))
 	addCoreRedesignS4bShowShape(t, doc)
 	addCoreRedesignS4cShowShape(t, doc)
+	addRequestToPlanS3aShapes(t, doc)
+}
+
+// addRequestToPlanS3aShapes は区切り S3a が足した形（`requirement create` の成功時のキーと、show --json の根の `requirement`・
+// `slice_split`）を doc へ合成する。仕様（request-to-plan-s3.md）が書いていることを確かめた上で足す。
+func addRequestToPlanS3aShapes(t *testing.T, doc *documentedJSON) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "features", "request-to-plan-s3.md"))
+	if err != nil {
+		t.Fatalf("read request-to-plan-s3 spec: %v", err)
+	}
+	const example = `{ "evidence_path": ".flywheel/requirements/RQ-3.md", "id": "RQ-3", "origin": "chat", "title": "通知をまとめて受け取れるようにする" }`
+	for _, want := range []string{example, "課題の詳細に `requirement` のキーがあり", "課題の詳細に `slice_split` のキーがあり"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("request-to-plan-s3 spec does not document %q", want)
+		}
+	}
+	doc.topLevel["requirement create"] = []map[string]bool{topLevelKeys(example)}
+	for _, shape := range doc.topLevel["show"] {
+		shape["requirement"] = true
+		shape["slice_split"] = true
+	}
 }
 
 // addCoreRedesignS4cShowShape は区切り S4c-1 が show --json の根に足した `budget`（estimate_usd・limit_usd・limit_reason）を doc へ合成する。

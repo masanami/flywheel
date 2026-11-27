@@ -30,6 +30,8 @@ type j1RawOutput struct {
 	// Headline・Context は課題カードの「一言で」「位置づけ」（S4。M4H7・M4P35）。
 	Headline *string `json:"headline"`
 	Context  *string `json:"context"`
+	// FitsOneSlice は区切り 1 つに収まるか。mine では必須。
+	FitsOneSlice *bool `json:"fits_one_slice"`
 }
 
 // j1ValidatedOutput は core の閉集合・必須の組の検査を通った J1 の出力
@@ -46,6 +48,8 @@ type j1ValidatedOutput struct {
 	// uncertain・not_mine では空白だけ・上限超えの値を nil（無いもの）にして持つ。
 	Headline *string
 	Context  *string
+	// FitsOneSlice は mine だけが持つ（mine では必ず非 nil。uncertain・not_mine の値は使わないので nil）。
+	FitsOneSlice *bool
 }
 
 // j1OutputSchema は J1 の `--json-schema` に渡すスキーマを返す（§IF / API
@@ -63,13 +67,14 @@ func j1OutputSchema() []byte {
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"verdict":  map[string]any{"type": "string", "enum": verdicts},
-			"priority": map[string]any{"type": []string{"string", "null"}, "enum": priorities},
-			"size":     map[string]any{"type": []string{"string", "null"}, "enum": sizes},
-			"reason":   map[string]any{"type": "string"},
-			"question": map[string]any{"type": []string{"string", "null"}},
-			"headline": map[string]any{"type": []string{"string", "null"}},
-			"context":  map[string]any{"type": []string{"string", "null"}, "description": "位置づけ（この課題が全体の計画のどこにあり、なぜ要るか）"},
+			"verdict":        map[string]any{"type": "string", "enum": verdicts},
+			"fits_one_slice": map[string]any{"type": []string{"boolean", "null"}, "description": "区切り 1 つに収まるか"},
+			"priority":       map[string]any{"type": []string{"string", "null"}, "enum": priorities},
+			"size":           map[string]any{"type": []string{"string", "null"}, "enum": sizes},
+			"reason":         map[string]any{"type": "string"},
+			"question":       map[string]any{"type": []string{"string", "null"}},
+			"headline":       map[string]any{"type": []string{"string", "null"}},
+			"context":        map[string]any{"type": []string{"string", "null"}, "description": "位置づけ（この課題が全体の計画のどこにあり、なぜ要るか）"},
 		},
 		"required":             []string{"verdict", "reason"},
 		"additionalProperties": false,
@@ -133,7 +138,15 @@ func validateJ1Output(data []byte) (*j1ValidatedOutput, bool) {
 		return nil, false
 	}
 
-	return &j1ValidatedOutput{Verdict: verdict, Priority: priority, Size: size, Reason: raw.Reason, Question: raw.Question, Headline: headline, Context: jctx}, true
+	var fits *bool
+	if verdict == J1VerdictMine {
+		if raw.FitsOneSlice == nil {
+			return nil, false
+		}
+		fits = raw.FitsOneSlice
+	}
+
+	return &j1ValidatedOutput{Verdict: verdict, Priority: priority, Size: size, Reason: raw.Reason, Question: raw.Question, Headline: headline, Context: jctx, FitsOneSlice: fits}, true
 }
 
 // checkedJ1Text は s が非 nil で check を通るときだけ s を返す（通らなければ nil）。
@@ -294,6 +307,18 @@ func listJ1Triage(ctx context.Context, tx *sql.Tx) ([]TriageItem, error) {
 
 // --- J1 の入力の組み立て ---
 
+// judgmentChallengeSection は分類の判断点と区切りを分ける判断点が共有する、区画「課題」の本文。
+func judgmentChallengeSection(ch Challenge) string {
+	urgency := ""
+	if ch.Urgency != nil {
+		urgency = string(*ch.Urgency)
+	}
+	return fmt.Sprintf(
+		"タイトル: %s\n\n説明:\n%s\n\n達成条件:\n%s\n\n緊急度: %s\n起票者: %s",
+		ch.Title, ch.Description, ch.DoneCriteria, urgency, ch.Reporter,
+	)
+}
+
 // buildJ1Sections は ch・decl から J1 の標準入力のデータの区画の一覧を組み立
 // てる（§J1「J1 の入力は、課題（人間記入欄・緊急度・起票者）・取り込み元の
 // 対応の記録（あれば）・ポジション定義の本文・保留の記録である」）。
@@ -330,17 +355,8 @@ func (s *Store) buildJ1Sections(ctx context.Context, ch Challenge, decl *AgentDe
 		return nil, fmt.Errorf("%w: read position_file %q: %w", ErrConfigInvalid, decl.PositionFile, err)
 	}
 
-	urgency := ""
-	if ch.Urgency != nil {
-		urgency = string(*ch.Urgency)
-	}
-	issueBody := fmt.Sprintf(
-		"タイトル: %s\n\n説明:\n%s\n\n達成条件:\n%s\n\n緊急度: %s\n起票者: %s",
-		ch.Title, ch.Description, ch.DoneCriteria, urgency, ch.Reporter,
-	)
-
 	sections := []JudgmentDataSection{
-		{Label: "課題", Content: issueBody},
+		{Label: "課題", Content: judgmentChallengeSection(ch)},
 		{Label: "ポジション定義", Content: string(posContent)},
 	}
 	// design-reviewer 指摘（round1 CONFIRMED）: §J1「J1 の入力は…取り込み元の
@@ -416,8 +432,16 @@ var errJ1MappingNotEligible = errors.New("core: j1 mapping is no longer eligible
 // From: 未分類の1行しか持たないため、Lookup(current.Status, OpClassify) の
 // 成功自体が「読み直した状態が未分類である」ことを保証する（§アーキテクチャ
 // 決定③はこの Lookup の失敗〈ErrInvalidTransition〉で満たされる）。
-func (s *Store) applyJ1Mine(ctx context.Context, runIDDisplay, challengeIDDisplay string, priority Priority, headline, jctx *string) (mapped bool, err error) {
-	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpClassify, func(_ context.Context, tc *transitionCtx) error {
+// out.FitsOneSlice が偽で、課題が区切りを分ける対象（取り込みで作り、取り込み元の子を持たず、要求の記録を指さない）なら、
+// 同じ書き込みで区切りを分ける記録を作る。
+func (s *Store) applyJ1Mine(ctx context.Context, runIDDisplay, challengeIDDisplay string, out *j1ValidatedOutput) (mapped bool, err error) {
+	priority, headline, jctx := *out.Priority, out.Headline, out.Context
+	_, err = s.transitionAsInvoker(ctx, runIDDisplay, challengeIDDisplay, OpClassify, func(ctx context.Context, tc *transitionCtx) error {
+		if !*out.FitsOneSlice {
+			if err := requestSliceSplit(ctx, tc, out.Reason); err != nil {
+				return err
+			}
+		}
 		tc.before["priority"] = nullablePriority(tc.current.Priority)
 		tc.after["priority"] = nullablePriority(&priority)
 		tc.priority = &priority
@@ -592,7 +616,7 @@ func (s *Store) finalizeJ1Output(ctx context.Context, runIDDisplay, challengeIDD
 
 	switch validated.Verdict {
 	case J1VerdictMine:
-		mapped, err := s.applyJ1Mine(ctx, runIDDisplay, challengeIDDisplay, *validated.Priority, validated.Headline, validated.Context)
+		mapped, err := s.applyJ1Mine(ctx, runIDDisplay, challengeIDDisplay, validated)
 		if err != nil {
 			return "", nil, "", err
 		}
@@ -631,7 +655,10 @@ type J1AutoInput struct {
 	// nil なら、selectJ1AutoTargets が選ぶ対象すべてを処理する。
 	ChallengeID *string
 	AgentDecl   *AgentDeclaration
-	Invoker     JudgmentInvoker
+	// ConnDecl は委譲先の宣言。区切りを分ける判断点の入力（リポジトリ）と出力の検査が使う。nil（connectors.json が
+	// 無い）なら区切りを分ける判断点を呼ばない。
+	ConnDecl *ConnectorsDeclaration
+	Invoker  JudgmentInvoker
 	// CycleID はこの操作が属する周（`BeginCycle` が返した ID）。空文字列は
 	// ErrValidation。
 	CycleID string
@@ -655,8 +682,11 @@ type J1AutoResult = JudgmentAutoResult
 // 起動・出力の写像は core が持ち、呼び出し元（internal/cli）は宣言の読み込み・
 // invoker の組み立て・周の開始と終了だけを行う（P2）。
 //
+// 分類の判断点の後に、区切りを分ける記録が pending の課題ごとに区切りを分ける判断点を呼ぶ（in.ConnDecl があるとき。
+// 結果は同じ Items に足す）。
+//
 //   - in.ChallengeID が非 nil（ID を指定した個別の操作）: その課題が
-//     未分類でなければ ErrInvalidTransition（§判断点の共通の規則「判断の
+//     未分類でも「分類済で記録が pending」でもなければ ErrInvalidTransition（§判断点の共通の規則「判断の
 //     呼び出しの対象にするのは、状態がその判断点の遷移元で…課題に限る」は
 //     ID 指定でも適用する）。周の上限で起動できなければ ErrBudgetExceeded、
 //     終了していない run があれば ErrRunInProgress をそのまま返す（CLI が
@@ -684,7 +714,18 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 			return nil, err
 		}
 		if ch.Status != StatusUnclassified {
-			return nil, ErrInvalidTransition
+			// 分類済で区切りを分ける記録が pending の課題は、区切りを分ける判断点だけを呼ぶ。
+			pending, err := s.sliceSplitIsPending(ctx, ch.ID)
+			if err != nil {
+				return nil, err
+			}
+			if !pending || ch.Status != StatusClassified || in.ConnDecl == nil {
+				return nil, ErrInvalidTransition
+			}
+			if err := s.splitOneJ10(ctx, in, nil, *ch, result); err != nil {
+				return nil, err
+			}
+			return result, nil
 		}
 		sections, err := s.buildJ1Sections(ctx, *ch, in.AgentDecl)
 		if err != nil {
@@ -709,6 +750,9 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 			return nil, err
 		}
 		result.Items = append(result.Items, item)
+		if err := s.splitAfterClassifyOne(ctx, in, res, result); err != nil {
+			return nil, err
+		}
 		return result, nil
 	}
 
@@ -793,6 +837,10 @@ func (s *Store) ClassifyAutoJ1(ctx context.Context, in J1AutoInput) (*J1AutoResu
 			return nil, err
 		}
 		result.Items = append(result.Items, item)
+	}
+	// 分類の判断点をすべて呼んだ後に対象を選ぶ（この段で pending になった課題も含む）。
+	if err := s.splitAutoJ10(ctx, in, jc, result); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

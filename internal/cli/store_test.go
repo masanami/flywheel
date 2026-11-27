@@ -110,6 +110,7 @@ func TestRun_AllRequiresStoreCommandsRejectTooNewStoreForEveryRegisteredCommand(
 	cases := [][]string{
 		{"init"},
 		{"create", "--title", "t"},
+		{"requirement", "create", "--title", "t"},
 		{"show", "C-1"},
 		{"list"},
 		{"edit", "C-1"},

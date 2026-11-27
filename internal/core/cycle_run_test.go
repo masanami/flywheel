@@ -85,7 +85,7 @@ func succeeded(output []byte) JudgmentLaunchOutput {
 // j1MineP は優先度 p の mine の出力。
 func j1MineP(t *testing.T, p string) []byte {
 	t.Helper()
-	return j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr(p), Reason: "r", Headline: strPtr("h"), Context: strPtr("c")})
+	return j1Output(t, j1RawOutput{Verdict: "mine", FitsOneSlice: boolPtr(true), Priority: strPtr(p), Reason: "r", Headline: strPtr("h"), Context: strPtr("c")})
 }
 
 // mineThenPlanInvoker は J1 なら mine（優先度 P1）、J2 なら plan（宛先は brief）を返す。
@@ -209,7 +209,7 @@ func TestRunCycle_RunsIngestClassifyPlanInOrder(t *testing.T) {
 	}
 	res := f.run(t, in)
 
-	want := []CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseSupervise, CyclePhaseLearn, CyclePhaseImprove, CyclePhaseBackup}
+	want := []CyclePhase{CyclePhaseRelease, CyclePhaseSettle, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseSupervise, CyclePhaseLearn, CyclePhaseImprove, CyclePhaseBackup}
 	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("phases = %v, want %v", got, want)
 	}
@@ -235,8 +235,8 @@ func TestRunCycle_NoIngestInput_IngestPhaseIsSkipped(t *testing.T) {
 	if !ing.Skipped || ing.Ingest != nil {
 		t.Errorf("ingest phase = %+v, want skipped with no result", ing)
 	}
-	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseRelease, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseSupervise, CyclePhaseLearn, CyclePhaseImprove, CyclePhaseBackup}) {
-		t.Errorf("phases = %v, want all ten phases listed even when ingest is skipped", got)
+	if got := phaseNames(res); fmt.Sprint(got) != fmt.Sprint([]CyclePhase{CyclePhaseRelease, CyclePhaseSettle, CyclePhaseIngest, CyclePhaseClassify, CyclePhasePlan, CyclePhaseRun, CyclePhaseVerify, CyclePhaseSupervise, CyclePhaseLearn, CyclePhaseImprove, CyclePhaseBackup}) {
+		t.Errorf("phases = %v, want all eleven phases listed even when ingest is skipped", got)
 	}
 }
 

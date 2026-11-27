@@ -234,9 +234,9 @@ func TestChatPrompt_LimitIsRaisedAndCoversTheBody(t *testing.T) {
 	}
 }
 
-// AC-128: chat.md の上限は 5.5 KiB を超えない。
+// AC-213（docs/features/request-to-plan-s3.md。S1 の天井 5.5 KiB を置き換える）: chat.md の上限は 6.5 KiB を超えない。
 func TestChatPrompt_LimitIsWithinTheCap(t *testing.T) {
-	if limit := judgmentPromptLimit[chatPromptFile]; limit > 5632 {
-		t.Errorf("chat.md limit %d bytes, want <= 5632", limit)
+	if limit := judgmentPromptLimit[chatPromptFile]; limit > 6656 {
+		t.Errorf("chat.md limit %d bytes, want <= 6656", limit)
 	}
 }

@@ -23,6 +23,9 @@ func runCreate(a Args) (any, error) {
 	if v, ok := a.Values["urgency"]; ok {
 		in.Urgency = &v
 	}
+	if v, ok := a.Values["requirement"]; ok {
+		in.Requirement = &v
+	}
 	in.Chat = a.Chat.coreMark()
 	c, err := a.Store.CreateChallenge(context.Background(), core.ChannelCLI, in)
 	if err != nil {
@@ -249,6 +252,43 @@ func writeSpecDraftSupervisorAnswers(b *strings.Builder, answers []core.SpecDraf
 	}
 }
 
+// writeRequirement は要求の記録（ID・出どころ。元の Issue なら URL）と、同じ要求の課題を書く（無ければ何も書かない）。
+func writeRequirement(b *strings.Builder, r *core.RequirementDetail) {
+	if r == nil {
+		return
+	}
+	var origin string
+	switch {
+	case r.Origin == core.RequirementOriginIssue && r.URL != nil:
+		origin = "元の Issue: " + escapeControl(*r.URL)
+	case r.Origin == core.RequirementOriginIssue:
+		origin = "出どころ: 元の Issue"
+	case r.Origin == core.RequirementOriginChat:
+		origin = "出どころ: チャットの欄の会話"
+	case r.Origin == core.RequirementOriginManual:
+		origin = "出どころ: 手で作った"
+	default:
+		origin = "出どころ: " + string(r.Origin)
+	}
+	fmt.Fprintf(b, "要求:          %s（%s）\n", r.ID, origin)
+	b.WriteString("同じ要求の課題:\n")
+	for _, c := range r.Challenges {
+		label, _ := c.Status.Label()
+		fmt.Fprintf(b, "  %s  %s  %s (%s)\n", c.ID, escapeControl(c.Title), label, c.Status)
+	}
+}
+
+// writeSliceSplit は区切りを分ける記録の状態と、案の区切りの番号と題名を書く（記録が無ければ何も書かない）。
+func writeSliceSplit(b *strings.Builder, s *core.SliceSplit) {
+	if s == nil {
+		return
+	}
+	fmt.Fprintf(b, "区切りを分ける記録: %s\n", s.State)
+	for i, v := range s.Slices {
+		fmt.Fprintf(b, "  %d. %s\n", i+1, escapeControl(v.Title))
+	}
+}
+
 // challengeDetailText は --json 無しの show の表示。
 func challengeDetailText(d *core.ChallengeDetail) string {
 	var b strings.Builder
@@ -293,6 +333,8 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	}
 	fmt.Fprintf(&b, "依存先:        %s\n", textOrDash(joinOrNil(deps)))
 	fmt.Fprintf(&b, "依存元:        %s\n", textOrDash(joinOrNil(d.Dependents)))
+	writeRequirement(&b, d.Requirement)
+	writeSliceSplit(&b, d.SliceSplit)
 	fmt.Fprintf(&b, "統合先:        %s\n", usesIntegrationText(d.UsesIntegration))
 	if d.IntegrationRef != nil {
 		fmt.Fprintf(&b, "統合先の識別:  %s\n", escapeControl(*d.IntegrationRef))

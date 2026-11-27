@@ -16,7 +16,9 @@ const CycleNotStartedNothingToAdvance = "nothing_to_advance"
 
 // CycleWorkStages はサイクルを回すと進むものの、段ごとの件数。
 type CycleWorkStages struct {
-	Release  int
+	Release int
+	// Settle は片付けの段の対象（解決したが、まだ解決の日時を持たない要求の記録）の数。
+	Settle   int
 	Classify int
 	Plan     int
 	Run      int
@@ -36,7 +38,7 @@ type CycleWork struct {
 
 // sum は段の件数の合計を返す。
 func (st CycleWorkStages) sum() int {
-	return st.Release + st.Classify + st.Plan + st.Run + st.Verify + st.Supervise + st.Learn + st.Improve + st.Cleanup
+	return st.Release + st.Settle + st.Classify + st.Plan + st.Run + st.Verify + st.Supervise + st.Learn + st.Improve + st.Cleanup
 }
 
 // CountCycleWork はサイクルを回すと進むものを数える（読み取りだけ。ストアを書かない）。
@@ -56,6 +58,12 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		st.Classify = len(ids)
+
+		settle, err := selectRequirementSettleTargets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		st.Settle = len(settle)
 
 		learn, err := selectJ6AutoTargets(ctx, tx)
 		if err != nil {
@@ -80,6 +88,12 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 		if conn == nil {
 			return nil
 		}
+		// 区切りを分ける判断点も、分類の段が進める。
+		splits, _, err := selectJ10AutoTargets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		st.Classify += len(splits)
 		plan, _, err := selectJ2AutoTargets(ctx, tx)
 		if err != nil {
 			return err
@@ -246,7 +260,7 @@ func (dc *delegationContext) advancesWhenTheStageRuns() bool {
 // CountCycleWork（サイクルを始めるかの数え。多めに数える）とは別物で、サイクルを続けるか・待つか・終えるかを決める。
 type RoundWork struct {
 	// Startable は、いま始められるもの（次の回りで進めうるもの）の件数。Stages はその段ごとの内訳
-	// （Learn・Improve・Cleanup は常に 0。終わりの段の対象は数えない）。
+	// （Settle・Learn・Improve・Cleanup は常に 0）。
 	Startable int
 	Stages    CycleWorkStages
 	// Active は作業中の実行の件数（委譲先が作業している実行。同時に走らせる数に数える実行と同じ決まり〔activeDelegationCount〕）。
@@ -296,6 +310,11 @@ func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, con
 		if conn == nil {
 			return nil
 		}
+		splits, _, err := selectJ10AutoTargets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		st.Classify += len(splits)
 		plan, _, err := selectJ2AutoTargets(ctx, tx)
 		if err != nil {
 			return err

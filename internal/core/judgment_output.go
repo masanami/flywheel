@@ -35,6 +35,18 @@ const (
 // J1VerdictValues は J1Verdict の全値（§IF / API の記載順）。
 var J1VerdictValues = []J1Verdict{J1VerdictMine, J1VerdictNotMine, J1VerdictUncertain}
 
+// J10Verdict は区切りを分ける判断点の判定の閉集合。
+type J10Verdict string
+
+// J10Verdict の2値。
+const (
+	J10VerdictSplit  J10Verdict = "split"
+	J10VerdictSingle J10Verdict = "single"
+)
+
+// J10VerdictValues は J10Verdict の全値。
+var J10VerdictValues = []J10Verdict{J10VerdictSplit, J10VerdictSingle}
+
 // J2Verdict は J2（計画）の判定の閉集合。
 type J2Verdict string
 
@@ -181,6 +193,9 @@ func AllJudgmentOutputClosedValues() []string {
 		vals = append(vals, string(v))
 	}
 	for _, v := range J1VerdictValues {
+		vals = append(vals, string(v))
+	}
+	for _, v := range J10VerdictValues {
 		vals = append(vals, string(v))
 	}
 	for _, v := range J2VerdictValues {

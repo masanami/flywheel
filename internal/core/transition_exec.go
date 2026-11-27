@@ -108,6 +108,10 @@ type runTransitionParams struct {
 	replanResolved func() bool
 	// att は本人確認つきの遷移（attested）の Attestation。経路 chat の印の検査と種類の絞りに使う。
 	att Attestation
+	// coveredBy は、この遷移を、別の本人確認つきの操作の中身として受けること。空でなければ、登録簿と経路 chat の絞りを、遷移の操作の
+	// 種類ではなくこの種類で照らし、会話と課題の紐づけは足さない（もとの操作が残す）。立てるのは、区切りを分ける回答が元の課題を
+	// 取り下げる書き込み（applySliceSplit）だけ。
+	coveredBy attestedAction
 	// restricted は、遷移表の制限つきの行を LookupRestricted で引くこと。立てるのは、その行の専用の書き込みだけ
 	// （スーパーバイザーの手の supervisor_resolve〔T20〕と、仕様の文書の場所を付けた編集の spec_draft_unhold〔T21〕だけ。終端から出る T18 は、終端の検査が先に断るのでこの道を通らない）。本人確認の要る行は、これを立てても本人確認つきの呼び出しだけが通る。
 	restricted bool
@@ -147,7 +151,8 @@ func (s *Store) runTransition(ctx context.Context, p runTransitionParams, apply 
 	if err != nil {
 		return nil, err
 	}
-	// 完了・取り下げへ進む遷移は、すべてここを通る（transitionInTx を直接呼ぶ経路は、終端の状態へ進まない）。
+	// 完了・取り下げへ進む遷移はここを通る。transitionInTx を直接呼ぶ経路で終端の状態へ進むのは、区切りを分ける回答の取り下げだけで、
+	// その後始末は ExecuteAnswer が行う。
 	if result.Status == StatusDone || result.Status == StatusWithdrawn {
 		s.cleanupSpecDraft(ctx, cid, p.actor)
 	}
@@ -205,6 +210,9 @@ func (s *Store) transitionGateInTx(ctx context.Context, tx *sql.Tx, p runTransit
 		// 登録簿の組が受けられる操作かを、遷移表の行が確定したこの時点で照らす
 		// （何も書く前。拒否は ErrVerificationRejected）。
 		act, ok := actionForTransition(tr)
+		if ok && p.coveredBy != "" {
+			act = p.coveredBy
+		}
 		if !ok || !registryPermits(p.channel, p.verification, act) {
 			return nil, Transition{}, ErrVerificationRejected
 		}
@@ -348,7 +356,7 @@ func (s *Store) transitionInTx(ctx context.Context, tx *sql.Tx, rec *activityRec
 		return nil, err
 	}
 	// 経路 chat の本人確認つきの操作は、成立した同じ書き込みの中で会話と課題を紐づける。
-	if p.attested && p.att.chat != nil {
+	if p.attested && p.att.chat != nil && p.coveredBy == "" {
 		act, ok := actionForTransition(tr)
 		if !ok {
 			return nil, fmt.Errorf("core: transition %s: no attested action for the chat link", tr.ID)

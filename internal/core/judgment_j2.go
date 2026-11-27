@@ -1260,6 +1260,14 @@ func selectJ2AutoTargets(ctx context.Context, tx *sql.Tx) (out []int64, excluded
 		if drafting {
 			continue
 		}
+		// 区切りを分ける途中の課題も、理由を残さず外す。
+		splitting, err := sliceSplitBlocksPlanning(ctx, tx, cid)
+		if err != nil {
+			return nil, nil, err
+		}
+		if splitting {
+			continue
+		}
 		ex, err := challengeAutoExclusion(ctx, tx, cid)
 		if err != nil {
 			return nil, nil, err
@@ -2063,14 +2071,17 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 		// 上流の取得（gh の呼び出し）を無駄にしないため、終了していない run が
 		// あれば取得の前に ErrRunInProgress にする（RunJudgment の①が最終防衛）。
 		cid, _ := parseChallengeID(ch.ID)
-		var active, drafting bool
+		var active, drafting, splitting bool
 		err = s.db.Read(ctx, func(tx *sql.Tx) error {
 			a, err := challengeHasActiveRun(ctx, tx, cid)
 			if err != nil {
 				return err
 			}
 			active = a
-			drafting, err = specDraftBlocksPlanning(ctx, tx, cid)
+			if drafting, err = specDraftBlocksPlanning(ctx, tx, cid); err != nil {
+				return err
+			}
+			splitting, err = sliceSplitBlocksPlanning(ctx, tx, cid)
 			return err
 		})
 		if err = classifyReadWriteErr(err); err != nil {
@@ -2082,6 +2093,10 @@ func (s *Store) PlanAutoJ2(ctx context.Context, in J2AutoInput) (*J2AutoResult, 
 		// 下書きづくりの途中の課題は、ID を指定しても判断点を呼ばない（計画を登録すると、下書きが宙に浮く）。
 		if drafting {
 			return nil, ErrInvalidTransition
+		}
+		if splitting {
+			result.NotStarted = append(result.NotStarted, NotStarted{ChallengeID: ch.ID, Reason: NotStartedSliceSplitPending})
+			return result, nil
 		}
 		items, notStarted, err := s.planOneJ2(ctx, in, nil, *ch)
 		if err != nil {
@@ -2148,13 +2163,16 @@ func (s *Store) j2AutoPreLaunch(ctx context.Context, in J2AutoInput, cid int64) 
 	if ch.Status != StatusClassified {
 		return nil, nil, nil
 	}
-	// 対象を選んだ後に下書きづくりへ回っていれば起動しない。
-	var drafting bool
+	// 対象を選んだ後に下書きづくりへ回ったか、区切りを分ける途中になっていれば起動しない。
+	var drafting, splitting bool
 	err = s.db.Read(ctx, func(tx *sql.Tx) (err error) {
-		drafting, err = specDraftBlocksPlanning(ctx, tx, cid)
+		if drafting, err = specDraftBlocksPlanning(ctx, tx, cid); err != nil {
+			return err
+		}
+		splitting, err = sliceSplitBlocksPlanning(ctx, tx, cid)
 		return err
 	})
-	if err = classifyReadWriteErr(err); err != nil || drafting {
+	if err = classifyReadWriteErr(err); err != nil || drafting || splitting {
 		return nil, nil, err
 	}
 	excluded, err := s.j2StillEligibleForAuto(ctx, cid)

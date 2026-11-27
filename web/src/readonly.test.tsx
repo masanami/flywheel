@@ -201,6 +201,7 @@ function awaitingApproval(): Record<string, unknown> {
       stages: {
         classify: 0,
         cleanup: 0,
+        settle: 0,
         improve: 0,
         learn: 0,
         plan: 0,
@@ -261,6 +262,8 @@ function awaitingApproval(): Record<string, unknown> {
       },
       pairs: S4_PAIRS,
       source_binding: null,
+      requirement: null,
+      slice_split: null,
       source_children: [],
       stages: S4_STAGES,
       waiting: { prerequisites: [] },

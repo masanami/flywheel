@@ -165,6 +165,8 @@ export function createMockApi(
       })),
       pairs: pairsOf(m.stages),
       source_binding: extra.source_binding ?? null,
+      requirement: m.requirement ?? null,
+      slice_split: m.sliceSplit ?? null,
       source_children: extra.source_children ?? [],
       supervisor_actions: [],
       supervisor_hands_taken: {},
