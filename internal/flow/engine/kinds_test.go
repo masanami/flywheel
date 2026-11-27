@@ -637,3 +637,98 @@ func TestWorkspaceAcquireNeedsAKeyOrAnIssue(t *testing.T) {
 		t.Errorf("worktree-setup was called: %q", got)
 	}
 }
+
+// 本文の末尾の注記は、節ごとの出どころ（定義の with が指すステップ）を書く。残指摘をレビューのステップから渡す定義で、
+// 「実装ステップの出力から作った」と書かない。
+func TestRenderPRBodyProvenance(t *testing.T) {
+	ref := func(s string) workflow.Value {
+		r, err := workflow.ParseRef(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return workflow.Value{Ref: r}
+	}
+	// 組み込みの ticket・ticket-light の publish と同じ with の参照。
+	reviewed := &workflow.Step{ID: "publish", With: []*workflow.Binding{
+		{Name: "base", Value: ref("$inputs.base")},
+		{Name: "title", Value: workflow.Value{Literal: "t"}},
+		{Name: "behaviors", Value: ref("$steps.implement.behaviors")},
+		{Name: "quality", Value: ref("$steps.implement.outcome")},
+		{Name: "residual_findings", Value: ref("$steps.self-review.residual_findings")},
+		{Name: "unverified", Value: ref("$steps.implement.unverified")},
+		{Name: "review_unverified", Value: ref("$steps.self-review.unverified")},
+		{Name: "cross_repo", Value: ref("$steps.implement.cross_repo_attestation")},
+	}}
+	src := prSources(reviewed)
+	if src["residual_findings"] != "self-review" || src["behaviors"] != "implement" || src["base"] != "" || src["title"] != "" {
+		t.Fatalf("prSources = %v", src)
+	}
+	body := RenderPRBody(PRInput{RunID: "r1", Summary: "s", Sources: src})
+	want := "振る舞いの一覧・品質ゲート・未検証・クロスリポジトリ確証の節は実装ステップ（implement）の出力、" +
+		"未検証・残指摘の節はレビューのステップ（self-review）の出力から作っている。"
+	if !strings.Contains(body, want) {
+		t.Errorf("body lacks %q:\n%s", want, body)
+	}
+	for _, bad := range []string{"残指摘・未検証・品質ゲートの節は実装ステップ", "差し戻しの修正（fix）の後の変化は反映されない", "実装ステップの型付きの出力から"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("body still has the stale note %q:\n%s", bad, body)
+		}
+	}
+	if !strings.Contains(body, "run `r1`") {
+		t.Errorf("body lacks the run id:\n%s", body)
+	}
+
+	// レビューのステップを持たない定義（全部を実装ステップから渡す）では、全部を実装ステップの出どころとして書く。
+	body = RenderPRBody(PRInput{RunID: "r1", Summary: "s", Sources: map[string]string{
+		"behaviors": "implement", "quality": "implement", "unverified": "implement", "residual_findings": "implement", "cross_repo": "implement",
+	}})
+	if want := "振る舞いの一覧・品質ゲート・未検証・残指摘・クロスリポジトリ確証の節は実装ステップ（implement）の出力から作っている。"; !strings.Contains(body, want) {
+		t.Errorf("body lacks %q:\n%s", want, body)
+	}
+	if strings.Contains(body, "self-review") {
+		t.Errorf("a definition without a review step must not mention it:\n%s", body)
+	}
+
+	// 定義が独自の名前のステップを指せば、その名前で書く。ステップの出力でない値だけなら、出どころのステップを書かない。
+	body = RenderPRBody(PRInput{RunID: "r1", Summary: "s", Sources: map[string]string{"residual_findings": "audit"}})
+	if !strings.Contains(body, "残指摘の節はステップ（audit）の出力から作っている。") {
+		t.Errorf("body lacks the custom step:\n%s", body)
+	}
+	body = RenderPRBody(PRInput{RunID: "r1", Summary: "s"})
+	if !strings.Contains(body, "定義の with に渡された型付きの値から作っている。") || strings.Contains(body, "implement") {
+		t.Errorf("without step references the note must not name a step:\n%s", body)
+	}
+}
+
+// 組み込みの ticket・ticket-light の publish は、残指摘とレビューの未検証をレビューのステップから渡している
+// （本文の末尾の注記がその出どころを書く）。
+func TestBuiltinPublishSources(t *testing.T) {
+	for _, name := range []string{"ticket", "ticket-light"} {
+		path := filepath.Join("..", "assets", "files", "workflows", name+".yaml")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wf, err := workflow.Parse(path, data)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var publish *workflow.Step
+		for _, s := range wf.Steps {
+			if s.Kind == "pull-request" && workflow.PRAction(s) == workflow.PRActionPublish {
+				publish = s
+			}
+		}
+		if publish == nil {
+			t.Fatalf("%s: no publish step", name)
+		}
+		src := prSources(publish)
+		if src["residual_findings"] != "self-review" || src["review_unverified"] != "self-review" || src["behaviors"] != "implement" {
+			t.Errorf("%s: sources = %v", name, src)
+		}
+		body := RenderPRBody(PRInput{RunID: "r1", Summary: "s", Sources: src})
+		if !strings.Contains(body, "残指摘の節はレビューのステップ（self-review）の出力から作っている。") {
+			t.Errorf("%s: body lacks the review provenance:\n%s", name, body)
+		}
+	}
+}

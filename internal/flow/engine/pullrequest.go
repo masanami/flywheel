@@ -66,6 +66,7 @@ func (e *Engine) executePullRequest(ctx context.Context, st *runstate.State, u *
 		return stepError("%v", err)
 	}
 	in.RunID = st.RunID
+	in.Sources = prSources(step)
 	git := func(args ...string) ([]string, toolResult) {
 		argv := append([]string{e.gitBin()}, args...)
 		return argv, tools.run(dir, argv...)
@@ -187,6 +188,77 @@ type PRInput struct {
 	Unverified       []json.RawMessage
 	CrossRepo        string
 	CrossRepoGiven   bool
+	// Sources は with の名前ごとの、値を出したステップの識別（`$steps.<識別>.…` の参照から取る）。
+	// ステップの出力でない値（入力・リテラル）と、Sources を渡さない呼び出しでは空。本文の末尾の注記に出どころを書くのに使う。
+	Sources map[string]string
+}
+
+// prSources は publish の with のうち、ステップの出力を指す参照の出どころ（ステップの識別）を集める。
+func prSources(step *workflow.Step) map[string]string {
+	out := map[string]string{}
+	for _, b := range step.With {
+		if r := b.Value.Ref; r != nil && r.Kind == workflow.RefSteps {
+			out[b.Name] = r.Step
+		}
+	}
+	return out
+}
+
+// prSections は本文の転記節と、その節の材料になる with の名前（本文に並ぶ順）。
+var prSections = []struct {
+	title string
+	keys  []string
+}{
+	{"振る舞いの一覧", []string{"behaviors"}},
+	{"品質ゲート", []string{"quality"}},
+	{"未検証", []string{"unverified", "review_unverified"}},
+	{"残指摘", []string{"residual_findings"}},
+	{"クロスリポジトリ確証", []string{"cross_repo"}},
+}
+
+// stepLabel はステップの識別を本文に書く名前にする（組み込みの定義のステップは役割の言葉を添える）。
+func stepLabel(id string) string {
+	switch id {
+	case "implement":
+		return "実装ステップ（implement）"
+	case "self-review":
+		return "レビューのステップ（self-review）"
+	}
+	return "ステップ（" + id + "）"
+}
+
+// renderProvenance は本文の末尾の注記を作る: どの節がどのステップの出力から来たか。
+// 出どころは定義の with の参照（Sources）から決めるので、定義を変えても注記が実物と食い違わない。
+func renderProvenance(in PRInput) string {
+	var order []string              // 出どころのステップ（最初に現れた順）
+	groups := map[string][]string{} // ステップ → 節の名前
+	for _, sec := range prSections {
+		seen := map[string]bool{}
+		for _, k := range sec.keys {
+			src := in.Sources[k]
+			if src == "" || seen[src] {
+				continue
+			}
+			seen[src] = true
+			if _, ok := groups[src]; !ok {
+				order = append(order, src)
+			}
+			groups[src] = append(groups[src], sec.title)
+		}
+	}
+	var b strings.Builder
+	if len(order) == 0 {
+		b.WriteString("転記節（振る舞いの一覧・品質ゲート・未検証・残指摘・クロスリポジトリ確証）は、定義の with に渡された型付きの値から作っている。\n\n")
+	} else {
+		parts := make([]string, 0, len(order))
+		for _, src := range order {
+			parts = append(parts, strings.Join(groups[src], "・")+"の節は"+stepLabel(src)+"の出力")
+		}
+		b.WriteString(strings.Join(parts, "、") + "から作っている。")
+		b.WriteString("各節はそのステップの最後の出力から作っており、そのステップより後の修正での変化は反映されない。\n\n")
+	}
+	fmt.Fprintf(&b, "この PR は harness runtime（run `%s`）が作成した。これらの節は、各ステップの型付きの出力から runtime が転記した（LLM による要約・件数への丸めを経ていない）。\n", in.RunID)
+	return b.String()
 }
 
 func prInputFrom(with map[string]json.RawMessage) (PRInput, error) {
@@ -349,8 +421,7 @@ func RenderPRBody(in PRInput) string {
 	}
 
 	b.WriteString("---\n\n")
-	b.WriteString("振る舞いの一覧・残指摘・未検証・品質ゲートの節は実装ステップ（implement）の出力から作っている。差し戻しの修正（fix）の後の変化は反映されない。\n\n")
-	fmt.Fprintf(&b, "この PR は harness runtime（run `%s`）が作成した。振る舞いの一覧・品質ゲート・未検証・残指摘・クロスリポジトリ確証の節は、実装ステップの型付きの出力から runtime が転記した（LLM による要約・件数への丸めを経ていない）。\n", in.RunID)
+	b.WriteString(renderProvenance(in))
 	return b.String()
 }
 

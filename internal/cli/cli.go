@@ -49,6 +49,11 @@ func runWithDeps(rawArgs []string, stdin io.Reader, stdout, stderr io.Writer, co
 		_, _ = fmt.Fprint(stdout, usageText)
 		return 0
 	}
+	// `flywheel flow [<サブコマンド>] --help`（-h）は、そのコマンドの使い方を出して 0 で終わる（一覧の flow の行と同じ文）。
+	if text, ok := flowHelp(rawArgs); ok {
+		_, _ = fmt.Fprint(stdout, text)
+		return 0
+	}
 
 	// 委譲の子の環境（core.DelegatedRunEnvVar が、空文字でも設定されている）からは、`help` を
 	// 除くすべてのコマンドを、コマンドの照合より前に拒否する（読み取りも含む。fail-closed）。
