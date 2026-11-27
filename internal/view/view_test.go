@@ -70,7 +70,7 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.CycleResponse{}, view.CycleStarted{}, view.CycleStatus{}, view.SlotCleared{}, view.SlotResponse{}, view.InitResponse{},
 		view.MarkReadResponse{}, view.BudgetResponse{}, view.ExportBody{}, view.ExportResponse{}, view.ImportBody{}, view.ImportResponse{},
 		view.ApprovalPlan{}, view.ApprovalRelease{}, view.ApprovalOtherOperation{}, view.ApprovalSummary{}, view.ApprovalSummaryResponse{}, view.DirectCompletion{}, view.ChallengeDirectCompletionResponse{}, view.StatusParentAgent{}, view.ShowCardResponse{}, view.ApprovedCardResponse{},
-		view.VersionResponse{}, view.FollowupPromoteResponse{},
+		view.VersionResponse{}, view.FollowupPromoteResponse{}, view.ChallengeSpecResponse{},
 		view.ChatActivity{}, view.ChatMessage{}, view.ChatResponse{}, view.ChatQuestionOption{}, view.ChatQuestion{}, view.ChatPromptAnswer{}, view.ChatPrompt{},
 		view.ChatPromptAnswerRequest{}, view.ChatSessionChallenge{}, view.ChatSessionSummary{}, view.ChatSessionsResponse{},
 		view.ChallengeChatSession{}, view.ChatTranscriptEntry{}, view.ChatTranscriptResponse{}, view.ShowChallenge{},
@@ -102,14 +102,14 @@ func TestFromApprovalPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"approval":{"added_tasks":[],"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","conflict_fixes":[],"direct_completion":null,"done_criteria":"d","followups":[],"integration_ref":null,"kind":"completion","mergeability_note":"","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"stages":` + emptyStages + `,"supervisor_hands_taken":{},"supervisor_questions":[],"tasks":[],"title":"t","uses_integration":null,"version":4}}`
+	want := `{"approval":{"added_tasks":[],"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","conflict_fixes":[],"direct_completion":null,"done_criteria":"d","followups":[],"integration_ref":null,"kind":"completion","mergeability_note":"","other_pending_operations":[{"id":"OP-2","kind":"delete","summary":"del"}],"pairs":[],"plan":null,"release_held":true,"releases":[{"head_sha":"abc","id":"OP-1","ref":"https://github.com/o/r/pull/3","summary":"rel"}],"spec_draft_answers":[],"spec_is_draft":false,"spec_path":null,"stages":` + emptyStages + `,"supervisor_hands_taken":{},"supervisor_questions":[],"tasks":[],"title":"t","uses_integration":null,"version":4}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
 
 	plan := &core.ApprovalPreview{ChallengeID: "C-1", Title: "t", Kind: core.ApprovalKindPlan, Version: 2, PlanVersion: 3, PlanBody: "B"}
 	b, _ = json.Marshal(view.FromApprovalPreview(plan, nil))
-	want = `{"approval":{"added_tasks":[],"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","conflict_fixes":[],"direct_completion":null,"done_criteria":null,"followups":[],"integration_ref":null,"kind":"plan","mergeability_note":"","other_pending_operations":[],"pairs":[],"plan":{"body":"B","budget_limit_reason":null,"budget_limit_usd":null,"budget_usd":null,"summary":null,"tasks":[],"topics":[],"uses_integration":null,"version":3},"release_held":true,"releases":[],"stages":` + emptyStages + `,"supervisor_hands_taken":{},"supervisor_questions":[],"tasks":[],"title":"t","uses_integration":null,"version":2}}`
+	want = `{"approval":{"added_tasks":[],"challenge_id":"C-1","conditions_after_release":[],"conditions_after_release_heading":"` + view.ConditionsAfterReleaseHeading(view.OutlookNotReleasing) + `","conflict_fixes":[],"direct_completion":null,"done_criteria":null,"followups":[],"integration_ref":null,"kind":"plan","mergeability_note":"","other_pending_operations":[],"pairs":[],"plan":{"body":"B","budget_limit_reason":null,"budget_limit_usd":null,"budget_usd":null,"summary":null,"tasks":[],"topics":[],"uses_integration":null,"version":3},"release_held":true,"releases":[],"spec_draft_answers":[],"spec_is_draft":false,"spec_path":null,"stages":` + emptyStages + `,"supervisor_hands_taken":{},"supervisor_questions":[],"tasks":[],"title":"t","uses_integration":null,"version":2}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
