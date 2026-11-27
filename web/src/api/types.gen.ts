@@ -1546,6 +1546,7 @@ export const STOP_KIND_CODES = [
   "intake_unverified",
   "upstream_unreadable",
   "child_question",
+  "spec_question",
 ] as const;
 
 export const SUPERVISOR_HAND_CODES = [

@@ -14,8 +14,8 @@ import (
 func TestSupervisorKinds_ClosedSetsAndTheHandTable(t *testing.T) {
 	t.Parallel()
 	kinds := StopKindValues()
-	if len(kinds) != 10 {
-		t.Fatalf("stop kinds = %v, want 10", kinds)
+	if len(kinds) != 11 {
+		t.Fatalf("stop kinds = %v, want 11", kinds)
 	}
 	for _, k := range kinds {
 		if got, ok := ParseStopKind(string(k)); !ok || got != k {
@@ -24,6 +24,9 @@ func TestSupervisorKinds_ClosedSetsAndTheHandTable(t *testing.T) {
 	}
 	if _, ok := ParseStopKind("child_question"); !ok {
 		t.Error("ParseStopKind rejected child_question (S4b-3)")
+	}
+	if got, ok := ParseStopKind("spec_question"); !ok || got != StopKindSpecQuestion {
+		t.Errorf("ParseStopKind(spec_question) = %q, %v", got, ok)
 	}
 	hands := SupervisorHandValues()
 	if len(hands) != 8 {
@@ -49,6 +52,7 @@ func TestSupervisorKinds_ClosedSetsAndTheHandTable(t *testing.T) {
 		"intake_unverified":   {"reverify", "defer", "escalate"},
 		"upstream_unreadable": {"defer", "escalate"},
 		"child_question":      {"answer", "escalate"},
+		"spec_question":       {"answer", "escalate"},
 	}
 	for _, k := range kinds {
 		got := SupervisorHandsFor(k)

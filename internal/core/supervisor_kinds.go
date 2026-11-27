@@ -3,11 +3,12 @@ package core
 // このファイルは、スーパーバイザーのその場の対処（区切り S4b-2）が使う閉じた一覧を 1 か所に置く:
 // 止まり方・手・対処の結果・断りの理由・保留の処理の状態、と「止まり方ごとに選べる手」の表。
 // 止まり方 child_question と手 answer（委譲先の問いに答える。区切り S4b-3）もここに置く。
+// 止まり方 spec_question（下書きの問い。区切り S2b-2）は、判断点の入力・選べる手の表・対処の記録に使い、保留には渡さない。
 
 // StopKind は保留を作る呼び出し元が渡す、スーパーバイザーを呼ぶきっかけの種類（止まり方）。保留の理由から導かない。
 type StopKind string
 
-// StopKind の 10 値。
+// StopKind の 11 値。
 const (
 	// StopKindVerifyUncertain は、完了の検証・タスクの検証が「判断できない」を返した。
 	StopKindVerifyUncertain StopKind = "verify_uncertain"
@@ -29,12 +30,14 @@ const (
 	StopKindUpstreamUnreadable StopKind = "upstream_unreadable"
 	// StopKindChildQuestion は、委譲先からの問い（保留を作る前に、スーパーバイザーが答えるか上げるかを決める）。
 	StopKindChildQuestion StopKind = "child_question"
+	// StopKindSpecQuestion は、下書きづくりで残った問い（下書きの問い）。下書きづくりの保留には渡さない（保留はスーパーバイザー待ちにしない）。
+	StopKindSpecQuestion StopKind = "spec_question"
 )
 
 var stopKindValues = []StopKind{
 	StopKindVerifyUncertain, StopKindArtifactMissing, StopKindDelegateStopped, StopKindFactsUnmet, StopKindReworkLimit,
 	StopKindChecksFailed, StopKindJudgmentFailed, StopKindIntakeUnverified, StopKindUpstreamUnreadable,
-	StopKindChildQuestion,
+	StopKindChildQuestion, StopKindSpecQuestion,
 }
 
 // StopKindValues は止まり方の閉集合を定義の順に返す（写し）。
@@ -69,7 +72,7 @@ const (
 	HandDefer SupervisorHand = "defer"
 	// HandEscalate は、調べた内容と推奨を付けて、オーナーへ上げる。
 	HandEscalate SupervisorHand = "escalate"
-	// HandAnswer は、根拠を示して、委譲先の問い（子の問い）に答える。保留を閉じる手ではない。
+	// HandAnswer は、根拠を示して、委譲先の問い（子の問い）・下書きの問いに答える。保留を閉じる手ではない。
 	HandAnswer SupervisorHand = "answer"
 )
 
@@ -166,6 +169,7 @@ var supervisorHandsByStopKind = map[StopKind][]SupervisorHand{
 	StopKindIntakeUnverified:   {HandReverify, HandDefer, HandEscalate},
 	StopKindUpstreamUnreadable: {HandDefer, HandEscalate},
 	StopKindChildQuestion:      {HandAnswer, HandEscalate},
+	StopKindSpecQuestion:       {HandAnswer, HandEscalate},
 }
 
 // SupervisorHandsFor は止まり方 k で選べる手を返す（写し）。k が閉集合の外なら nil。
