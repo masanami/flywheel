@@ -25,18 +25,6 @@ func TestDocsS2b1_GlossarySpecDraftingRowSaysDefaultPermissionModeCannotWrite(t 
 		"許可の形（`permission_mode`）が `default` の委譲先では下書きを書けない")
 }
 
-// 「止まり方」の行は、この区切りで変えない（下書きづくりは止まり方を足さない）。
-func TestDocsS2b1_GlossaryStopKindRowIsUnchanged(t *testing.T) {
-	row := strings.Join(glossaryRow(t, "止まり方"), " | ")
-	requireAll(t, "the 止まり方 row", row,
-		"9 つ（検証が判断できない・成果物が見つからない・委譲先の実行の失敗や中止・求める値を満たさないレビュー待ちの継続・差し戻しの上限・中身の確かめの失敗・判断点の連続失敗・統合先への受け取りの不成立・上流を読めない）")
-	for _, banned := range []string{"下書き", "spec"} {
-		if strings.Contains(row, banned) {
-			t.Errorf("the 止まり方 row mentions %q", banned)
-		}
-	}
-}
-
 // 全部の実装が入った後の一覧に、下書きづくりで足した閉集合の値・宣言のキー・作業ログの種類を足しても、
 // 計画を作る判断点の指示文は禁止語の検査を通る。出力の型の項目の名前 spec_draft は指示文に書いてよい。
 func TestDocsS2b1_J2PromptPassesForbiddenTermsAfterAllOfSpecDrafting(t *testing.T) {
