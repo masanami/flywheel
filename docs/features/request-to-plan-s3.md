@@ -54,7 +54,7 @@ S3a だけが入っている間は、分けた区切りの課題に GitHub の I
 - [ ] core が `fits_one_slice` の偽を使うのは、課題が次の 3 つをすべて満たすときだけ: 出どころ（`challenge.origin`）が取り込み（`ingest`）・取り込み元の子（`source_child`）の記録を持たない・要求の記録を指していない。ほかの課題では偽でも使わず、いまのまま計画へ進む。
 - [ ] 偽を使う課題では、core は、いまの担当の写し（分類済へ進め、優先度・一言で・位置づけを書く）に加えて、同じ書き込みで、区切りを分ける記録（`slice_split`）を状態 `pending` で作り、その分類の判断点の実行の理由を記録の `classify_reason` に書く。
 - [ ] 作業ログに、区切りを分けると決まったこと（`slice_split_requested`）を残す。
-- [ ] 区切りを分ける記録が `pending` か `awaiting_owner` の課題は、計画を作る判断点の対象から外す（自動の対象選びでも、ID を指定した `flywheel plan` でも）。ID を指定したときは、「着手しなかった」に理由 `slice_split_pending` で出す。
+- [ ] 区切りを分ける記録が `pending` か `awaiting_owner` の課題は、計画を作る判断点の対象から外す（自動の対象選びでも、ID を指定した `flywheel plan` でも）。ID を指定したとき、記録が `pending` の課題は「着手しなかった」に理由 `slice_split_pending` で出す。記録が `awaiting_owner` の課題は人間対応待ちなので、先に状態の検査に当たり、誤り（`invalid_transition`）になる。
 
 ### 区切りを分ける判断点（J10）
 
@@ -188,6 +188,7 @@ S3a だけが入っている間は、分けた区切りの課題に GitHub の I
 - [ ] 証跡のファイルが無いときは、何もしない（誤りにせず、作業ログも残さない）。
 - [ ] 作業ログ `requirement_evidence_cleanup_failed` の対象は、要求の解決では要求の記録（`requirement`）、`single` の回答と保留を開いたままの取り下げでは課題（`challenge`）。細目に証跡の場所を入れる。
 - [ ] リンクをたどった先が `.flywheel/requirements/` の下に無いときは、ファイルを消さず、消せなかったものとして扱う（作業ログ `requirement_evidence_cleanup_failed`）。
+- [ ] 消す前に、置き場の実体がワークスペースの実体の `.flywheel/` の下にあるかを確かめる（置き場そのものがシンボリックリンクで外を指すと、リンクをたどった先が置き場の実体の下になるため）。外なら、ファイルを消さず、消せなかったものとして扱う。この確かめは、仕様の下書きを消す処理（置き場 `.flywheel/specs/`。作業ログ `spec_draft_cleanup_failed`）と共通にする（オーナーの決定 2026-11-28）。
 - [ ] 証跡を消せなかったときは、作業ログ `requirement_evidence_cleanup_failed` を残し、解決の日時は書く（次の回りで消し直さない）。
 - [ ] 解決の日時を書くとき、作業ログ `requirement_resolved` を残す。
 - [ ] 解決した要求の記録を指す課題は、解決の後も記録を指したまま残す。
@@ -1115,6 +1116,10 @@ S3a でやらないこと。
 - [ ] 証跡の場所のリンクをたどった先が `.flywheel/requirements/` の外のとき、リンク先のファイルが消されない。
 - [ ] 同じとき、作業ログ `requirement_evidence_cleanup_failed` が 1 件残る。
 - [ ] 同じとき、`resolved_at` が書かれる。
+- [ ] 置き場 `.flywheel/requirements` がシンボリックリンクで、実体がワークスペースの実体の `.flywheel/` の下に無いとき（ワークスペースの外と、中の `.flywheel/` の外の 2 つ）、証跡を消す処理は、置き場の先のファイルを消さない。
+- [ ] 同じとき、作業ログ `requirement_evidence_cleanup_failed` が 1 件残る。
+- [ ] 置き場 `.flywheel/specs` がシンボリックリンクで、実体がワークスペースの実体の `.flywheel/` の下に無いとき（同じ 2 つ）、仕様の下書きを消す処理は、置き場の先のファイルを消さない。
+- [ ] 同じとき、作業ログ `spec_draft_cleanup_failed` が 1 件残る。
 - [ ] 証跡のファイルが無いとき、片付けの段は誤りにならない。
 - [ ] 同じとき、`resolved_at` が書かれる。
 - [ ] 同じとき、作業ログ `requirement_evidence_cleanup_failed` が残らない。

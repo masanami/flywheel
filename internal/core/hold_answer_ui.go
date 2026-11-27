@@ -16,6 +16,8 @@ import (
 
 // holdOptionButtonOK は、保留の理由 reason の選択肢 optionID を、画面のボタンで選べるか。保留の理由と選択肢の識別だけで決め、選択肢の文は読まない。
 // 選べないのは、足す依頼の保留（上限を超える足す依頼）の「足す」（上限が上がる）と「計画を作り直す」（範囲が変わる）だけ。
+// 分けるかの保留（理由を持たない）はどれも選べる。その split は元の課題の取り下げを伴うが、取り下げを伴う回答をボタンで受けない
+// 決まりの例外。
 func holdOptionButtonOK(reason holdReason, optionID string) bool {
 	if reason != holdReasonTaskAddOverLimit {
 		return true

@@ -537,9 +537,14 @@ func TestClassifyAutoJ1_InvokesJ10ForPendingChallenges(t *testing.T) {
 			t.Errorf("%s: items = %+v, want J1 then J10 split", name, res.Items)
 		}
 		// すでに pending の課題にも 1 回呼ぶ。
-		f.classify(t, inv, f.conn, arg)
-		if n := len(inv.callsFor(JudgmentJ10)); n != 2 {
-			t.Errorf("%s: J10 calls after the second classify = %d, want 2", name, n)
+		old := f.pending(t)
+		if explicit {
+			arg = &old
+		}
+		again := &j10Invoker{outputs: map[JudgmentPoint][]byte{JudgmentJ10: j10SingleOutput(t)}}
+		f.classify(t, again, f.conn, arg)
+		if n := len(again.callsFor(JudgmentJ10)); n != 1 {
+			t.Errorf("%s: J10 calls for the already pending challenge = %d, want 1", name, n)
 		}
 	}
 }

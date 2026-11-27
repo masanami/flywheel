@@ -338,6 +338,14 @@ const ActivityActionRequirementResolved = "requirement_resolved"
 // （entity=challenge。after は区切りを分ける記録の状態 state）。
 const ActivityActionSliceSplitRequested = "slice_split_requested"
 
+// ActivityActionSliceSplitSingle は、課題を分けずに 1 つの課題で進めると決まったことの作業ログの action
+// （entity=challenge。after の by は決めたもの。区切りを分ける判断点は judgment）。
+const ActivityActionSliceSplitSingle = "slice_split_single"
+
+// ActivityActionSliceSplitEvidenceFailed は、分ける案の証跡のファイルを書けなかったことの作業ログの action
+// （entity=challenge。after は証跡の場所 path と訳 reason）。
+const ActivityActionSliceSplitEvidenceFailed = "slice_split_evidence_failed"
+
 // ActivityActionSpecDraftRequested は、計画を作る判断点が課題を下書きづくりへ回すと決めたことの作業ログの action
 // （entity=challenge。after は下書きの場所 path・置き換える元 base_path・対象のリポジトリ repo・回した理由 reason）。
 const ActivityActionSpecDraftRequested = "spec_draft_requested"
