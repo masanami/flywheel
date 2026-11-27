@@ -99,6 +99,8 @@ type DelegationInvoker interface {
 
 // DelegateInput は Store.RunDelegation の入力。
 type DelegateInput struct {
+	// requeuedSpecDrafts は、この呼び出しの状態の確認で下書きづくりの記録を実行待ちへ戻した課題。次の回かサイクルで始める。
+	requeuedSpecDrafts map[int64]bool
 	// ChallengeID が非 nil なら、その課題 1 件だけを対象にする（ID を指定した個別の
 	// 操作。状態の条件は適用し、上流の状態による除外は適用しない）。nil なら、
 	// 着手中で承認済みの計画を持ち、終了していない run を持たない課題すべてを、
@@ -700,6 +702,12 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 			return nil, err
 		}
 		for _, r := range reports {
+			if r.requeuedSpecDraft != 0 {
+				if in.requeuedSpecDrafts == nil {
+					in.requeuedSpecDrafts = map[int64]bool{}
+				}
+				in.requeuedSpecDrafts[r.requeuedSpecDraft] = true
+			}
 			if r.Result != RunResultSucceeded && !r.Held {
 				pollNotStarted = append(pollNotStarted, NotStarted{ChallengeID: r.ChallengeID, Reason: NotStartedInProgress,
 					Detail: fmt.Sprintf("接続ツールの run の状態を読めなかった（失敗の種類: %s。詳細: %s）", r.Result, r.Error)})

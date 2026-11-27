@@ -298,6 +298,9 @@ type ContractRunReport struct {
 	CostDeltaUSD float64
 	CostTotalUSD float64
 	Error        string
+	// requeuedSpecDraft は、この呼び出しでスーパーバイザーが残った問いの全部に答え、下書きづくりの記録を実行待ちへ戻した課題の
+	// 内部の番号（無ければ 0）。委譲の段は、同じ回の中ではその課題の下書きづくりを始めない。
+	requeuedSpecDraft int64
 }
 
 // contractRunRow は contract_run の 1 行。

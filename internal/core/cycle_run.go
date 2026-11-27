@@ -128,7 +128,7 @@ type CyclePhaseResult struct {
 	// Backup は backup の段の結果（他の段は nil）。
 	Backup *BackupResult
 	// SuperviseProcessed は、スーパーバイザーの判断点を 1 回呼んだ保留・子の問いの数（結果が failed・rejected のものを含む。
-	// 子の問いの分は、段の中ではなく、サイクルの回りの終わりにまとめて足す。addChildQuestionSuperviseCounts）。
+	// 子の問いと下書きの問いの分は、段の中ではなく、サイクルの回りの終わりにまとめて足す。addChildQuestionSuperviseCounts）。
 	// SuperviseHands は、そのうち結果が executed の対処の手ごとの件数。他の段は 0・空。
 	SuperviseProcessed int
 	SuperviseHands     map[SupervisorHand]int
