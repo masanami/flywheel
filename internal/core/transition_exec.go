@@ -113,7 +113,7 @@ type runTransitionParams struct {
 	// 取り下げる書き込み（applySliceSplit）だけ。
 	coveredBy attestedAction
 	// restricted は、遷移表の制限つきの行を LookupRestricted で引くこと。立てるのは、その行の専用の書き込みだけ
-	// （スーパーバイザーの手の supervisor_resolve〔T20〕と、仕様の文書の場所を付けた編集の spec_draft_unhold〔T21〕だけ。終端から出る T18 は、終端の検査が先に断るのでこの道を通らない）。本人確認の要る行は、これを立てても本人確認つきの呼び出しだけが通る。
+	// （スーパーバイザーの手の supervisor_resolve〔T20〕と、仕様の文書の場所を付けた編集の spec_draft_unhold〔T21〕と、委譲の前の確かめ直しの flow_definition_unhold〔T22〕だけ。終端から出る T18 は、終端の検査が先に断るのでこの道を通らない）。本人確認の要る行は、これを立てても本人確認つきの呼び出しだけが通る。
 	restricted bool
 	// holdCheck が非 nil のとき、版の照合の代わりに呼ぶ（回答だけ。確かめた保留が開いたままで問いと選択肢が同じかを、書き込みの中で確かめる）。
 	// 遷移表の検査より前に呼ぶ（保留が閉じていれば、状態の食い違いではなくコンフリクトで断る）。

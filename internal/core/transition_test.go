@@ -181,11 +181,23 @@ func TestLookup_CreateNotAvailableFromExistingStatus(t *testing.T) {
 	}
 }
 
-// TestTable_RowCount は、Table の物理行数が32（T1〜T21、うちT11が6遷移元〔人間対応待ちからの、保留を重ねる行を含む〕・T16が7遷移元に展開）であることを検証する。
+// TestTable_RowCount は、Table の物理行数が33（T1〜T22、うちT11が6遷移元〔人間対応待ちからの、保留を重ねる行を含む〕・T16が7遷移元に展開）であることを検証する。
 func TestTable_RowCount(t *testing.T) {
 	t.Parallel()
-	if len(Table) != 32 {
-		t.Fatalf("len(Table) = %d, want 32", len(Table))
+	if len(Table) != 33 {
+		t.Fatalf("len(Table) = %d, want 33", len(Table))
+	}
+}
+
+// 遷移表に、操作 flow_definition_unhold（遷移元は人間対応待ち）の行 T22 があり、本人確認の要らない制限つきの行で、保留に入る直前の状態へ戻る。
+func TestTable_T22FlowDefinitionUnholdRow(t *testing.T) {
+	t.Parallel()
+	if _, ok := Lookup(StatusAwaitingHuman, OpFlowDefinitionUnhold); ok {
+		t.Fatal("T22 appears in the ordinary lookup")
+	}
+	tr, ok := LookupRestricted(StatusAwaitingHuman, OpFlowDefinitionUnhold)
+	if !ok || tr.ID != "T22" || tr.RequiresVerification || !tr.Target.ReturnToPrecedingHoldStatus {
+		t.Fatalf("T22 = %+v ok=%v", tr, ok)
 	}
 }
 

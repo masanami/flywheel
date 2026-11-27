@@ -105,9 +105,39 @@ type ContractStatus struct {
 	Facts map[string]string
 	// Flow は出力の flow（フローの名前。無い・文字列でないときは nil）。contract_run.flow に残す。
 	Flow *string
+	// Definition は出力の definition（その実行が動いたフローの定義の出どころとハッシュ。無い・形が合わないときは nil）。
+	// contract_run.definition_source・definition_sha256 に残す。nil のときは記録を変えない。
+	Definition *ContractDefinition
 	// Steps は出力の steps。nil は「無い」（steps が無い・形が合わない）で、ステップの行に触らない。
 	// 空の非 nil は「在って 0 件」で、その委譲の実行のステップの行をすべて消す。
 	Steps []ContractStep
+}
+
+// 契約の出力の definition.source の値（フローの定義の出どころ）。
+const (
+	// FlowDefinitionSourceWorkspace はワークスペースに置いた定義。
+	FlowDefinitionSourceWorkspace = "workspace"
+	// FlowDefinitionSourceBuiltin は組み込みの定義。
+	FlowDefinitionSourceBuiltin = "builtin"
+)
+
+// ContractDefinition は契約の出力の definition（形は invoker が確かめ済み。値の閉集合は core が validContractDefinition で確かめる）。
+type ContractDefinition struct {
+	Source string
+	SHA256 string
+}
+
+// validContractDefinition は d の source が閉集合の中で、sha256 が 64 桁の小文字の 16 進か。
+func validContractDefinition(d *ContractDefinition) bool {
+	if d == nil || (d.Source != FlowDefinitionSourceWorkspace && d.Source != FlowDefinitionSourceBuiltin) || len(d.SHA256) != 64 {
+		return false
+	}
+	for _, r := range d.SHA256 {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // ContractStep は契約の出力の steps の 1 要素（形は invoker が確かめ済み）。API の steps と同じ欄に Seq を足したもの。
@@ -154,6 +184,9 @@ type ContractClient interface {
 	// Resume は判断待ちへの答えを返して続ける（標準出力は start・status と同じ形）。Cancel は run を中止する。
 	Resume(ctx context.Context, in ContractLaunchInput) (ContractLaunchOutput, error)
 	Cancel(ctx context.Context, in ContractLaunchInput) (ContractLaunchOutput, error)
+	// CheckFlow は flow の形の委譲先の、委譲を始める前のフローの定義の確かめ（in.Command は `flow check --json <名前>`）を起動する。
+	// 終了コードが 0 か 1 で標準出力が確かめの JSON として読めれば succeeded（通ったかは定義ごとの OK）。
+	CheckFlow(ctx context.Context, in ContractLaunchInput) (FlowCheckOutput, error)
 }
 
 // contractVersion は扱う契約の版（宣言の contract_version と同じ。1 だけ）。
@@ -736,6 +769,18 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	if _, err := s.contractCommandArgs(connector, contractCmdStart, startFill); err != nil {
 		return nil, err
 	}
+	// flow の形の委譲先は、始める前に、そのタスクのフローの定義を確かめる。通らなければ始めずに保留にし、確かめられなければ
+	// 始めるコマンドが失敗したときと同じに記録する（下の call が始めるコマンドの代わりに確かめの失敗を返す）。
+	var checkFailed *flowCheckVerdict
+	if connector.Form == ConnectorFormFlow {
+		v := s.checkFlowDefinition(ctx, in.Client, in.AgentDecl, startFill.Flow)
+		switch {
+		case v.Unavailable:
+			checkFailed = &v
+		case !v.OK:
+			return nil, s.holdFlowDefinitionInvalid(ctx, in.ChallengeID, task, startFill.Flow, v.Definition)
+		}
+	}
 	workDir, ok, err := s.contractRepoWorkDir(ctx, in.AgentDecl, in.ConnDecl, cid, in.WorkDir, task.Repo)
 	if err != nil {
 		return nil, err
@@ -772,6 +817,9 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 		return nil, err
 	}
 	call := func(ctx context.Context, li ContractLaunchInput) (ContractLaunchOutput, error) {
+		if checkFailed != nil {
+			return flowCheckUnavailableOutput(*checkFailed), nil
+		}
 		if writeErr != nil {
 			return ContractLaunchOutput{Result: RunResultLaunchFailed, ErrorSummary: fmt.Sprintf("write task file: %v", writeErr)}, nil
 		}
@@ -1426,7 +1474,7 @@ func (s *Store) writeContractRunRecord(ctx context.Context, tx *sql.Tx, c contra
 	return countUnmetFacts(ctx, tx, c, st, rowID, report)
 }
 
-// writeContractFlowAndSteps は contract_run.flow と、委譲の実行のステップの行（contract_run_step）を出力と同じ中身にする。
+// writeContractFlowAndSteps は contract_run.flow・定義の出どころとハッシュと、委譲の実行のステップの行（contract_run_step）を出力と同じ中身にする。
 // 委譲の実行の ID と seq を鍵に足すか上書きし、出力に無い seq の行は消す。steps が無い（nil）ときはステップの行に触らない。
 func writeContractFlowAndSteps(ctx context.Context, tx *sql.Tx, rowID int64, st *ContractStatus) error {
 	var flow any
@@ -1435,6 +1483,12 @@ func writeContractFlowAndSteps(ctx context.Context, tx *sql.Tx, rowID int64, st 
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET flow = ? WHERE id = ?`, flow, rowID); err != nil {
 		return err
+	}
+	// 定義の出どころとハッシュは、出力にあって値が正しいときだけ写す（無い出力・壊れた値で、記録を消さない）。
+	if d := st.Definition; validContractDefinition(d) {
+		if _, err := tx.ExecContext(ctx, `UPDATE contract_run SET definition_source = ?, definition_sha256 = ? WHERE id = ?`, d.Source, d.SHA256, rowID); err != nil {
+			return err
+		}
 	}
 	if st.Steps == nil {
 		return nil

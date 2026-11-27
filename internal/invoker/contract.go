@@ -38,6 +38,8 @@ type rawContractStatus struct {
 	// flow・steps は任意。形が合わなければ無いものとして扱い、出力の全体は malformed にしない。
 	Flow  json.RawMessage `json:"flow"`
 	Steps json.RawMessage `json:"steps"`
+	// definition は任意（source・sha256 の 2 つの文字列）。形が合わなければ無いものとして扱い、出力の全体は malformed にしない。
+	Definition json.RawMessage `json:"definition"`
 }
 
 // decodeContractStatus は標準出力を core.ContractStatus へ正規化する。単一の JSON オブジェクトとして
@@ -91,6 +93,7 @@ func decodeContractStatus(stdout []byte) (*core.ContractStatus, bool) {
 		}
 	}
 	st.Steps = decodeSteps(raw.Steps)
+	st.Definition = decodeDefinition(raw.Definition)
 	if !isJSONNull(raw.CostUSD) {
 		v, ok := decodeNumber(raw.CostUSD)
 		if !ok {
@@ -99,6 +102,22 @@ func decodeContractStatus(stdout []byte) (*core.ContractStatus, bool) {
 		st.CostUSD = &v
 	}
 	return st, true
+}
+
+// decodeDefinition は definition を読む。無い・null・オブジェクトでない・source か sha256 が文字列でないときは nil
+// （値の閉集合は core が確かめる）。
+func decodeDefinition(raw json.RawMessage) *core.ContractDefinition {
+	if isJSONNull(raw) {
+		return nil
+	}
+	var d struct {
+		Source *string `json:"source"`
+		SHA256 *string `json:"sha256"`
+	}
+	if json.Unmarshal(raw, &d) != nil || d.Source == nil || d.SHA256 == nil {
+		return nil
+	}
+	return &core.ContractDefinition{Source: *d.Source, SHA256: *d.SHA256}
 }
 
 // Start は core.ContractClient の実装（契約の start）。

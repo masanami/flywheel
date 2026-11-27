@@ -1224,6 +1224,7 @@ func FillAllTables(t *testing.T, workspace string) {
 			{`UPDATE task SET verify_not_met_streak = 2 WHERE id = 1`, nil},
 			{`UPDATE contract_run SET upstream_unreadable_rounds = 3 WHERE id = 1`, nil},
 			{`UPDATE contract_run SET flow = 'ticket' WHERE id = 1`, nil},
+			{`UPDATE contract_run SET definition_source = 'workspace', definition_sha256 = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' WHERE id = 1`, nil},
 			{`UPDATE task SET planned_flow = 'ticket-light', flow_reason = '小さな変更なので "quoted"' WHERE id = 1`, nil},
 			{`INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used, effort)
 			  VALUES (1, 1, 'analyze', 'agent', 1, 'finished', 'ok', ?, ?, 1234567, 1, 'm1', '["m1","m2"]', 'medium')`, []any{at, at}},

@@ -714,6 +714,12 @@ func (s *Store) RunDelegation(ctx context.Context, in DelegateInput) (*DelegateR
 			}
 		}
 	}
+	// 委譲の前の確かめが通らずに立てた保留を確かめ直し、定義が直っていれば閉じる（閉じた課題・タスクは、この後の選びで委譲を始める）。
+	if in.Contract != nil {
+		if _, err := s.recheckFlowDefinitionHolds(ctx, in.Contract, in.AgentDecl, in.ConnDecl, in.ChallengeID); err != nil {
+			return nil, err
+		}
+	}
 	res, err := s.runDelegationAfterPoll(ctx, in)
 	if err != nil {
 		return nil, err

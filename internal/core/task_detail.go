@@ -16,6 +16,8 @@ type TaskDelegate struct {
 	Summary       string
 	// Flow は委譲の実行の記録（contract_run.flow）の値（NULL は nil。ステップの行の有無に依らない）。
 	Flow *string
+	// Definition は委譲の実行が動いたフローの定義の出どころとハッシュ（contract_run.definition_source・definition_sha256。どちらかが NULL なら nil）。
+	Definition *ContractDefinition
 	// Steps は委譲の実行のステップの行（contract_run_step）を、始まった順（seq の昇順）に、すべての種類で持つ。行が無ければ空（nil にしない）。
 	Steps []TaskDelegateStep
 }
@@ -81,18 +83,21 @@ func loadTaskDetail(ctx context.Context, tx *sql.Tx, cid int64, t *Task, integra
 	tid := taskIntID(t)
 
 	var state, summary, reqKind, facts, landRef, verifiedRef string
-	var flow sql.NullString
+	var flow, defSource, defSHA sql.NullString
 	var startRun, contractRunID int64
 	var ended bool
 	err := tx.QueryRowContext(ctx, `SELECT state, summary, COALESCE(requested_kind, ''), COALESCE(facts, ''), COALESCE(land_ref, ''), COALESCE(verified_ref, ''),
-		start_run_id, ended_at IS NOT NULL, flow, id FROM contract_run
+		start_run_id, ended_at IS NOT NULL, flow, definition_source, definition_sha256, id FROM contract_run
 		WHERE challenge_id = ? AND task_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`, cid, tid, contractRunKindTask).
-		Scan(&state, &summary, &reqKind, &facts, &landRef, &verifiedRef, &startRun, &ended, &flow, &contractRunID)
+		Scan(&state, &summary, &reqKind, &facts, &landRef, &verifiedRef, &startRun, &ended, &flow, &defSource, &defSHA, &contractRunID)
 	switch {
 	case err == nil:
 		dg := &TaskDelegate{RunID: formatRunID(startRun), State: ContractState(state), Summary: summary, Steps: []TaskDelegateStep{}}
 		if flow.Valid {
 			dg.Flow = &flow.String
+		}
+		if defSource.Valid && defSHA.Valid {
+			dg.Definition = &ContractDefinition{Source: defSource.String, SHA256: defSHA.String}
 		}
 		steps, serr := loadTaskDelegateSteps(ctx, tx, contractRunID)
 		if serr != nil {

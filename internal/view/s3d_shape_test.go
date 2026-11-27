@@ -39,7 +39,7 @@ func TestTask_S3dKeysShape_927(t *testing.T) {
 	})
 	for _, want := range []string{
 		`"artifacts":[{"kind":"pr","ref":"https://example.com/1","role":"integration","state":"open"}]`,
-		`"delegate":{"flow":null,"requested_kind":"review","run_id":"R-1","state":"waiting","steps":[],"summary":"要約"}`,
+		`"delegate":{"definition":null,"flow":null,"requested_kind":"review","run_id":"R-1","state":"waiting","steps":[],"summary":"要約"}`,
 		`"facts":{"self_review":"done"}`,
 		`"landing":"sent"`,
 		`"verification":{"at":"2026-11-21T00:00:00Z","reason":"理由","verdict":"met"}`,
@@ -93,8 +93,21 @@ func TestTaskDelegate_StepsShape_1229(t *testing.T) {
 		Attempt: 1, CostUnknown: true, CostUSD: &cost, Kind: "llm", ModelsUsed: []string{"a", "b"}, Outcome: &outcome,
 		StartedAt: "2026-11-01T00:00:00Z", State: "finished", Step: "implement",
 	}}})
-	want := `{"flow":null,"requested_kind":null,"run_id":"","state":"","steps":[{"attempt":1,"cost_unknown":true,"cost_usd":1.9429,"effort":null,"ended_at":null,"kind":"llm","model":null,"models_used":["a","b"],"outcome":"pass","started_at":"2026-11-01T00:00:00Z","state":"finished","step":"implement"}],"summary":""}`
+	want := `{"definition":null,"flow":null,"requested_kind":null,"run_id":"","state":"","steps":[{"attempt":1,"cost_unknown":true,"cost_usd":1.9429,"effort":null,"ended_at":null,"kind":"llm","model":null,"models_used":["a","b"],"outcome":"pass","started_at":"2026-11-01T00:00:00Z","state":"finished","step":"implement"}],"summary":""}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// delegate.definition は、定義の出どころとハッシュと、ハッシュの先頭 12 文字。記録の無い実行は null。
+func TestTaskDelegate_DefinitionShape(t *testing.T) {
+	sum := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	got := view.FromTasks([]core.Task{{Detail: core.TaskDetail{Delegate: &core.TaskDelegate{
+		Definition: &core.ContractDefinition{Source: core.FlowDefinitionSourceWorkspace, SHA256: sum}}}}})
+	if d := got[0].Delegate.Definition; d == nil || d.Source != "workspace" || d.SHA256 != sum || d.SHA256Prefix != "0123456789ab" {
+		t.Fatalf("definition = %+v", d)
+	}
+	if s := marshal(t, *got[0].Delegate.Definition); s != `{"sha256":"`+sum+`","sha256_prefix":"0123456789ab","source":"workspace"}` {
+		t.Errorf("shape = %s", s)
 	}
 }

@@ -661,6 +661,15 @@ export const STEP_LABELS: Record<string, string> = {
   describe: "PR の説明",
   push: "push",
   branch: "作業ブランチ名の決定",
+  "self-review": "セルフレビュー",
+  "self-review-fix": "セルフレビューの直し",
+};
+
+// 委譲先の実行が動いたフローの定義の出どころ（tasks[].delegate.definition.source）。表に無い値は、値だけを出す。
+// 画面には「ワークスペース」の語を出さない（用語集）ので、ワークスペースに置いた定義は「置いた定義」と書く。
+export const FLOW_DEFINITION_SOURCE_LABELS: Record<string, string> = {
+  workspace: "置いた定義",
+  builtin: "組み込み",
 };
 
 // フローの名前の表示。表に無い名前は、名前だけを出す。

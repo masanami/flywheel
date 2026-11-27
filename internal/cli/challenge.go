@@ -290,6 +290,17 @@ func writeSliceSplit(b *strings.Builder, s *core.SliceSplit) {
 }
 
 // challengeDetailText は --json 無しの show の表示。
+// flowDefinitionSourceText は委譲の実行が動いた定義の出どころの語（ワークスペースの定義・組み込み。閉集合の外は値のまま）。
+func flowDefinitionSourceText(source string) string {
+	switch source {
+	case core.FlowDefinitionSourceWorkspace:
+		return "ワークスペースの定義"
+	case core.FlowDefinitionSourceBuiltin:
+		return "組み込み"
+	}
+	return escapeControl(source)
+}
+
 func challengeDetailText(d *core.ChallengeDetail) string {
 	var b strings.Builder
 	c := d.Challenge
@@ -345,6 +356,10 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	for _, t := range d.Tasks {
 		fmt.Fprintf(&b, "  %s %s [%s (%s)] 枠: 実装 %s USD・レビュー対応 %s USD / 使った額: %s USD\n", t.ID, escapeControl(t.Title), t.Status.Label(), t.Status,
 			formatUSD(t.BudgetImplUSD), formatUSD(t.BudgetReviewUSD), formatUSD(t.SpentUSD))
+		if dg := t.Detail.Delegate; dg != nil && dg.Definition != nil {
+			fmt.Fprintf(&b, "    委譲先の実行 %s の定義: %s・ハッシュ %s\n", dg.RunID, flowDefinitionSourceText(dg.Definition.Source),
+				escapeControl(view.DefinitionHashPrefix(dg.Definition.SHA256)))
+		}
 	}
 	if c.Status == core.StatusAwaitingCompletionApproval {
 		writeAddedTasks(&b, d.AddedTasks)

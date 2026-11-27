@@ -55,6 +55,34 @@ type fakeContractClient struct {
 	uniqueRunIDs bool
 	// echoRunning なら、status は、読む実行 ID の running を返す（キューも last も使わない）。
 	echoRunning bool
+	// checks は委譲の前の確かめ（CheckFlow）が受け取ったコマンド。checkOut が nil なら、確かめる名前の組み込みの定義が通ったことを返す。
+	checks   [][]string
+	checkOut *FlowCheckOutput
+	// checkFor は、フローの名前ごとの確かめの結果（checkOut より先に見る）。
+	checkFor map[string]*FlowCheckOutput
+}
+
+// passingFlowCheck は、コマンドの最後の引数（フローの名前）の組み込みの定義が通った確かめの結果。
+func passingFlowCheck(in ContractLaunchInput) FlowCheckOutput {
+	name := ""
+	if len(in.Command) > 0 {
+		name = in.Command[len(in.Command)-1]
+	}
+	return FlowCheckOutput{Result: RunResultSucceeded, Definitions: []FlowCheckDefinition{{
+		Name: name, Source: FlowDefinitionSourceBuiltin, Kind: "builtin", OK: true, SHA256: strings.Repeat("b", 64)}}}
+}
+
+func (f *fakeContractClient) CheckFlow(_ context.Context, in ContractLaunchInput) (FlowCheckOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.checks = append(f.checks, in.Command)
+	if out, ok := f.checkFor[in.Command[len(in.Command)-1]]; ok {
+		return *out, nil
+	}
+	if f.checkOut != nil {
+		return *f.checkOut, nil
+	}
+	return passingFlowCheck(in), nil
 }
 
 func (f *fakeContractClient) recordWorkDir(name, dir string) {

@@ -280,6 +280,10 @@ func TestPollContractRuns_ConcurrentReadsDoNotDoubleCountCost(t *testing.T) {
 // statusOnlyClient はゴルーチンから安全に使える、固定の応答を返す ContractClient。
 type statusOnlyClient struct{ out ContractLaunchOutput }
 
+func (c *statusOnlyClient) CheckFlow(_ context.Context, in ContractLaunchInput) (FlowCheckOutput, error) {
+	return passingFlowCheck(in), nil
+}
+
 func (c *statusOnlyClient) Start(context.Context, ContractLaunchInput) (ContractLaunchOutput, error) {
 	return c.out, nil
 }

@@ -356,6 +356,9 @@ const (
 	// task_add_question は「足す」の形の判断点が問いを返した（足す依頼は仕様待ちのまま）。
 	holdReasonTaskAddOverLimit holdReason = "task_add_over_limit"
 	holdReasonTaskAddQuestion  holdReason = "task_add_question"
+	// holdReasonFlowDefinitionInvalid は、flow の形の委譲先でタスクの委譲を始める前の確かめで、フローの定義が検査を通らなかった保留
+	// （発生は作らない）。次のサイクルで確かめ直し、通れば core が閉じる（T22）。
+	holdReasonFlowDefinitionInvalid holdReason = "flow_definition_invalid"
 )
 
 // persisted は、保留の行（hold.reason）に値を書く理由か。成果物つきのレビュー待ちを受け取れない理由（統合先を使う課題のものを含む）と、進めようが無い理由だけが書く
@@ -365,7 +368,7 @@ func (r holdReason) persisted() bool {
 	case holdReasonLandUnavailable, holdReasonContentRefInvalid, holdReasonFactsUnmet, holdReasonTasksBlocked,
 		holdReasonIntegrationRefInvalid, holdReasonDelegateEnded, holdReasonMergedUnverified, holdReasonChecksFailed, holdReasonLandRefused,
 		holdReasonReflectUnavailable, holdReasonReflectFailed, holdReasonChallengeCheckNotMet,
-		holdReasonTaskAddOverLimit, holdReasonTaskAddQuestion:
+		holdReasonTaskAddOverLimit, holdReasonTaskAddQuestion, holdReasonFlowDefinitionInvalid:
 		return true
 	}
 	return false

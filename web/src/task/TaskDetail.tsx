@@ -12,6 +12,7 @@ import { useChat } from "../chat/context.ts";
 import {
   CONFLICT_FIX_PENDING_TEXT,
   DELEGATE_STATE_LABELS,
+  FLOW_DEFINITION_SOURCE_LABELS,
   FLOW_LABELS,
   HOLD_KIND_PARENT_DIRECT,
   LANDING_LABELS,
@@ -406,6 +407,15 @@ function DelegateSection({ d }: { d: NonNullable<Task["delegate"]> }) {
         <p>
           フロー:{" "}
           <span data-testid="delegate-flow">{label(FLOW_LABELS, d.flow)}</span>
+        </p>
+      ) : null}
+      {d.definition !== null ? (
+        <p>
+          定義:{" "}
+          <span data-testid="delegate-definition">
+            {label(FLOW_DEFINITION_SOURCE_LABELS, d.definition.source)}
+            （ハッシュ {d.definition.sha256_prefix}）
+          </span>
         </p>
       ) : null}
       <p data-testid="delegate-summary" style={{ whiteSpace: "pre-wrap" }}>

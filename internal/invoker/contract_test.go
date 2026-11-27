@@ -341,3 +341,21 @@ type contractReadForTest struct {
 	Result core.RunResult
 	Status *core.ContractStatus
 }
+
+// definition は任意。source・sha256 が文字列なら写し、無い・null・形が合わないときは無いものとして扱い、出力の全体は読む。
+func TestContractCommand_DefinitionIsNormalized(t *testing.T) {
+	got := statusWithSteps(t, `"definition": {"source": "workspace", "sha256": "abc"}`)
+	if got.Result != core.RunResultSucceeded || got.Status == nil || got.Status.Definition == nil ||
+		got.Status.Definition.Source != "workspace" || got.Status.Definition.SHA256 != "abc" {
+		t.Fatalf("got = %+v", got.Status)
+	}
+	for name, extra := range map[string]string{
+		"absent": `"x": 1`, "null": `"definition": null`, "not an object": `"definition": "builtin"`,
+		"sha256 missing": `"definition": {"source": "builtin"}`, "source not a string": `"definition": {"source": 1, "sha256": "abc"}`,
+	} {
+		got := statusWithSteps(t, extra)
+		if got.Result != core.RunResultSucceeded || got.Status == nil || got.Status.Definition != nil {
+			t.Errorf("%s: result %s status %+v, want succeeded without definition", name, got.Result, got.Status)
+		}
+	}
+}

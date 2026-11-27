@@ -657,12 +657,19 @@ export interface TaskArtifact {
 }
 
 export interface TaskDelegate {
+  definition: TaskDelegateDefinition | null;
   flow: string | null;
   requested_kind: string | null;
   run_id: string;
   state: string;
   steps: TaskDelegateStep[];
   summary: string;
+}
+
+export interface TaskDelegateDefinition {
+  sha256: string;
+  sha256_prefix: string;
+  source: string;
 }
 
 export interface TaskDelegateStep {

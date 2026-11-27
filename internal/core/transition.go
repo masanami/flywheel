@@ -44,6 +44,9 @@ const (
 	// OpSpecDraftUnhold は、オーナーが仕様の文書の場所を付けた編集が、開いている下書きづくりの保留を回答なしで閉じる操作（T21）。
 	// 編集の書き込み（EditChallenge）だけが使う。CLI の操作には対応しない。
 	OpSpecDraftUnhold Operation = "spec_draft_unhold"
+	// OpFlowDefinitionUnhold は、委譲の前の確かめが通らずに立てた保留（フローの定義が検査を通らない）を、次のサイクルで確かめが
+	// 通ったときに core が回答なしで閉じる操作（T22）。委譲の段の確かめ直し（recheckFlowDefinitionHolds）だけが使う。CLI の操作には対応しない。
+	OpFlowDefinitionUnhold Operation = "flow_definition_unhold"
 )
 
 // TransitionTarget は遷移先の表現。T1〜T11・T13〜T15 は固定の状態を持つが、
@@ -196,6 +199,9 @@ var Table = []Transition{
 	// T21: 仕様の文書の場所を付けた編集が、開いている下書きづくりの保留を閉じて、分類済へ戻す。本人確認は要さない（edit は
 	// 本人確認の無い操作で、回答でも承認でもない）。制限つきの行で、通常の操作には現れない。
 	{ID: "T21", From: StatusAwaitingHuman, Op: OpSpecDraftUnhold, Target: TransitionTarget{Fixed: StatusClassified}, Restricted: true},
+	// T22: 委譲の前の確かめが通らずに立てた保留を、定義が直って確かめが通ったときに閉じる。保留に入る直前の状態へ戻す（ほかの開いている
+	// 保留が残っていれば人間対応待ちのまま）。本人確認は要さない（回答でも承認でもない）。制限つきの行で、通常の操作には現れない。
+	{ID: "T22", From: StatusAwaitingHuman, Op: OpFlowDefinitionUnhold, Target: TransitionTarget{ReturnToPrecedingHoldStatus: true}, Restricted: true},
 }
 
 // Lookup は (from, op) から遷移表の行を引く。表に無い組は ok=false を返す

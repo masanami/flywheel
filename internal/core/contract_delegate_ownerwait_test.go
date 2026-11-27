@@ -34,6 +34,10 @@ func (c *perRunClient) set(runID string, out ContractLaunchOutput) {
 	c.state[runID] = out
 }
 
+func (c *perRunClient) CheckFlow(_ context.Context, in ContractLaunchInput) (FlowCheckOutput, error) {
+	return passingFlowCheck(in), nil
+}
+
 func (c *perRunClient) Start(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
 	c.starts = append(c.starts, in.Command)
 	c.n++
