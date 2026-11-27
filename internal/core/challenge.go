@@ -1266,20 +1266,20 @@ func (s *Store) EditChallenge(ctx context.Context, ch Channel, id string, in Edi
 		newStage := current.applyPatch(patch, before, after)
 
 		var draft *SpecDraft
-		if attaching {
+		if in.Spec != nil {
 			if draft, err = loadSpecDraft(ctx, tx, cid); err != nil {
 				return err
 			}
 		}
-		skipDraft := draft != nil && draft.State.blocksPlanning()
+		skipDraft := attaching && draft != nil && draft.State.blocksPlanning()
 		if skipDraft {
 			if err := requireNoOpenSpecDraftRun(ctx, tx, cid); err != nil {
 				return err
 			}
 		}
-		// 記録の下書きは、記録を省くときと、済んだ記録の課題の場所を変えるときに、付けた場所と違えば消す。
+		// 記録の下書きは、記録を省くときと、済んだ記録の課題の場所を変える・外すときに、外したか、付けた場所が下書きと違えば消す。
 		if draft != nil && (skipDraft || (draft.State == SpecDraftStateDone && !reflect.DeepEqual(current.SpecPath, newSpec))) {
-			discardDraft = !sameSpecFile(s.workspace, draft.Path, *newSpec)
+			discardDraft = newSpec == nil || !sameSpecFile(s.workspace, draft.Path, *newSpec)
 		}
 
 		if len(after) == 0 && !skipDraft {

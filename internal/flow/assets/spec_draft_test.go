@@ -5,6 +5,8 @@ package assets_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"reflect"
@@ -140,11 +142,65 @@ func TestSpecDraftSessionsAreNew(t *testing.T) {
 	}
 }
 
-// AC-153
-func TestSpecDraftDeclaresOnlySpecQuestionsFact(t *testing.T) {
-	want := map[string][]string{"spec_questions": {"$steps.critique.questions"}}
-	if got := specDraft(t).Facts; !reflect.DeepEqual(got, want) {
-		t.Errorf("facts = %v, want %v", got, want)
+// S2b-2 の AC-370（前の区切りの「spec_questions を 1 つだけ宣言する」を改めた）
+func TestSpecDraftDeclaresSpecQuestionsAndStepSummaryFacts(t *testing.T) {
+	var names []string
+	for name := range specDraft(t).Facts {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	if want := []string{"spec_questions", "spec_step_summary"}; !slices.Equal(names, want) {
+		t.Errorf("facts = %v, want %v", names, want)
+	}
+	if got, want := specDraft(t).Facts["spec_questions"], []string{"$steps.critique.questions"}; !slices.Equal(got, want) {
+		t.Errorf("spec_questions = %v, want %v", got, want)
+	}
+}
+
+// S2b-2 の AC-371
+func TestSpecDraftStepSummaryFactComesFromWriteThenCritique(t *testing.T) {
+	got := specDraft(t).Facts["spec_step_summary"]
+	if want := []string{"$steps.write.summary", "$steps.critique.summary"}; !slices.Equal(got, want) {
+		t.Errorf("spec_step_summary = %v, want %v", got, want)
+	}
+}
+
+// S2b-2 の AC-372〜AC-376: モデル・effort・上限額・時間切れは、この区切りの前の値のまま。
+func TestSpecDraftKeepsModelEffortBudgetAndTimeout(t *testing.T) {
+	d := specDraft(t)
+	for _, c := range []struct {
+		name      string
+		got, want any
+	}{
+		{"AC-372 models.main", d.Models["main"], "opus"},
+		{"AC-373 efforts.main", d.Efforts["main"], "high"},
+		{"AC-374 limits.budget_usd", d.Limits["budget_usd"], 15.0},
+		{"AC-375 write budget_usd", specDraftStep(t, "write")["budget_usd"], 10},
+		{"AC-375 critique budget_usd", specDraftStep(t, "critique")["budget_usd"], 10},
+		{"AC-376 write timeout", specDraftStep(t, "write")["timeout"], "30m"},
+		{"AC-376 critique timeout", specDraftStep(t, "critique")["timeout"], "45m"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if !reflect.DeepEqual(c.got, c.want) {
+				t.Errorf("got %#v, want %#v", c.got, c.want)
+			}
+		})
+	}
+}
+
+// S2b-2 の AC-379: 出力の型は変えない。値は、この区切りの前の SHA256SUMS の値。
+func TestSpecDraftOutputSchemaHashesAreUnchanged(t *testing.T) {
+	for name, want := range map[string]string{
+		"schemas/spec-draft-critique.json": "6d88a055062cdf6816f0c19e6745e492c94268595055f69924f9c449e4abefef",
+		"schemas/spec-draft-write.json":    "68955d08d8de0530c4f6e893a9c589530b074dfa61540d95af74881435dfe59a",
+	} {
+		sum := sha256.Sum256(readEmbedded(t, name))
+		if got := hex.EncodeToString(sum[:]); got != want {
+			t.Errorf("%s sha256 = %s, want %s", name, got, want)
+		}
+		if !strings.Contains(string(assets.Sums()), want+"  workflows/"+name+"\n") {
+			t.Errorf("SHA256SUMS does not list workflows/%s with %s", name, want)
+		}
 	}
 }
 
@@ -241,7 +297,7 @@ func TestSpecDraftStepFiles(t *testing.T) {
 	}
 }
 
-// AC-159
+// AC-159・S2b-2 の AC-384
 func TestSpecDraftMaterialsAreListedInSums(t *testing.T) {
 	if err := assets.CheckSums(assets.FS, assets.Sums()); err != nil {
 		t.Fatal(err)
@@ -319,6 +375,26 @@ func TestSpecDraftCritiquePrompt(t *testing.T) {
 		{"AC-183", []string{"`## クリティカル設計決定`", "自分で直さない"}},
 		{"recommended-label", []string{"選択肢の見出し", "（推奨）", "入れない"}},
 		{"spec-skill", []string{"`/define-feature`", "`/create-ticket`", "呼ばない"}},
+	})
+}
+
+// S2b-2 の AC-363〜AC-367・AC-369
+func TestSpecDraftCritiquePromptReducesWritingOnlyQuestions(t *testing.T) {
+	const writingOnly = "受入基準の書き方・割り方・並べ方だけの点"
+	checkPhrases(t, "spec-draft-critique.md", []phraseCase{
+		{"AC-363", []string{writingOnly, "問いにしない"}},
+		{"AC-364", []string{writingOnly, "決まりのとおりに", "修正役に直させる"}},
+		{"AC-365", []string{"問いにするのは", "振る舞い・範囲・設計が変わる点だけ"}},
+		{"AC-366", []string{"迷ったら問いにする"}},
+		{"AC-367", []string{"直らずに残った `blocker`", "問いにします"}},
+		{"AC-369", []string{"## オーナーの添え書き", "仕様の内容の決定", "反映"}},
+	})
+}
+
+// S2b-2 の AC-368
+func TestSpecDraftWritePromptReadsOwnerNotes(t *testing.T) {
+	checkPhrases(t, "spec-draft-write.md", []phraseCase{
+		{"AC-368", []string{"## オーナーの添え書き", "読", "仕様の内容の決定", "反映"}},
 	})
 }
 

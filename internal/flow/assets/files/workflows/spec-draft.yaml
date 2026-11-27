@@ -20,6 +20,7 @@ limits:
   budget_usd: 15                  # core の定数 SpecDraftDefaultBudgetUSD と同じ値にする（2026-11-27 に実物の実行を測って決めた）
 facts:
   spec_questions: [$steps.critique.questions]
+  spec_step_summary: [$steps.write.summary, $steps.critique.summary]
 steps:
   write:
     kind: llm
