@@ -20,7 +20,7 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 `flywheel flow start|status|resume|cancel` の本体と、切り離して進める `__run-detached`、接続契約（版 1）の JSON の組み立て。写した元は `runtime/internal/cli` の `cli.go`・`contract.go`・`detach.go`・`version.go`。
 
 - 置き場は `--workspace` から直接決める: 実行のフォルダは `<ws>/.flywheel/flow/runs/<実行の識別>/`、資材は `<ws>/.flywheel/flow/runtime/<版>/`。`HARNESS_STATE_DIR`・`HARNESS_DATA_DIR`・`XDG_STATE_HOME`・`XDG_DATA_HOME` は読まない。
-- 定義の上書き（`.claude-harness/overrides/`）は読まず、埋め込んだ定義を読む。
+- 定義の上書き（`.claude-harness/overrides/`）は読まない。定義は、ワークスペースの `.flywheel/flows/<名前>.yaml` があればそれ、無ければ埋め込んだものを読む（下の「ワークスペースの定義」）。
 - `claude-harness-run --plugin-root` でプラグインの場所を解決し、`plugin.json` の版が `4.9.0` 以上 `6.0.0` 未満でなければ、実行のフォルダを作らずに始めない。
 - 写さなかったもの: 上書きの読み込み・`graph`・`predict-conflicts`・`setup`・端末の判定・人向けの引数の解釈と使い方・`approve`・`runs`。契約の `flow`・`steps` は任意の欄で、契約の版は 1 のまま（下の「ステップの一覧の出力」）。
 - 写した元から変えた振る舞い: 契約の呼び出しはいつも `review` を受け付ける（`--accept-kind` を持たない）。切り離した runner の引き継ぎに失敗した `start`・`resume` は 0 でない終了コード。プラグインの場所・版を確かめられない `start` は、標準出力に何も出さず 0 でない終了コード。契約の `requested_action.text` のコマンドの案内は `flywheel flow resume …`。この版の flywheel と run を始めた版の定義の食い違い（写した元の終了コード 5 の仕組み）は持たない（記録した定義を開き直せなければ誤り）。
@@ -47,7 +47,7 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 
 ### 上書き
 
-- 写した元の定義の上書き（`.claude-harness/overrides/`）は読まない。埋め込んだ定義だけを読む。組み込みのフローで上書きを使えるようにするのは、この区切りの範囲外。
+- 写した元の定義の上書き（`.claude-harness/overrides/`）は読まない。組み込みとの差分だけを書く上書きは受けず、変えたいときは定義を丸ごとワークスペースに置く（下の「ワークスペースの定義」）。
 - 写した元の `graph`・`predict-conflicts`・`setup`・`approve`・`runs` も写していない。
 
 ### プラグインの場所と版
@@ -103,3 +103,16 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 - `ticket`・`ticket-light` のセルフレビューを、実装のステップの指示文から外し、レビューのステップ `self-review`（指示文 `prompts/ticket-self-review.md`・出力の型 `schemas/self-review-result.json`）と直すステップ `self-review-fix` にした。`self-review` の結果は `findings`（直すべき指摘あり。`self-review-fix` へ戻り、回数は `limits.self_review` で数える。尽きたら残った指摘を PR に載せて `commit` へ）・`clean`（直すべき指摘なし。`commit` へ）・`incomplete`（最後まで行えなかった。`self_review_incomplete` で止まる）。`self-review-route` と、実装の出力の `review_incomplete`・`self_review`・`codex_review`・`residual_findings`、直し・レビュー対応の出力の `self_review` を外した。直し（`fix`）の後も `self-review` を通る。
 - レビュアーの構成・境目・Codex は `self-review` の `with` に書く（`reviewers`・`verifier`・`fix_threshold`・`codex_review`）。`ticket` はレビュアー 2 体と `claude-harness:finding-verifier`・上限 3・Codex を使う、`ticket-light` はレビュアー 2 体・疑う役なし（`none`）・上限 1・Codex を使わない。Codex のレビューは 1 回目の `self-review` だけが起動する（上の「標準のフロー ticket の値と Codex のレビュー」の実装のステップの手順を移した）。
 - `facts.self_review` は `$steps.self-review.self_review` から出す。PR の残指摘は `$steps.self-review.residual_findings`、レビューの未検証は pull-request の新しい `with` の `review_unverified`（実装の `unverified` の後ろに並べて載せる）から渡す。
+
+### ワークスペースの定義（フローのカスタマイズ S1）
+
+仕様は `docs/features/flow-customization.md`。実装は `definition.go`（探し方・検査・写し）と `check.go`（写す口・確かめる口）。
+
+- **置き場**: ワークスペースの `.flywheel/flows/<名前>.yaml` に、定義を丸ごと置ける（名前は `^[a-z][a-z0-9-]*$`）。`flow start <名前>` は、置いてあればそれで始め（組み込みと同じ名前なら置き換え、無い名前なら新しいフロー）、無ければ組み込みで始める。
+- **指示文**: ワークスペースの定義が指す `prompts/<x>.md` は、`.flywheel/flows/prompts/<x>.md` があればそれ、無ければ組み込みのもの。出力の型（`schemas/`）とつなぎのスクリプト（`scripts/`）は組み込みだけで、`.flywheel/flows/schemas/`・`.flywheel/flows/scripts/` があれば `start` も `check` も誤りにする。組み込みの定義は組み込みの指示文だけを使う（ワークスペースの `prompts/` を見ない）。
+- **検査**: 定義の YAML・使う指示文・組み込みの `schemas/` と `scripts/` を 1 つのディレクトリ（写し）に並べ、組み込みと同じ読み込みと検査（`workflow.LoadWithOverrides`。上書きは重ねない）にかける。通らなければ実行を始めず、契約の `failed` を返す（理由は元のファイルのパスと行）。組み込みの定義へ落として動かすことはしない。
+- **実行の写し**: 検査を通った写しを、実行のフォルダの `definition/` へ移し、その写しを定義の場所（`workflow.path`・`workflow_dir`）として始める。`resume`・`__run-detached` は写しを読むので、始めた後にワークスペースのファイルを変えても実行は変わらない。開き直すときは、YAML の sha256 の照合（いまと同じ）に加えて、写しの YAML とワークスペースから写した指示文が、始めたときの定義のハッシュのままかを確かめる。ワークスペースの定義で始めた実行は `embedded` を偽にする。組み込みの定義の実行は、いまと同じ（展開した資材を直に読む）。
+- **定義のハッシュ**: ワークスペースの定義は、YAML の中身と、ワークスペースから写した指示文（パスと中身。パスの昇順）をまとめた sha256（`definitionHash`）。組み込みは YAML の sha256（`workflow.hash` と同じ）。
+- **記録と契約**: 実行の始まりの記録（`run_started`）に `definition`（`source`＝`workspace`・`builtin`、`sha256`、ワークスペースの定義では元のパスと写した指示文の一覧）を残す。契約（版 1 のまま）の JSON に任意の欄 `definition`（`source`・`sha256`）を足し、実行を読めた `start`・`status`・`resume`・`cancel` の出力に必ず載せる。記録の無い（この版より前に始めた）実行は `builtin` と YAML の sha256 を出す。
+- **写す口**: `flywheel flow export <名前>` は、組み込みの定義の YAML だけを `.flywheel/flows/<名前>.yaml` へ書き出し、その絶対パスを標準出力へ出す（指示文は書き出さない）。書き出す先に既にあれば上書きせず、組み込みに無い名前と合わせて 0 でない終了コード。`.flywheel/flows/` が無ければ作る。
+- **確かめる口**: `flywheel flow check [--json] [<名前>...]` は、名前が無ければ `.flywheel/flows/*.yaml` をすべて、あればその名前だけを検査する（置いていない名前は組み込みを検査し、組み込みにも無ければ通らない）。すべて通れば 0、1 つでも通らなければ 1。テキストは定義ごとに 1 行（名前・種別・通ったか・ハッシュの先頭 12 文字）と「ファイル:行: 理由」。`--json` は `{"definitions":[{"name","source","kind"（replace・new・builtin）,"path","sha256","ok","problems":[{"file","line","message"}]}]}`。検査はプラグインのスクリプトとエージェントの実在も確かめるので、`start` と同じくプラグインの場所を解決できないと検査できない（0 でない終了コード）。

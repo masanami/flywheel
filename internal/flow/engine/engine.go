@@ -77,6 +77,11 @@ type StartParams struct {
 	// CLIVersion・Embedded は run_started に記録する（§7.3・N3）。
 	CLIVersion string
 	Embedded   bool
+	// Definition は run_started に記録する定義の出どころとハッシュ（nil なら記録しない）。
+	Definition *runstate.DefinitionRecord
+	// Relocate は非 nil なら、run ディレクトリを作った直後に呼び、返した定義（run ディレクトリの中の写しから読み直したもの）で
+	// 始める。WorkflowDir はその定義のディレクトリにする。ワークスペースの定義を写しで動かすために使う。
+	Relocate func(runDir string) (*workflow.Workflow, error)
 }
 
 // arrayField は facts の参照 r が指す欄が、段の出力の型で配列かを返す。
@@ -108,6 +113,17 @@ func Start(p StartParams) (*Engine, error) {
 	run, err := runstate.Create(p.RunsDir, id)
 	if err != nil {
 		return nil, err
+	}
+	if p.Relocate != nil {
+		wf, err := p.Relocate(run.Dir)
+		if err == nil && wf.Hash != p.WF.Hash {
+			err = fmt.Errorf("it differs from the checked one (sha256 %s, copy %s)", p.WF.Hash, wf.Hash)
+		}
+		if err != nil {
+			_ = os.RemoveAll(run.Dir) // run_started を書く前なので、まだ誰も読まない
+			return nil, fmt.Errorf("cannot place the copy of the workflow in the run folder: %w", err)
+		}
+		p.WF, p.WorkflowDir = wf, wf.Dir
 	}
 	limits := map[string]float64{}
 	for _, l := range p.WF.Limits {
@@ -144,6 +160,7 @@ func Start(p StartParams) (*Engine, error) {
 			WorkflowDir: p.WorkflowDir,
 			CLIVersion:  p.CLIVersion,
 			Embedded:    p.Embedded,
+			Definition:  p.Definition,
 			Units:       []string{MainUnit},
 			EntryStep:   p.WF.Steps[0].ID,
 		}},

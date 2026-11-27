@@ -1,0 +1,32 @@
+# ワークスペースの定義の試験に使う小さなフロー（組み込みに無い名前）。
+# greet は組み込みの指示文（prompts/sync-resolve.md。ワークスペースに置かない）、again はワークスペースの指示文（prompts/hello.md）を使う。
+schema: harness.workflow/v1
+id: hello
+description: ワークスペースの定義の試験
+limits:
+  budget_usd: 5
+steps:
+  greet:
+    kind: llm
+    prompt: prompts/sync-resolve.md
+    session: new
+    output: schemas/sync-resolve-result.json
+    budget_usd: 1
+    timeout: 5m
+    on: { resolved: wait, failure: { fail: greet_failed } }
+  wait:
+    kind: gate
+    type: input
+    decider: any
+    requested_action: go on
+    inputs: [go]
+    on:
+      go: { goto: again }
+  again:
+    kind: llm
+    prompt: prompts/hello.md
+    session: new
+    output: schemas/sync-resolve-result.json
+    budget_usd: 1
+    timeout: 5m
+    on: { resolved: { done: greeted }, failure: { fail: again_failed } }

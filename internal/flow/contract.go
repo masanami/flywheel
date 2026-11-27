@@ -54,6 +54,23 @@ type contractDoc struct {
 	// ステップがまだ無くても Steps は [] を出す。
 	Flow  *string         `json:"flow,omitempty"`
 	Steps *[]contractStep `json:"steps,omitempty"`
+	// Definition は run がどの定義で始まったか（任意の欄。run を読めたときは必ず出す）。
+	Definition *contractDefinition `json:"definition,omitempty"`
+}
+
+// contractDefinition は契約の definition: 定義の出どころ（workspace・builtin）と定義のハッシュ。
+type contractDefinition struct {
+	Source string `json:"source"`
+	SHA256 string `json:"sha256"`
+}
+
+// definitionOf は run の定義の出どころとハッシュ。記録の無い（この版より前に始めた）run は、埋め込んだ定義で始めたものとして
+// YAML の sha256 を出す。
+func definitionOf(st *runstate.State) *contractDefinition {
+	if r := st.Definition; r != nil {
+		return &contractDefinition{Source: r.Source, SHA256: r.SHA256}
+	}
+	return &contractDefinition{Source: runstate.DefinitionBuiltin, SHA256: st.Workflow.Hash}
 }
 
 // contractStep は steps の要素（ステップ 1 回ぶん。キーは辞書順）。Seq は step_started の記録の通し番号。
@@ -186,6 +203,7 @@ func contractFromView(v *runView, note string) contractDoc {
 	d.Flow = &flow
 	steps := contractSteps(v)
 	d.Steps = &steps
+	d.Definition = definitionOf(st)
 	return d
 }
 
