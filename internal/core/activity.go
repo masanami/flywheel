@@ -96,6 +96,8 @@ func formatEntityID(entity string, id int64) string {
 		return formatTaskID(id)
 	case "followup":
 		return formatFollowupID(id)
+	case "requirement":
+		return formatRequirementID(id)
 	case "task_addition":
 		return formatTaskAdditionID(id)
 	default:

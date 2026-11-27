@@ -13,9 +13,12 @@ const usageText = `flywheel - flywheel の core を操作する CLI
 
 コマンド:
   init
-  create --title <t> [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>] [--spec <パス>] [--spec-base <パス>]
+  create --title <t> [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>] [--spec <パス>] [--spec-base <パス>] [--requirement <RQ-ID>]
             （--spec＝仕様の文書の場所。ワークスペースから見た相対のパス。ファイルはまだ無くてもよい）
             （--spec-base＝仕様の下書き〔.flywheel/specs/ の下〕が置き換える元の文書の場所。リポジトリの中の相対のパス）
+            （--requirement＝作る課題が指す要求の記録。無い記録と解決済みの記録は指せない）
+  requirement create --title <t>   （要求の記録を作り、ID と証跡の場所を返す。題名は 200 文字以内。証跡のファイルは作らない。
+            対話の欄から実行すると会話を持つ記録になる）
   show <ID> [--plan]   （--plan＝最新の計画の方針・問いと推奨・タスクのツリー・予算の見込み・統合先を使うかを出す）
   list [--status <状態>]
   edit <ID> [--title <t>] [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>]

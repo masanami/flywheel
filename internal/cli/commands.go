@@ -161,8 +161,15 @@ func defaultCommands() []Command {
 				{Name: "urgency", HasValue: true},
 				{Name: "spec", HasValue: true},
 				{Name: "spec-base", HasValue: true},
+				{Name: "requirement", HasValue: true},
 			},
 			Run: runCreate,
+		},
+		{
+			Path:          []string{"requirement", "create"},
+			RequiresStore: true,
+			Flags:         []flagDef{{Name: "title", HasValue: true, Required: true}},
+			Run:           runRequirementCreate,
 		},
 		{
 			Path:          []string{"show"},

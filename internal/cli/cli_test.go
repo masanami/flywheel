@@ -874,6 +874,8 @@ func TestDefaultCommands_MatchIFAPITable(t *testing.T) {
 	// （仕様は docs/features/core-redesign.md §走っているサイクルを見る・止める。値の形は cycle_status_test.go が検査する）。
 	wantSet["cycle status"] = true
 	wantSet["cycle stop"] = true
+	// 区切り S3a: 同じ理由で、`requirement create` を個別に足す（仕様は docs/features/request-to-plan-s3.md の「画面・API設計」）。
+	wantSet["requirement create"] = true
 	gotSet := map[string]bool{}
 	for _, c := range defaultCommands() {
 		key := strings.Join(c.Path, " ")

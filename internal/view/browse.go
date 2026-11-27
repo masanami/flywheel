@@ -76,10 +76,13 @@ type ShowCardResponse struct {
 	Operations        []Operation         `json:"operations"`
 	Pairs             []StagePair         `json:"pairs"`
 	Plans             []PlanDetail        `json:"plans"`
-	Runs              []ShowRun           `json:"runs"`
-	SourceBinding     *SourceBinding      `json:"source_binding"`
-	SourceChildren    []SourceChild       `json:"source_children"`
-	Stages            Stages              `json:"stages"`
+	// Requirement・SliceSplit は ShowResponse と同じ値。
+	Requirement    *Requirement   `json:"requirement"`
+	Runs           []ShowRun      `json:"runs"`
+	SliceSplit     *SliceSplit    `json:"slice_split"`
+	SourceBinding  *SourceBinding `json:"source_binding"`
+	SourceChildren []SourceChild  `json:"source_children"`
+	Stages         Stages         `json:"stages"`
 	// SupervisorActions・SupervisorHandsTaken は ShowResponse と同じ値。
 	SupervisorActions    []SupervisorAction `json:"supervisor_actions"`
 	SupervisorHandsTaken map[string]int     `json:"supervisor_hands_taken"`
@@ -103,10 +106,13 @@ type ApprovedCardResponse struct {
 	Operations        []Operation         `json:"operations"`
 	Pairs             []StagePair         `json:"pairs"`
 	Plans             []PlanDetail        `json:"plans"`
-	Runs              []ShowRun           `json:"runs"`
-	SourceBinding     *SourceBinding      `json:"source_binding"`
-	SourceChildren    []SourceChild       `json:"source_children"`
-	Stages            Stages              `json:"stages"`
+	// Requirement・SliceSplit は ShowResponse と同じ値。
+	Requirement    *Requirement   `json:"requirement"`
+	Runs           []ShowRun      `json:"runs"`
+	SliceSplit     *SliceSplit    `json:"slice_split"`
+	SourceBinding  *SourceBinding `json:"source_binding"`
+	SourceChildren []SourceChild  `json:"source_children"`
+	Stages         Stages         `json:"stages"`
 	// SupervisorActions・SupervisorHandsTaken は ShowCardResponse と同じ値。
 	SupervisorActions    []SupervisorAction `json:"supervisor_actions"`
 	SupervisorHandsTaken map[string]int     `json:"supervisor_hands_taken"`
@@ -121,7 +127,7 @@ func FromApprovedChallengeDetailCard(d *core.ChallengeDetail, card *core.Card, t
 	out := ApprovedCardResponse{
 		Additions: s.Additions, Approvals: s.Approvals, Budget: s.Budget, Card: s.Card, Challenge: s.Challenge, ConflictFixes: s.ConflictFixes,
 		DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: s.Holds, Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans,
-		Runs: s.Runs, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
+		Requirement: s.Requirement, Runs: s.Runs, SliceSplit: s.SliceSplit, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
 		SupervisorActions: s.SupervisorActions, SupervisorHandsTaken: s.SupervisorHandsTaken, Tasks: s.Tasks, Waiting: s.Waiting,
 	}
 	if tree != nil {
@@ -157,7 +163,7 @@ func FromChallengeDetailCard(d *core.ChallengeDetail, card *core.Card, tree core
 	s := FromChallengeDetail(d)
 	return ShowCardResponse{
 		Additions: FromTaskAdditionsForScreen(d.Additions), Approvals: s.Approvals, Budget: s.Budget, Card: FromCard(card), Challenge: s.Challenge, ConflictFixes: s.ConflictFixes, DirectCompletions: s.DirectCompletions, Followups: s.Followups, Holds: FromHoldsForScreen(d.Holds),
-		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Runs: s.Runs, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
+		Operations: s.Operations, Pairs: s.Pairs, Plans: s.Plans, Requirement: s.Requirement, Runs: s.Runs, SliceSplit: s.SliceSplit, SourceBinding: s.SourceBinding, SourceChildren: s.SourceChildren, Stages: s.Stages,
 		SupervisorActions: s.SupervisorActions, SupervisorHandsTaken: s.SupervisorHandsTaken,
 		Tasks:   s.Tasks,
 		Tree:    FromTreeChallenge(tree),

@@ -85,6 +85,9 @@ var allCommandSuccessCases = map[string]commandSuccessCase{
 	"create": {setup: func(_ *testing.T, _ string) []string {
 		return []string{"create", "--title", "t"}
 	}},
+	"requirement create": {setup: func(_ *testing.T, _ string) []string {
+		return []string{"requirement", "create", "--title", "t"}
+	}},
 	"show": {setup: func(t *testing.T, ws string) []string {
 		return []string{"show", createForCase(t, ws)}
 	}},

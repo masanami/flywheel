@@ -221,7 +221,9 @@ export interface ShowResponse {
   pairs: StagePair[];
   plans: PlanDetail[];
   release_head_changes?: ReleaseHeadChange[];
+  requirement: Requirement | null;
   runs: ShowRun[];
+  slice_split: SliceSplit | null;
   source_binding: SourceBinding | null;
   source_children: SourceChild[];
   stages: Stages;
@@ -474,6 +476,26 @@ export interface ConflictFixFile {
   patch_unavailable: boolean;
 }
 
+export interface Requirement {
+  challenges: RequirementChallenge[];
+  chat_session: string | null;
+  created_at: string;
+  evidence_path: string;
+  external_key: string | null;
+  id: string;
+  origin: string;
+  origin_challenge_id: string | null;
+  resolved_at: string | null;
+  title: string;
+  url: string | null;
+}
+
+export interface RequirementChallenge {
+  id: string;
+  status: string;
+  title: string;
+}
+
 export interface ShowRun {
   challenge_id: string | null;
   cost_source: string | null;
@@ -493,6 +515,24 @@ export interface ShowRun {
   session_id: string | null;
   started_at: string;
   task_id: string | null;
+}
+
+export interface SliceSplit {
+  evidence_path: string | null;
+  hold_id: string | null;
+  reason: string | null;
+  slices: Slice[];
+  state: string;
+}
+
+export interface Slice {
+  context: string;
+  depends_on: number[];
+  headline: string;
+  repo: string;
+  scope: string;
+  summary: string;
+  title: string;
 }
 
 export interface SourceBinding {
@@ -744,7 +784,9 @@ export interface ShowCardResponse {
   operations: Operation[];
   pairs: StagePair[];
   plans: PlanDetail[];
+  requirement: Requirement | null;
   runs: ShowRun[];
+  slice_split: SliceSplit | null;
   source_binding: SourceBinding | null;
   source_children: SourceChild[];
   stages: Stages;
@@ -1580,4 +1622,17 @@ export const SUPERVISOR_STATE_CODES = [
 export const FOLLOWUP_SOURCE_CODES = [
   "learn",
   "supervisor",
+] as const;
+
+export const REQUIREMENT_ORIGIN_CODES = [
+  "issue",
+  "chat",
+  "manual",
+] as const;
+
+export const SLICE_SPLIT_STATE_CODES = [
+  "pending",
+  "awaiting_owner",
+  "split",
+  "single",
 ] as const;
