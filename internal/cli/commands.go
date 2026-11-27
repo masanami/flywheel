@@ -297,7 +297,8 @@ func defaultCommands() []Command {
 			RequiresStore: true,
 			MinPositional: 1,
 			MaxPositional: 1,
-			// --answer（保留への回答）と --choice・--text（計画の承認待ちの問いへの答え）のどちらを使うかは runAnswer が検査する。
+			// --answer（保留への回答）と --choice・--text（計画の承認待ちの問いへの答え。--option があれば下書きの問いへの答え）の
+			// 組み合わせは runAnswer が検査する。
 			Flags: append([]flagDef{
 				{Name: "answer", HasValue: true}, {Name: "replan", HasValue: false}, {Name: "option", HasValue: true}, {Name: "hold", HasValue: true},
 				{Name: "choice", HasValue: true, Repeatable: true}, {Name: "text", HasValue: true, Repeatable: true},

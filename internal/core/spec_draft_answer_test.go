@@ -185,7 +185,7 @@ func TestSpecDraftAnswer_AnswersAreAppendOnly(t *testing.T) { // AC-312・AC-332
 		t.Fatal(err)
 	}
 	got := f.detail(t, id).SpecDraft.Answers
-	want := append(first, SpecDraftAnswer{Attempt: 2, Question: "2 回目の問い", Answer: "y", By: "owner", Basis: []SpecDraftBasis{}})
+	want := append(first, SpecDraftAnswer{Kind: SpecDraftAnswerKindAnswer, Attempt: 2, Question: "2 回目の問い", Answer: "y", By: "owner", Basis: []SpecDraftBasis{}})
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("answers = %+v, want %+v", got, want)
 	}

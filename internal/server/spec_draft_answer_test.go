@@ -46,6 +46,24 @@ func TestHoldAnswer_SpecDraftAnswerRecordsEveryRecommendation(t *testing.T) { //
 	}
 }
 
+// 画面からの回答は添え書きも問いごとの答えも持たないので、回答の文は見出しのままになる。
+func TestHoldAnswer_SpecDraftAnswerTextIsTheOptionLabel(t *testing.T) { // AC-224
+	ws := specHoldWorkspace(t)
+	port, _ := recordingServer(t, ws, CycleLaunch{Started: true})
+	check, _ := readHold(t, port, "H-1")
+	if code, body := postAnswer(t, port, holdAnswerPath, check, "answer"); code != http.StatusOK {
+		t.Fatalf("answer = %d %s", code, body)
+	}
+	if got := holdState(t, ws, "C-1").Answer; got == nil || *got != "推奨のまま進める" {
+		t.Errorf("hold answer = %v", got)
+	}
+	for _, a := range specDraftOf(t, ws).Answers {
+		if a.Kind != core.SpecDraftAnswerKindAnswer {
+			t.Errorf("element = %+v, want only answers", a)
+		}
+	}
+}
+
 func TestHoldAnswer_SpecDraftRejectsChoicesInTheBody(t *testing.T) { // AC-330
 	ws := specHoldWorkspace(t)
 	port, _ := recordingServer(t, ws, CycleLaunch{})

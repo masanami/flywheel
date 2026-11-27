@@ -631,6 +631,20 @@ func InsertSpecDraftHold(t *testing.T, workspace string, challengeID int, reason
 	}
 }
 
+// SetSpecDraftAnswers はテスト専用のフィクスチャとして、課題 challengeID の下書きづくりの記録の答えの一覧を answersJSON にする
+// （種類を持たない要素など、core の口が書かない形の記録を作る）。
+func SetSpecDraftAnswers(t *testing.T, workspace string, challengeID int, answersJSON string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE spec_draft SET answers = ? WHERE challenge_id = ?`, answersJSON, challengeID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: SetSpecDraftAnswers: %v", err)
+	}
+}
+
 // InsertTaskHold はテスト専用のフィクスチャとして、課題 challengeID のタスク（題名 taskTitle）を止める、未回答の保留
 // （scope は task。選択肢は optionsJSON。空なら NULL）を挿入し、保留の行の番号を返す。
 func InsertTaskHold(t *testing.T, workspace string, challengeID int, taskTitle, question, fromStatus, raisedAt, optionsJSON string) int64 {

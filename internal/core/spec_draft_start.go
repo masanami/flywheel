@@ -68,11 +68,20 @@ func formatSpecBrief(title, description string, binding *sourceBinding, d SpecDr
 	seq := map[int]int{}
 	// 複数の行の値は、2 行目から字下げして、項目の中に収める（見出しや次の項目と読み違えないようにする）。
 	item := func(v string) string { return strings.ReplaceAll(strings.TrimRight(v, "\n"), "\n", "\n  ") }
+	var notes strings.Builder
 	for _, a := range d.Answers {
+		if a.Kind == SpecDraftAnswerKindNote {
+			fmt.Fprintf(&notes, "### %d\n%s\n", a.Attempt, strings.Trim(a.Answer, "\n"))
+			continue
+		}
 		seq[a.Attempt]++
 		fmt.Fprintf(&answers, "### %d-%d\n- 問い: %s\n- 答え: %s\n- 答えた者: %s\n", a.Attempt, seq[a.Attempt], item(a.Question), item(a.Answer), item(a.By))
+		for _, basis := range a.Basis {
+			fmt.Fprintf(&answers, "- 根拠: %s（%s）\n", oneLine(basis.Path), oneLine(basis.Locator))
+		}
 	}
 	section("これまでの問いと答え", answers.String())
+	section("オーナーの添え書き", notes.String())
 	return b.String()
 }
 

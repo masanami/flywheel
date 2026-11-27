@@ -204,7 +204,7 @@ func TestHoldSpecDraft_FailedFromPendingKeepsAnswers(t *testing.T) {
 	t.Parallel()
 	f, id, runID := shDrafting(t, SpecDraftStatePending, 1)
 	cid, _ := parseChallengeID(id)
-	answers := []SpecDraftAnswer{{Attempt: 1, Question: "P?", Answer: "yes", By: "owner", Basis: []SpecDraftBasis{}}}
+	answers := []SpecDraftAnswer{{Kind: SpecDraftAnswerKindAnswer, Attempt: 1, Question: "P?", Answer: "yes", By: "owner", Basis: []SpecDraftBasis{}}}
 	if err := f.s.db.Write(context.Background(), func(tx *sql.Tx) error {
 		return updateSpecDraft(context.Background(), tx, cid, specDraftUpdate{State: SpecDraftStatePending, Attempts: 1, Answers: answers}, time.Now())
 	}); err != nil {
