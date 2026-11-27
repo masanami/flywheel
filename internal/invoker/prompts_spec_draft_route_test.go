@@ -84,19 +84,19 @@ func TestInstructions_J2ExpandCallSkipsAllFourChoices(t *testing.T) {
 		"上の「判断」の 4 つの選択をせず")
 }
 
-// AC-409: スーパーバイザーの指示文と、その分量の上限は、この区切りの前と変わらない。
-// 後の区切りで sv.md を変えるときは、この試験の値を書き換える。
-func TestSupervisorPrompt_IsUnchangedBySpecDraftRouting(t *testing.T) {
+// AC-409（S2b-2 で改めた）: スーパーバイザーの指示文は、節「下書きの問いに答えるとき」を足し、上限を 7,168 バイトに
+// した値で固定する。後の区切りで sv.md を変えるときは、この試験の値を書き換える。
+func TestSupervisorPrompt_IsPinned(t *testing.T) {
 	body, err := Instructions(core.JudgmentSV)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256([]byte(body))
-	const want = "404223857c445f18dbcf3e0d76134c8f8548428d5960d4e1457377f3cb0cbc0c"
+	const want = "bc25c7ad22466c32d83648e54dce536fc2e12b8aed2a368c8edccfface52a69f"
 	if got := hex.EncodeToString(sum[:]); got != want {
 		t.Errorf("sv.md sha256 = %s, want %s", got, want)
 	}
-	if limit := judgmentPromptLimit["sv.md"]; limit != 6144 {
-		t.Errorf("sv.md limit %d bytes, want 6144", limit)
+	if limit := judgmentPromptLimit["sv.md"]; limit != 7168 {
+		t.Errorf("sv.md limit %d bytes, want 7168", limit)
 	}
 }
