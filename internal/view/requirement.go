@@ -70,13 +70,15 @@ type SliceSplit struct {
 
 // Slice は slice_split.slices の要素。depends_on は前に済ませる区切りの番号（1 始まり。無ければ []）。
 type Slice struct {
-	Context   string `json:"context"`
-	DependsOn []int  `json:"depends_on"`
-	Headline  string `json:"headline"`
-	Repo      string `json:"repo"`
-	Scope     string `json:"scope"`
-	Summary   string `json:"summary"`
-	Title     string `json:"title"`
+	// ChallengeID は区切りから作った課題の ID。区切りを分けた後だけ出す。
+	ChallengeID string `json:"challenge_id,omitempty"`
+	Context     string `json:"context"`
+	DependsOn   []int  `json:"depends_on"`
+	Headline    string `json:"headline"`
+	Repo        string `json:"repo"`
+	Scope       string `json:"scope"`
+	Summary     string `json:"summary"`
+	Title       string `json:"title"`
 }
 
 // FromSliceSplit は区切りを分ける記録を変換する。nil なら nil。
@@ -87,7 +89,7 @@ func FromSliceSplit(s *core.SliceSplit) *SliceSplit {
 	slices := make([]Slice, 0, len(s.Slices))
 	for _, v := range s.Slices {
 		slices = append(slices, Slice{
-			Context: v.Context, DependsOn: append([]int{}, v.DependsOn...), Headline: v.Headline, Repo: v.Repo,
+			ChallengeID: v.ChallengeID, Context: v.Context, DependsOn: append([]int{}, v.DependsOn...), Headline: v.Headline, Repo: v.Repo,
 			Scope: v.Scope, Summary: v.Summary, Title: v.Title,
 		})
 	}

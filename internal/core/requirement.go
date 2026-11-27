@@ -105,6 +105,8 @@ type Slice struct {
 	Repo     string `json:"repo"`
 	// DependsOn は前に済ませる区切りの番号（1 始まり）。
 	DependsOn []int `json:"depends_on"`
+	// ChallengeID は、この区切りから作った課題の ID。区切りを分ける前は空。
+	ChallengeID string `json:"challenge_id,omitempty"`
 }
 
 // SliceSplit は区切りを分ける記録のうち、課題の詳細が持つ項目。

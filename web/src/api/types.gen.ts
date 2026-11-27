@@ -527,6 +527,7 @@ export interface SliceSplit {
 }
 
 export interface Slice {
+  challenge_id?: string;
   context: string;
   depends_on: number[];
   headline: string;
