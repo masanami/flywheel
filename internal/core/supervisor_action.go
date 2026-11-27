@@ -88,6 +88,8 @@ type SupervisorActionCountQuery struct {
 	// Hands が空でなければ、その手の記録だけを数える。ExcludeHands の手の記録は数えない。
 	Hands        []SupervisorHand
 	ExcludeHands []SupervisorHand
+	// ExcludeStopKinds の止まり方の記録は数えない。
+	ExcludeStopKinds []StopKind
 	// AnyTask が真なら、タスクの条件を付けない（課題の全体で数える。TaskID は見ない）。
 	AnyTask bool
 	// ExecutedOnly が真なら、結果が executed の記録だけを数える。
@@ -368,6 +370,12 @@ func supervisorActionWhere(ctx context.Context, tx *sql.Tx, q SupervisorActionCo
 		conds = append(conds, "stop_kind = ?")
 		args = append(args, string(q.StopKind))
 	}
+	if len(q.ExcludeStopKinds) > 0 {
+		conds = append(conds, "stop_kind NOT IN ("+placeholders(len(q.ExcludeStopKinds))+")")
+		for _, k := range q.ExcludeStopKinds {
+			args = append(args, string(k))
+		}
+	}
 	switch {
 	case q.AnyTask: // 課題の全体で数える
 	case q.TaskID == "":
@@ -478,9 +486,10 @@ func countExecutedSupervisorHands(ctx context.Context, tx *sql.Tx, challengeID i
 }
 
 // executedSupervisorQuestions は課題で、スーパーバイザーが答えた子の問い（結果が executed の対処の記録の questions）を古い順に返す。
-// 完了の承認のときにオーナーへ見せる（無ければ空のスライス）。
+// 完了の承認のときにオーナーへ見せる（無ければ空のスライス）。下書きの問いは入れない（記録の答えの一覧で見せる）。
 func executedSupervisorQuestions(ctx context.Context, tx *sql.Tx, challengeID int64) ([]SupervisorQuestion, error) {
-	actions, err := querySupervisorActions(ctx, tx, `WHERE challenge_id = ? AND result = ? AND questions IS NOT NULL`, challengeID, string(ActionExecuted))
+	actions, err := querySupervisorActions(ctx, tx, `WHERE challenge_id = ? AND result = ? AND stop_kind <> ? AND questions IS NOT NULL`,
+		challengeID, string(ActionExecuted), string(StopKindSpecQuestion))
 	if err != nil {
 		return nil, err
 	}

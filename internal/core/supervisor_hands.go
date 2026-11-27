@@ -101,8 +101,8 @@ func supervisorOwnHandCount(t supervisorTarget, h SupervisorHand) SupervisorActi
 	return q
 }
 
-// supervisorHandDescription は選べる手の一覧に添える、手ごとの 1 行の説明。
-func supervisorHandDescription(h SupervisorHand) string {
+// supervisorHandDescription は、止まり方 kind の選べる手の一覧に添える、手ごとの 1 行の説明。
+func supervisorHandDescription(kind StopKind, h SupervisorHand) string {
 	switch h {
 	case HandReverify:
 		return "調べた結果を添えて、検証（受け取り）をやり直す"
@@ -119,6 +119,9 @@ func supervisorHandDescription(h SupervisorHand) string {
 	case HandEscalate:
 		return "調べた内容と推奨を付けて、オーナーへ上げる"
 	case HandAnswer:
+		if kind == StopKindSpecQuestion {
+			return "根拠（対象のリポジトリの元のクローンか、ワークスペースの中のファイル）を示して、下書きの問いに答える（答えない問いは null）"
+		}
 		return "根拠（ワークスペースの中のファイル）を示して、委譲先の問い全部に答える"
 	}
 	return ""

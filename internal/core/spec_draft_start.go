@@ -250,13 +250,17 @@ func (s *Store) startSpecDrafts(ctx context.Context, in DelegateInput) (res *Del
 		}
 	}
 	for _, cid := range startable {
+		if in.requeuedSpecDrafts[cid] {
+			continue
+		}
 		item, err := s.startSpecDraft(ctx, in, cid)
 		if err != nil {
 			return nil, false, err
 		}
 		appendDelegateOutcome(res, item, nil)
 	}
-	return res, len(startable)+len(stalls) > 0, nil
+	// ID を指定した呼び出しの対象が、いま実行待ちへ戻した下書きづくりなら、始めないが、対象はあったことにする。
+	return res, len(startable)+len(stalls) > 0 || (only != nil && in.requeuedSpecDrafts[*only]), nil
 }
 
 // specDraftStartContext は、下書きづくりの実行の行を作った書き込みの中で読んだ値。

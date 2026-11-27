@@ -46,6 +46,10 @@ type specDraftHold struct {
 	// CountAttempt は、この実行を保留と同じ書き込みで回数に数える。記録を running にする前に開始が失敗したときに使う
 	// （記録が pending のときだけ。running の記録は始めるときに数えてあるので、指定すると ErrValidation）。
 	CountAttempt bool
+	// AddAnswers は、保留と同じ書き込みで記録の答えの一覧へ足す答え（スーパーバイザーの答え）。足すだけで、前の要素は変えない。
+	AddAnswers []SpecDraftAnswer
+	// SupervisorAnswered は、スーパーバイザーが答えた問いの件数（spec_question の問いの文に書く。0 なら書かない）。
+	SupervisorAnswered int
 }
 
 // specDraftFailedStep は実行の最後のステップ。どの値も接続ツールの出力で、Summary は LLM が書いた信頼できない文。
@@ -140,14 +144,18 @@ func (h specDraftHold) question(path string, attempts int) string {
 		return fmt.Sprintf("仕様の下書きづくりの回数の上限（%d 回）に達し、決めないと進まない問いが %d 件残りました。下書き: %s",
 			SpecDraftMaxAttempts, len(h.Questions), path)
 	}
-	return fmt.Sprintf("仕様の下書きに、決めないと進まない問いが %d 件残りました。下書き: %s", len(h.Questions), path)
+	out := fmt.Sprintf("仕様の下書きに、決めないと進まない問いが %d 件残りました。下書き: %s", len(h.Questions), path)
+	if h.SupervisorAnswered > 0 {
+		out += fmt.Sprintf("\nスーパーバイザーが %d 件に答えました。", h.SupervisorAnswered)
+	}
+	return out
 }
 
 // errSpecDraftHoldNotEligible は、読み直した課題か記録が、下書きづくりの保留を作る対象でなかったことを表す内部の sentinel。
 var errSpecDraftHoldNotEligible = errors.New("core: the spec draft can no longer be held")
 
 // holdSpecDraft は runID を原因の実行として、課題を下書きづくりの保留で人間対応待ちにする（戻り先は分類済の、課題を止める保留）。
-// 同じ書き込みで、記録を awaiting_owner にし、問いの一覧・保留・保留の理由を書く（答えは変えない。回数は CountAttempt のときだけ 1 増やす）。
+// 同じ書き込みで、記録を awaiting_owner にし、問いの一覧・保留・保留の理由を書く（答えは AddAnswers を足すだけ。回数は CountAttempt のときだけ 1 増やす）。
 // 保留の選択肢と問いの文の回数は、書いた後の記録の回数。
 // 作るのは、課題が分類済で、記録が pending か running のときだけ。それ以外は何も書かず held は偽。
 // 止まり方は渡さないので、スーパーバイザー待ちにならない。呼び出し元の ctx の取り消しには従わない。
@@ -211,5 +219,5 @@ func raiseSpecDraftHold(ctx context.Context, tc *transitionCtx, h specDraftHold)
 		return err
 	}
 	return updateSpecDraft(ctx, tc.tx, tc.id, specDraftUpdate{State: SpecDraftStateAwaitingOwner, Attempts: attempts,
-		Questions: h.Questions, Answers: d.Answers, HoldRowID: &holdID, HoldReason: &h.Reason}, tc.now)
+		Questions: h.Questions, Answers: append(slices.Clone(d.Answers), h.AddAnswers...), HoldRowID: &holdID, HoldReason: &h.Reason}, tc.now)
 }

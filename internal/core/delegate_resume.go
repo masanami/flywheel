@@ -1012,9 +1012,11 @@ func (s *Store) holdForReworkLimit(ctx context.Context, dc *delegationContext, c
 
 // answeredSVRunIDs は、課題の、子の問いに答えたスーパーバイザーの run の ID（昇順）。検査を通って記録された答え
 // （手が answer で結果が executed の対処の記録）が指す run だけを返す（記録の無い答え・検査に落ちた答えで再開しないため）。
+// 下書きの問いに答えた run は、委譲先へ答えを返さないので入れない。
 func answeredSVRunIDs(ctx context.Context, tx *sql.Tx, challengeID int64) ([]int64, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT run_id FROM supervisor_action
-		WHERE challenge_id = ? AND hand = 'answer' AND result = 'executed' AND run_id IS NOT NULL ORDER BY run_id ASC`, challengeID)
+		WHERE challenge_id = ? AND stop_kind = ? AND hand = 'answer' AND result = 'executed' AND run_id IS NOT NULL ORDER BY run_id ASC`,
+		challengeID, string(StopKindChildQuestion))
 	if err != nil {
 		return nil, err
 	}
