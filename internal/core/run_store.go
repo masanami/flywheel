@@ -96,7 +96,7 @@ func (k runKind) valid() bool {
 	return false
 }
 
-// judgmentPoint は run.judgment（判断点 J1〜J6・J8・SV。J7 は無い。委譲は "" = NULL）。
+// judgmentPoint は run.judgment（判断点 J1〜J6・J8・J10・SV。J7 は無い。委譲は "" = NULL）。
 type judgmentPoint string
 
 const (
@@ -107,6 +107,8 @@ const (
 	judgmentJ5 judgmentPoint = "J5"
 	judgmentJ6 judgmentPoint = "J6"
 	judgmentJ8 judgmentPoint = "J8"
+	// judgmentJ10 は区切りを分ける判断点。課題を持つ。
+	judgmentJ10 judgmentPoint = "J10"
 	// judgmentSV はスーパーバイザーの判断点（想定外の止まりへの対処。区切り S4b-2）。課題を持つ。
 	judgmentSV judgmentPoint = "SV"
 	// judgmentJ9 は 2 つの課題を同時に進めてよいかの判断（J7 は無い）。新しく呼ぶ経路は無く、
@@ -117,11 +119,11 @@ const (
 // hasNoChallenge は j が課題を持たない判断（J8・J9）かを返す。
 func (j judgmentPoint) hasNoChallenge() bool { return j == judgmentJ8 || j == judgmentJ9 }
 
-// valid は j が J1〜J6・J8 のいずれかであるかを返す（"" には false。空許容は
+// valid は j が閉集合の判断点のいずれかであるかを返す（"" には false。空許容は
 // 呼び出し側が kind に応じて判定する）。
 func (j judgmentPoint) valid() bool {
 	switch j {
-	case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5, judgmentJ6, judgmentJ8, judgmentSV, judgmentJ9:
+	case judgmentJ1, judgmentJ2, judgmentJ3, judgmentJ4, judgmentJ5, judgmentJ6, judgmentJ8, judgmentJ10, judgmentSV, judgmentJ9:
 		return true
 	}
 	return false

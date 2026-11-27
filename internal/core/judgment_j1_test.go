@@ -45,6 +45,12 @@ func j1Output(t *testing.T, out j1RawOutput) []byte {
 	return b
 }
 
+// mineOutput は区切り 1 つに収まる、優先度 P1 の検査済みの mine の出力。
+func mineOutput(headline, jctx *string) *j1ValidatedOutput {
+	p := PriorityP1
+	return &j1ValidatedOutput{Verdict: J1VerdictMine, Priority: &p, Headline: headline, Context: jctx, FitsOneSlice: boolPtr(true)}
+}
+
 // succeededInvoker は常に succeeded・output を返す偽の判断の IF。
 func succeededInvoker(output []byte) *fakeJudgmentInvoker {
 	return &fakeJudgmentInvoker{result: JudgmentLaunchOutput{Result: RunResultSucceeded, StructuredOutput: output}}
@@ -76,10 +82,10 @@ func TestJ1OutputSchema_ContainsClosedValues(t *testing.T) {
 func TestValidateJ1Output_MineRequiresPriority(t *testing.T) {
 	t.Parallel()
 	// AC-77: mine で優先度が null は invalid。
-	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", Reason: "r"})); ok {
+	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", FitsOneSlice: boolPtr(true), Reason: "r"})); ok {
 		t.Error("want ok=false when mine has no priority")
 	}
-	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: strPtr("h"), Context: strPtr("c")})); !ok {
+	if _, ok := validateJ1Output(j1Output(t, j1RawOutput{Verdict: "mine", FitsOneSlice: boolPtr(true), Priority: strPtr("P1"), Reason: "r", Headline: strPtr("h"), Context: strPtr("c")})); !ok {
 		t.Error("want ok=true when mine has a valid priority")
 	}
 }
@@ -255,7 +261,7 @@ func TestApplyJ1Mine_RecordsActivityWithInvokerChannelAndRunID(t *testing.T) {
 	}
 	runID := insertFakeRunForTest(t, s, ch.ID, judgmentJ1)
 
-	mapped, err := s.applyJ1Mine(context.Background(), formatRunID(runID), ch.ID, PriorityP1, strPtr("h"), strPtr("c"))
+	mapped, err := s.applyJ1Mine(context.Background(), formatRunID(runID), ch.ID, mineOutput(strPtr("h"), strPtr("c")))
 	if err != nil {
 		t.Fatalf("applyJ1Mine: %v", err)
 	}
@@ -461,7 +467,7 @@ func TestClassifyAutoJ1_Mine_ClassifiesWithPriority(t *testing.T) {
 		t.Fatalf("CreateChallenge: %v", err)
 	}
 	cycleID := beginJ1Cycle(t, s, 300)
-	inv := succeededInvoker(j1Output(t, j1RawOutput{Verdict: "mine", Priority: strPtr("P1"), Reason: "r", Headline: strPtr("h"), Context: strPtr("c")}))
+	inv := succeededInvoker(j1Output(t, j1RawOutput{Verdict: "mine", FitsOneSlice: boolPtr(true), Priority: strPtr("P1"), Reason: "r", Headline: strPtr("h"), Context: strPtr("c")}))
 	id := ch.ID
 	res, err := s.ClassifyAutoJ1(context.Background(), J1AutoInput{ChallengeID: &id, AgentDecl: decl, Invoker: inv, CycleID: cycleID})
 	if err != nil {
@@ -497,7 +503,7 @@ func TestClassifyAutoJ1_MineWithoutPriority_InvalidOutputLeavesChallengeUnchange
 		t.Fatalf("GetChallenge before: %v", err)
 	}
 	cycleID := beginJ1Cycle(t, s, 300)
-	inv := succeededInvoker(j1Output(t, j1RawOutput{Verdict: "mine", Reason: "r"}))
+	inv := succeededInvoker(j1Output(t, j1RawOutput{Verdict: "mine", FitsOneSlice: boolPtr(true), Reason: "r"}))
 	id := ch.ID
 	res, err := s.ClassifyAutoJ1(context.Background(), J1AutoInput{ChallengeID: &id, AgentDecl: decl, Invoker: inv, CycleID: cycleID})
 	if err != nil {

@@ -131,6 +131,8 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 	spec = append(spec, "waiting_outside")
 	// 仕様の下書きを入れるタスクの起動の前の読み直し（docs/features/request-to-plan.md の S2a）が足した理由。
 	spec = append(spec, "spec_draft_changed")
+	// 区切りを分ける途中の課題を指定した plan（docs/features/request-to-plan-s3.md）が足した理由。
+	spec = append(spec, "slice_split_pending")
 	sort.Strings(spec)
 
 	var impl []string
@@ -239,6 +241,15 @@ func TestCycle_NotStartedReasonsAreTheClosedSetInBothDirections(t *testing.T) {
 		})
 		putRoutedFakeClaudeOnPATH(t, []fakeClaudeRoute{j1RouteMine("P1")}, "")
 		observe(cycleDoc(t, ws))
+	})
+	t.Run("slice_split_pending", func(t *testing.T) {
+		// ID を指定した plan --auto だけが出す（cycle の計画の段は、区切りを分ける途中の課題を黙って除く）。
+		ws, id := setupPendingSliceSplit(t)
+		pm := runJSON(t, ws, "plan", "--auto", id)["phase"].(map[string]any)
+		assertDocumentedPhase(t, loadDocumentedJSON(t), "plan", pm)
+		for _, n := range phaseNotStarted(t, pm) {
+			observed[n["reason"].(string)] = true
+		}
 	})
 	t.Run("not_learnable", func(t *testing.T) {
 		// ID を指定した learn の課題が対象の条件を満たさないときだけ出る（cycle の learn の段は対象外を黙って除く）。

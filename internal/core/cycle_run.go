@@ -439,6 +439,7 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 	// 分類（J1。classify --auto と同じ処理）。
 	j1, err := s.ClassifyAutoJ1(ctx, J1AutoInput{
 		AgentDecl: in.AgentDecl,
+		ConnDecl:  in.ConnDecl,
 		Invoker:   in.Invoker,
 		CycleID:   cycleID,
 		Cycle:     jc,

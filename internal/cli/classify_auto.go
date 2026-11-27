@@ -16,7 +16,7 @@ import (
 // だけを呼ぶ」）。
 //
 // 読み込み順（技術的な指示「宣言の読み込み順」）: agent.json の読み込み・
-// 検証 → RequirePositionFile → claude の有無 → 周の開始
+// 検証 → RequirePositionFile → connectors.json（任意）→ claude の有無 → 周の開始
 // （BeginCycle trigger "classify --auto"）→ ClassifyAutoJ1 → EndCycle。
 func runClassifyAuto(a Args) (any, error) {
 	ctx := context.Background()
@@ -27,6 +27,12 @@ func runClassifyAuto(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 	if err := decl.RequirePositionFile(ws); err != nil {
+		return nil, mapCoreErr(err)
+	}
+
+	// 委譲先の宣言は区切りを分ける判断点が使う。無ければ分類の判断点だけを呼ぶ。
+	conn, err := core.LoadConnectorsDeclaration(ws)
+	if err != nil && !errors.Is(err, core.ErrConfigNotFound) {
 		return nil, mapCoreErr(err)
 	}
 
@@ -62,6 +68,7 @@ func runClassifyAuto(a Args) (any, error) {
 	res, runErr := a.Store.ClassifyAutoJ1(ctx, core.J1AutoInput{
 		ChallengeID: challengeID,
 		AgentDecl:   decl,
+		ConnDecl:    conn,
 		Invoker:     launcher,
 		CycleID:     cyc.ID,
 	})

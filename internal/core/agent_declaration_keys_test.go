@@ -26,8 +26,8 @@ func TestAgentDeclarationKeys_ContainsAllTopLevelAndNestedKeys(t *testing.T) {
 		"S", "M", "L",
 		// ネスト: size pair（impl/review）
 		"impl", "review",
-		// ネスト: judgment_budget_usd（J1〜J6・J8・SV）
-		"J1", "J2", "J3", "J4", "J5", "J6", "J8", "SV",
+		// ネスト: judgment_budget_usd（J1〜J6・J8・J10・SV）
+		"J1", "J2", "J3", "J4", "J5", "J6", "J8", "J10", "SV",
 		// ネスト: timeout_sec（judgment/delegate）
 		"judgment", "delegate",
 		// M4.5 S3

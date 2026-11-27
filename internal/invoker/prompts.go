@@ -48,20 +48,17 @@ func promptsSubFS() (fs.FS, error) {
 	return fs.Sub(promptsFS, "prompts")
 }
 
-// judgmentJ10 は区切りを分ける判断点の指示文を引く値。
-const judgmentJ10 = core.JudgmentPoint("J10")
-
 // judgmentPromptFile は判断点ごとの指示文ファイル名（prompts/ 直下、
 // promptsSubFS からの相対パス）。
 var judgmentPromptFile = map[core.JudgmentPoint]string{
-	core.JudgmentJ1: "j1.md",
-	core.JudgmentJ2: "j2.md",
-	core.JudgmentJ3: "j3.md",
-	core.JudgmentJ5: "j5.md",
-	core.JudgmentJ6: "j6.md",
-	core.JudgmentJ8: "j8.md",
-	core.JudgmentSV: "sv.md",
-	judgmentJ10:     "j10.md",
+	core.JudgmentJ1:  "j1.md",
+	core.JudgmentJ2:  "j2.md",
+	core.JudgmentJ3:  "j3.md",
+	core.JudgmentJ5:  "j5.md",
+	core.JudgmentJ6:  "j6.md",
+	core.JudgmentJ8:  "j8.md",
+	core.JudgmentSV:  "sv.md",
+	core.JudgmentJ10: "j10.md",
 }
 
 // judgmentPromptLimit は判断点ごとの指示文の分量の上限（バイト。UTF-8）

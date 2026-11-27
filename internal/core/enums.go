@@ -334,6 +334,10 @@ const ActivityActionRequirementEvidenceCleanupFailed = "requirement_evidence_cle
 // （entity=requirement。after は解決の日時 resolved_at と証跡の場所 evidence_path）。
 const ActivityActionRequirementResolved = "requirement_resolved"
 
+// ActivityActionSliceSplitRequested は、分類の判断点の結果で課題の区切りを分けると決まったことの作業ログの action
+// （entity=challenge。after は区切りを分ける記録の状態 state）。
+const ActivityActionSliceSplitRequested = "slice_split_requested"
+
 // ActivityActionSpecDraftRequested は、計画を作る判断点が課題を下書きづくりへ回すと決めたことの作業ログの action
 // （entity=challenge。after は下書きの場所 path・置き換える元 base_path・対象のリポジトリ repo・回した理由 reason）。
 const ActivityActionSpecDraftRequested = "spec_draft_requested"
