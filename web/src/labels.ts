@@ -499,6 +499,7 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
   task_verify: "タスクを検証した",
   integration_ref_set: "統合先を記録した",
   spec_draft_requested: "下書きづくりへ回した",
+  slice_split_requested: "区切りに分けると決まった",
   classify: "分類した",
   withdraw: "取り下げた",
   dep_add: "前提を足した",
@@ -541,6 +542,7 @@ export const HISTORY_ACTION_LABELS: Record<string, string> = {
 // （ほかの理由の語は無く、この表を表示する画面もまだ無い）。画面で理由を出すときは、全部の値の語をそろえる。
 export const NOT_STARTED_REASON_LABELS: Record<string, string> = {
   spec_draft_changed: "仕様の下書きが計画の後に変わった",
+  slice_split_pending: "区切りに分ける途中",
 };
 
 // 足す依頼の状態（additions[].state）。開いているのは pending・awaiting_owner。知らない値は値のまま出す。
@@ -573,6 +575,7 @@ export const JUDGMENT_LABELS: Record<string, string> = {
   J5: "完了を検証する判断点（J5）",
   J6: "学びを書く判断点（J6）",
   J8: "改修を提案する判断点（J8）",
+  J10: "区切りを分ける判断点（J10）",
   SV: "スーパーバイザーの判断点（SV）",
 };
 export const RUN_KIND_LABELS: Record<string, string> = {

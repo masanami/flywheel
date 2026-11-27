@@ -80,6 +80,12 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 		if conn == nil {
 			return nil
 		}
+		// 区切りを分ける判断点も、分類の段が進める。
+		splits, _, err := selectJ10AutoTargets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		st.Classify += len(splits)
 		plan, _, err := selectJ2AutoTargets(ctx, tx)
 		if err != nil {
 			return err
@@ -296,6 +302,11 @@ func (s *Store) countRoundWork(ctx context.Context, agent *AgentDeclaration, con
 		if conn == nil {
 			return nil
 		}
+		splits, _, err := selectJ10AutoTargets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		st.Classify += len(splits)
 		plan, _, err := selectJ2AutoTargets(ctx, tx)
 		if err != nil {
 			return err

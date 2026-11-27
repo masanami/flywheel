@@ -68,7 +68,7 @@ func realForbiddenSources() invoker.ForbiddenSources {
 func allEmbeddedPromptContents(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8, core.JudgmentSV, core.JudgmentPoint("J10")} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8, core.JudgmentSV, core.JudgmentJ10} {
 		body, err := invoker.Instructions(j)
 		if err != nil {
 			t.Fatalf("invoker.Instructions(%s): %v", j, err)
@@ -272,7 +272,7 @@ func TestChatPrompt_PassesForbiddenTermsCheck(t *testing.T) {
 // （判定の値は出力の型だけで子に伝える）。
 func TestJ10Prompt_PassesForbiddenTermsWithItsOwnVerdictValues(t *testing.T) {
 	t.Parallel()
-	body, err := invoker.Instructions(core.JudgmentPoint("J10"))
+	body, err := invoker.Instructions(core.JudgmentJ10)
 	if err != nil {
 		t.Fatal(err)
 	}

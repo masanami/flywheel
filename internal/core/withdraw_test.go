@@ -352,7 +352,7 @@ func TestWithdraw_J1Mapping_OnWithdrawnChallenge_WritesNothing(t *testing.T) {
 	}
 	before := len(activitiesFor(t, s, ch.ID))
 
-	mapped, err := s.applyJ1Mine(context.Background(), formatRunID(runID), ch.ID, PriorityP1, nil, nil)
+	mapped, err := s.applyJ1Mine(context.Background(), formatRunID(runID), ch.ID, mineOutput(nil, nil))
 	if err != nil || mapped {
 		t.Errorf("applyJ1Mine: mapped=%v err=%v, want not mapped and no error", mapped, err)
 	}
