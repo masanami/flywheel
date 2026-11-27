@@ -27,6 +27,10 @@ const (
 	specDraftDoneByFlow = "flow"
 	// flowOutcomeBudgetExhausted は、上限額に当たったステップの結果。
 	flowOutcomeBudgetExhausted = "budget_exhausted"
+	// flowOutcomeFailure は、ステップが自分で失敗と返した結果。
+	flowOutcomeFailure = "failure"
+	// specStepSummaryFact は、最後に出力を返したステップの要約が載る facts の名前。
+	specStepSummaryFact = "spec_step_summary"
 
 	maxSpecQuestions     = 10
 	minSpecOptions       = 2
@@ -83,8 +87,9 @@ type specDraftEnd struct {
 	draft  *SpecDraft
 	status Status
 	facts  map[string]string
-	// lastOutcome は最後のステップの結果（無ければ空）。
-	lastOutcome string
+	// hasStep はステップの記録が 1 件以上あるか。lastStep は最後のステップの名前、lastOutcome はその結果（無ければ空）。
+	hasStep               bool
+	lastStep, lastOutcome string
 }
 
 // loadSpecDraftEnd は終わっていない記録の実行 rowID の値を読む（終わった記録になっていれば nil）。
@@ -115,10 +120,12 @@ func loadSpecDraftEnd(ctx context.Context, tx *sql.Tx, rowID int64) (*specDraftE
 		}
 	}
 	var outcome sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT outcome FROM contract_run_step WHERE contract_run_id = ? ORDER BY seq DESC LIMIT 1`, rowID).Scan(&outcome)
+	err = tx.QueryRowContext(ctx, `SELECT step, outcome FROM contract_run_step WHERE contract_run_id = ? ORDER BY seq DESC LIMIT 1`, rowID).
+		Scan(&out.lastStep, &outcome)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
+	out.hasStep = err == nil
 	out.lastOutcome = outcome.String
 	return out, nil
 }
@@ -177,6 +184,9 @@ func (s *Store) finishSpecDraftRun(ctx context.Context, in ContractPollInput, ca
 	cid := end.run.ChallengeID
 	if hold == nil {
 		return false, s.completeSpecDraft(ctx, causeRunID, end.run)
+	}
+	if hold.Reason == SpecDraftHoldFailed {
+		hold.DraftExists = s.specDraftFileExists(end.draft.Path)
 	}
 	_, err = s.transitionAsInvoker(ctx, causeRunID, formatChallengeID(cid), OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
@@ -270,7 +280,11 @@ func (s *Store) judgeSpecDraftEnd(ctx context.Context, in ContractPollInput, end
 		}
 	}
 
+	var failedStep *specDraftFailedStep
 	if end.run.State == ContractStateFailed || end.run.State == ContractStateCancelled {
+		if end.hasStep {
+			failedStep = &specDraftFailedStep{Step: end.lastStep, Outcome: end.lastOutcome, Summary: end.facts[specStepSummaryFact]}
+		}
 		if end.lastOutcome == flowOutcomeBudgetExhausted || end.run.CostMicros >= end.run.MaxBudget {
 			failures = append(failures, fmt.Sprintf("1 回の上限額（%s USD）に当たりました。費用: %s USD",
 				formatUSDAmount(microsToUSD(end.run.MaxBudget)), formatUSDAmount(microsToUSD(end.run.CostMicros))))
@@ -279,7 +293,7 @@ func (s *Store) judgeSpecDraftEnd(ctx context.Context, in ContractPollInput, end
 
 	switch {
 	case len(failures) > 0:
-		return &specDraftHold{Reason: SpecDraftHoldFailed, Detail: strings.Join(failures, "\n\n")}, nil
+		return &specDraftHold{Reason: SpecDraftHoldFailed, Detail: strings.Join(failures, "\n\n"), FailedStep: failedStep}, nil
 	case len(questions) == 0:
 		return nil, nil
 	case end.draft.Attempts >= SpecDraftMaxAttempts:
