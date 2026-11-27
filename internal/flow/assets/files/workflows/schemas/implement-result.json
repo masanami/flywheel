@@ -1,12 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "ticket ワークフローの implement（feature-implementer）の型付き出力。behaviors・residual_findings・unverified・cross_repo_attestation は pull-request 種類が PR 本文へそのまま転記する（I7・I13）",
+  "description": "ticket ワークフローの implement（feature-implementer）の型付き出力。behaviors・unverified・cross_repo_attestation は pull-request 種類が PR 本文へそのまま転記する（I7・I13）。セルフレビューと Codex のレビューの結果は、レビューのステップ（self-review）の出力が持つ",
   "type": "object",
-  "required": ["outcome", "self_review", "codex_review", "pr_title", "summary", "behaviors", "residual_findings", "unverified", "cross_repo_attestation", "deviation_report"],
+  "required": ["outcome", "pr_title", "summary", "behaviors", "unverified", "cross_repo_attestation", "deviation_report"],
   "properties": {
-    "outcome": { "type": "string", "enum": ["pass", "skip", "failure", "deviation", "review_incomplete"] },
-    "self_review": { "type": "string", "enum": ["complete", "incomplete", "not_run"], "description": "/self-review を実行したか。complete（実行し、報告が self_review: complete）/ incomplete（実行したが complete でない）/ not_run（実行していない）。complete 以外は PR へ進めない（#381）" },
-    "codex_review": { "type": "string", "enum": ["off", "complete", "partial", "failed", "skipped"], "description": "Codex のレビューの結果。off（添付データの codex_review が on でない）/ complete（完了）/ partial（部分の結果）/ failed（起動できなかった・失敗した）/ skipped（戻された 2 回目で走らせなかった）" },
+    "outcome": { "type": "string", "enum": ["pass", "skip", "failure", "deviation"] },
     "pr_title": { "type": "string" },
     "summary": { "type": "string" },
     "behaviors": {
@@ -18,20 +16,6 @@
           "kind": { "type": "string", "enum": ["test", "e2e", "signature"] },
           "name": { "type": "string" },
           "guarantees": { "type": "string" }
-        },
-        "additionalProperties": false
-      }
-    },
-    "residual_findings": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["location", "severity", "claim", "reason"],
-        "properties": {
-          "location": { "type": "string" },
-          "severity": { "type": "string" },
-          "claim": { "type": "string" },
-          "reason": { "type": "string" }
         },
         "additionalProperties": false
       }

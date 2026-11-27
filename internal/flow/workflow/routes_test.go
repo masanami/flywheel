@@ -144,8 +144,8 @@ func TestOverrideRouteRejects(t *testing.T) {
 			`steps.merge-route.on.default cannot be overridden: the transition leads to the human gate "human-merge" (decider: human) (§6.2 rule 2)`},
 		{"rule 2: gate form to a human gate", "steps: { respond: { on: { needs_human: review } } }\n",
 			`steps.respond.on.needs_human cannot be overridden: the transition leads to the human gate "review-human"`},
-		{"rule 2: fail", "steps: { implement: { on: { review_incomplete: commit } } }\n",
-			"steps.implement.on.review_incomplete cannot be overridden: the transition ends the run as failed (fail: self_review_incomplete) (§6.2 rule 2)"},
+		{"rule 2: fail", "steps: { self-review: { on: { incomplete: commit } } }\n",
+			"steps.self-review.on.incomplete cannot be overridden: the transition ends the run as failed (fail: self_review_incomplete) (§6.2 rule 2)"},
 		{"on is a mapping", "steps: { merge-route: { on: human-merge } }\n",
 			"steps.merge-route.on must be a mapping"},
 	}

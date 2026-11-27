@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "ticket・ticket-light のレビューのステップ（self-review）の型付き出力。findings は直すステップ（self-review-fix）へ、residual_findings と unverified は pull-request 種類が PR 本文へそのまま転記する",
+  "type": "object",
+  "required": ["outcome", "self_review", "codex_review", "summary", "findings", "residual_findings", "unverified"],
+  "properties": {
+    "outcome": { "type": "string", "enum": ["findings", "clean", "incomplete"], "description": "findings（直すべき指摘あり）/ clean（直すべき指摘なし）/ incomplete（レビューを最後まで行えなかった）" },
+    "self_review": { "type": "string", "enum": ["complete", "incomplete"], "description": "レビューを最後まで行えたか。outcome が findings・clean なら complete、incomplete なら incomplete。接続契約の facts.self_review に出る" },
+    "codex_review": { "type": "string", "enum": ["off", "complete", "partial", "failed", "skipped"], "description": "Codex のレビューの結果。off（with の codex_review が on でない）/ complete（完了）/ partial（部分の結果）/ failed（起動できなかった・失敗した）/ skipped（2 回目以降のレビューで走らせなかった）" },
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "description": "直すべき指摘（重さが境目以上で、疑う役に反証されなかったもの）。outcome が findings のときだけ 1 件以上",
+      "items": {
+        "type": "object",
+        "required": ["file", "line", "severity", "claim", "evidence", "source"],
+        "properties": {
+          "file": { "type": "string" },
+          "line": { "type": "integer", "minimum": 0, "description": "行。特定できなければ 0" },
+          "severity": { "type": "string", "enum": ["high", "medium", "low"] },
+          "claim": { "type": "string" },
+          "evidence": { "type": "string" },
+          "source": { "type": "string", "description": "指摘したレビュアー（エージェントの名前、または codex）" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "residual_findings": {
+      "type": "array",
+      "description": "このレビューの時点で直っていない指摘の全件（直すべき指摘・境目より軽い指摘・反証された指摘）。戻る回数の上限に達したときや直すべき指摘が無いときは、これが PR に載る",
+      "items": {
+        "type": "object",
+        "required": ["location", "severity", "claim", "reason"],
+        "properties": {
+          "location": { "type": "string" },
+          "severity": { "type": "string" },
+          "claim": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "unverified": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

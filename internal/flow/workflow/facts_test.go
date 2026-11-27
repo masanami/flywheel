@@ -67,7 +67,7 @@ func TestOverrideCannotWriteFacts(t *testing.T) {
 	}
 }
 
-// 同梱の ticket は self_review を implement・fix・respond の順に宣言する。
+// 同梱の ticket は self_review をレビューのステップ（self-review）の出力から出す。
 func TestTicketDeclaresSelfReviewFact(t *testing.T) {
 	wf, err := loadTicket(t)
 	if err != nil {
@@ -80,37 +80,38 @@ func TestTicketDeclaresSelfReviewFact(t *testing.T) {
 	for _, r := range wf.Facts[0].Refs {
 		steps = append(steps, r.Step+"."+strings.Join(r.Path, "."))
 	}
-	if got, want := strings.Join(steps, ","), "implement.self_review,fix.self_review,respond.self_review"; got != want {
+	if got, want := strings.Join(steps, ","), "self-review.self_review"; got != want {
 		t.Fatalf("refs = %s, want %s", got, want)
 	}
 }
 
-// self_review は fix・respond の出力の必須の欄（#403）。無い出力はスキーマが拒み、ある出力は enum の値だけを通す。
-func TestFixAndRespondOutputsRequireSelfReview(t *testing.T) {
+// self_review はレビューのステップの出力の必須の欄。無い出力はスキーマが拒み、ある出力は enum の値だけを通す。
+// 実装・直し・レビュー対応の出力は self_review を持たない（セルフレビューはレビューのステップだけが行う）。
+func TestSelfReviewOutputRequiresSelfReview(t *testing.T) {
 	wf, err := loadTicket(t)
 	if err != nil {
 		t.Fatal(err)
+	}
+	review := func(outcome, sr string) map[string]any {
+		v := map[string]any{"outcome": outcome, "codex_review": "off", "summary": "s", "findings": []any{}, "residual_findings": []any{}, "unverified": []any{}}
+		if sr != "" {
+			v["self_review"] = sr
+		}
+		return v
 	}
 	for _, c := range []struct {
 		step string
 		ok   []map[string]any
 		bad  []map[string]any
 	}{
-		{"fix", []map[string]any{
-			{"outcome": "pass", "summary": "s", "deviation_report": "", "self_review": "complete"},
-			{"outcome": "failure", "summary": "s", "deviation_report": "", "self_review": "not_run"},
-		}, []map[string]any{
-			{"outcome": "pass", "summary": "s", "deviation_report": ""},
-			{"outcome": "pass", "summary": "s", "deviation_report": "", "self_review": "done"},
-		}},
-		{"respond", []map[string]any{
-			{"outcome": "pushed", "summary": "s", "human_question": "", "self_review": "not_run"},
-			{"outcome": "no_change", "summary": "s", "human_question": "", "self_review": "incomplete"},
-			{"outcome": "needs_human", "summary": "s", "human_question": "q", "self_review": "complete"},
-		}, []map[string]any{
-			{"outcome": "pushed", "summary": "s", "human_question": ""},
-			{"outcome": "pushed", "summary": "s", "human_question": "", "self_review": ""},
-		}},
+		{"self-review", []map[string]any{review("clean", "complete"), review("incomplete", "incomplete"),
+			{"outcome": "findings", "self_review": "complete", "codex_review": "partial", "summary": "s", "residual_findings": []any{}, "unverified": []any{"codex"},
+				"findings": []any{map[string]any{"file": "a.go", "line": 3, "severity": "high", "claim": "c", "evidence": "e", "source": "codex"}}}},
+			[]map[string]any{review("clean", ""), review("clean", "not_run"), review("done", "complete")}},
+		{"fix", []map[string]any{{"outcome": "pass", "summary": "s", "deviation_report": ""}},
+			[]map[string]any{{"outcome": "pass", "summary": "s", "deviation_report": "", "self_review": "complete"}}},
+		{"respond", []map[string]any{{"outcome": "pushed", "summary": "s", "human_question": ""}},
+			[]map[string]any{{"outcome": "pushed", "summary": "s", "human_question": "", "self_review": "not_run"}}},
 	} {
 		sch := wf.Step(c.step).OutputSchema
 		for _, v := range c.ok {

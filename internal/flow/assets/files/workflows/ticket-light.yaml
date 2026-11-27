@@ -1,13 +1,15 @@
 # ticket の簡略版（組み込みのフロー）。ticket.yaml を元に、次の差分だけを持つ。表に無いステップ・遷移・with・limits・facts は ticket と同じ。
 #   - analyze・e2e-route・e2e を外す。作業ブランチの名前は branch（command）が feature/<鍵>-light と決める
 #   - integration-route の none・integration の created・existing は branch へ、sync の current・synced は quality へ向ける
-#   - implement・fix はエージェントを指定せず、軽いセルフレビュー（code-reviewer と design-reviewer を並べて 1 回）の指示文を使う。Codex のレビューは並べない（with に codex_review は無い）
+#   - implement・fix・self-review-fix はエージェントを指定せず、簡略なフローの指示文を使う（implement の with に critical_design は無い）
+#   - レビューのステップ（self-review）は ticket と同じ指示文で、with だけが違う: 指摘を疑う役を置かない（verifier: none）・Codex のレビューを並べない（codex_review: "off"）。
+#     レビューから直すステップへ戻る回数の上限（limits.self_review）は 1
 #   - models は main・quick とも sonnet、efforts は main: medium・quick: low。commit・sync-resolve・land-sync-resolve は quick、そのほかの llm は main
 #   - overridable（上書きの口）は持たない
 #
 schema: harness.workflow/v1
 id: ticket-light
-description: 1チケット（=1 Issue）の簡略な実装フロー。分析・E2E・懐疑のレビュー・Codex のレビューを省き、軽いセルフレビューで PR 作成後のレビュー・マージのラウンドまで進める
+description: 1チケット（=1 Issue）の簡略な実装フロー。分析・E2E・指摘を疑う役・Codex のレビューを省き、軽いレビュー（戻る回数 1）で PR 作成後のレビュー・マージのラウンドまで進める
 inputs:
   issue:    { type: integer }       # 省略可。PR が閉じる対象（task_file があれば範囲の正本は文面のファイル）。issue も task_file も無ければ resolve が input_invalid
   base:     { type: string }        # 省略可。resolve-ticket が I2 の優先順で決める
@@ -25,10 +27,10 @@ efforts:
 limits:
   budget_usd: 40                    # この unit 全ラウンドの累計上限（仮の値。shadow run で較正する。§12）
   rework: 3                         # Phase 4→8 の差し戻し上限（W2・Q8）
-  self_review: 1                    # セルフレビューを実行しなかった implement を戻す上限（#381）
+  self_review: 1                    # レビュー（self-review）から直すステップ（self-review-fix）へ戻る回数の上限（この unit の累計）
   sync_resolve: 3                   # 取り込みの衝突を LLM に直させる回数（この unit の累計。sync と land-sync の両方で数える）
 facts:                              # 接続契約の facts に出す値（名前 → $steps.<段>.<欄>）。最後に成功して終わり、その欄を返した段の値になる（#388 の S3-4）
-  self_review: [$steps.implement.self_review, $steps.fix.self_review, $steps.respond.self_review]
+  self_review: [$steps.self-review.self_review]   # レビューのステップが最後まで行えたか（complete になる道でしか PR へ進まない）
 steps:
   resolve:
     kind: command
@@ -77,7 +79,7 @@ steps:
       reused:   implement
       conflict: { fail: worktree_conflict }         # 別ブランチの worktree・未登録ディレクトリ・別のリポジトリ
 
-  implement:                                        # エージェントは指定しない。軽いセルフレビュー（code-reviewer と design-reviewer を並べて 1 回）は指示文が行う
+  implement:                                        # エージェントは指定しない。セルフレビューは後のレビューのステップが行う
     kind: llm
     prompt: prompts/ticket-light-implement.md
     model: $models.main
@@ -89,19 +91,45 @@ steps:
     budget_usd: 15
     timeout: 90m
     on:
-      pass:      self-review-route                  # #381: セルフレビューを実行したかを見てから commit へ
-      skip:      self-review-route                  # I7: 未検証は pull-request が本文に明記する。skip でもセルフレビューは省けない（#381）
+      pass:      self-review                        # セルフレビューは実装のステップの外のレビューのステップで行う（省けない）
+      skip:      self-review                        # I7: 未検証は pull-request が本文に明記する。skip でもレビューは省けない
       failure:   { fail: quality_gate }             # W2: 初回 failure は再委譲しない
       deviation: { gate: design-deviation }         # I8
-      review_incomplete: { fail: self_review_incomplete }  # #262: セルフレビューと合流できないまま PR へ進めない
 
-  self-review-route:                                # #381: 変更の種類（テストだけ・文書だけを含む）に関わらずセルフレビューを必須にする
-    kind: select
-    value: $steps.implement.self_review
+  self-review:                                      # レビューのステップ。レビュアーを並べて呼び、指摘を返す（直さない）
+    kind: llm
+    prompt: prompts/ticket-self-review.md
+    model: $models.main
+    effort: $efforts.main
+    session: new                                    # 実装の文脈を持たない目で見る
+    add_dirs: [ $steps.resolve.task_dir ]
+    with: { issue: $steps.resolve.issue, task_file: $steps.resolve.task_file, base: $steps.resolve.base,
+            reviewers: "claude-harness:code-reviewer,claude-harness:design-reviewer",   # 使うレビュアー（カンマ区切り）
+            verifier: none,                                                             # 指摘を疑う役を置かない
+            fix_threshold: medium,                                                      # 直すべき指摘とみなす重さの境目（high・medium・low）
+            codex_review: "off" }                                                       # Codex のレビューを並べない
+    output: schemas/self-review-result.json
+    budget_usd: 8
+    timeout: 60m
     on:
-      complete:   commit
-      incomplete: { goto: implement, limit: self_review, exhausted: { fail: self_review_incomplete } }
-      not_run:    { goto: implement, limit: self_review, exhausted: { fail: self_review_incomplete } }
+      findings:   { goto: self-review-fix, limit: self_review, exhausted: commit }   # 尽きたら残った指摘を PR に載せて進む
+      clean:      commit
+      incomplete: { fail: self_review_incomplete }  # #262: レビューを最後まで行えないまま PR へ進めない
+
+  self-review-fix:                                  # 直すステップ。渡された指摘だけを直し、必須ゲートを通してレビューへ戻る
+    kind: llm
+    prompt: prompts/ticket-light-self-review-fix.md
+    model: $models.main
+    effort: $efforts.main
+    session: continue:implement
+    with: { findings: $steps.self-review.findings }
+    output: schemas/fix-result.json
+    budget_usd: 8
+    timeout: 60m
+    on:
+      pass:      self-review
+      failure:   { fail: quality_gate }
+      deviation: { gate: design-deviation }         # W3: 逸脱は再試行しない
 
   fix:                                              # W1: スコープ付き修正（Step a〜e を開始しない）
     kind: llm
@@ -114,7 +142,7 @@ steps:
     budget_usd: 8
     timeout: 60m
     on:
-      pass:      commit
+      pass:      self-review                        # 直した後もレビューのステップを通す
       failure:   { fail: quality_gate }
       deviation: { gate: design-deviation }         # W3: 逸脱は再試行しない
 
@@ -178,8 +206,9 @@ steps:
       summary: $steps.implement.summary
       behaviors: $steps.implement.behaviors         # #304: 振る舞いの一覧（テスト名・ケース名・シグネチャと保証すること）
       quality: $steps.implement.outcome
-      residual_findings: $steps.implement.residual_findings
+      residual_findings: $steps.self-review.residual_findings   # 最後のレビューで直っていない指摘の全件
       unverified: $steps.implement.unverified
+      review_unverified: $steps.self-review.unverified          # レビューのステップの未検証（Codex が完了しなかった等）
       cross_repo: $steps.implement.cross_repo_attestation
     on: { opened: ci, updated: ci }
 

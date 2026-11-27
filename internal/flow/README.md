@@ -97,3 +97,9 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 - core は `flow start`・`resume` に `--delegated-run <run の ID>` を付ける。進める側へは、権限モードを `HARNESS_CLAUDE_PERMISSION_MODE`、run の ID を内部の環境変数（`FLYWHEEL_FLOW_DELEGATED_RUN`）で引き継ぐ。
 - 進める側は、claude を起動するときだけ、子の環境に `FLYWHEEL_DELEGATED_RUN=<run の ID>` を足す。進める側のプロセス自身の環境と、つなぎのスクリプト・プラグインのスクリプトの環境には、目印を置かない（置くと、進める側が自分の起動で拒否される）。
 - `flywheel flow` も、ほかのコマンドと同じに、目印のある環境からは実行できない。claude の子から `flywheel flow resume` を呼んで、自分のレビュー待ちに答えることはできない。
+
+### レビューのステップ（フローのカスタマイズ S1）
+
+- `ticket`・`ticket-light` のセルフレビューを、実装のステップの指示文から外し、レビューのステップ `self-review`（指示文 `prompts/ticket-self-review.md`・出力の型 `schemas/self-review-result.json`）と直すステップ `self-review-fix` にした。`self-review` の結果は `findings`（直すべき指摘あり。`self-review-fix` へ戻り、回数は `limits.self_review` で数える。尽きたら残った指摘を PR に載せて `commit` へ）・`clean`（直すべき指摘なし。`commit` へ）・`incomplete`（最後まで行えなかった。`self_review_incomplete` で止まる）。`self-review-route` と、実装の出力の `review_incomplete`・`self_review`・`codex_review`・`residual_findings`、直し・レビュー対応の出力の `self_review` を外した。直し（`fix`）の後も `self-review` を通る。
+- レビュアーの構成・境目・Codex は `self-review` の `with` に書く（`reviewers`・`verifier`・`fix_threshold`・`codex_review`）。`ticket` はレビュアー 2 体と `claude-harness:finding-verifier`・上限 3・Codex を使う、`ticket-light` はレビュアー 2 体・疑う役なし（`none`）・上限 1・Codex を使わない。Codex のレビューは 1 回目の `self-review` だけが起動する（上の「標準のフロー ticket の値と Codex のレビュー」の実装のステップの手順を移した）。
+- `facts.self_review` は `$steps.self-review.self_review` から出す。PR の残指摘は `$steps.self-review.residual_findings`、レビューの未検証は pull-request の新しい `with` の `review_unverified`（実装の `unverified` の後ろに並べて載せる）から渡す。

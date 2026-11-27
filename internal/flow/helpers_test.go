@@ -156,12 +156,33 @@ printf '{"worktree_path":"%s","removed":true,"skipped":false,"dirty":false,"reas
 		t.Setenv(k, v)
 	}
 
-	// analyze → implement → commit。CI は偽のプラグインの ci-wait.sh が green を返す。
+	// analyze → implement → self-review（直すべき指摘なし）→ commit。CI は偽のプラグインの ci-wait.sh が green を返す。
+	// レビューのステップの費用は 0 にして、累計の額を前と同じにする。
 	f.respond(1, claudeStructured(map[string]any{"outcome": "ok", "e2e_target": "no", "e2e_reason": "internal only", "branch": f.branch, "critical_design": ""}, 0.3))
-	f.respond(2, claudeStructured(map[string]any{"outcome": "pass", "self_review": "complete", "codex_review": "off", "pr_title": "feat: add the widget", "summary": "Adds the widget.",
-		"behaviors": []map[string]string{}, "residual_findings": []map[string]string{}, "unverified": []string{}, "cross_repo_attestation": "", "deviation_report": ""}, 4.0))
-	f.respond(3, claudeStructured(map[string]any{"outcome": "committed", "commit_sha": "abc", "summary": "committed"}, 4.5))
+	f.respond(2, claudeStructured(implementPass, 4.0))
+	f.respond(3, claudeStructured(reviewResult("clean"), 0))
+	f.respond(4, claudeStructured(map[string]any{"outcome": "committed", "commit_sha": "abc", "summary": "committed"}, 4.5))
 	return f
+}
+
+// implementPass は実装のステップの pass の出力。
+var implementPass = map[string]any{"outcome": "pass", "pr_title": "feat: add the widget", "summary": "Adds the widget.",
+	"behaviors": []map[string]string{}, "unverified": []string{}, "cross_repo_attestation": "", "deviation_report": ""}
+
+// reviewResult はレビューのステップの出力（outcome は findings・clean・incomplete）。findings のときは直すべき指摘を 1 件持つ。
+func reviewResult(outcome string) map[string]any {
+	sr := "complete"
+	if outcome == "incomplete" {
+		sr = "incomplete"
+	}
+	findings := []map[string]any{}
+	residual := []map[string]any{}
+	if outcome == "findings" {
+		findings = append(findings, map[string]any{"file": "README.md", "line": 1, "severity": "medium", "claim": "typo", "evidence": "widget", "source": "claude-harness:code-reviewer"})
+		residual = append(residual, map[string]any{"location": "README.md:1", "severity": "medium", "claim": "typo", "reason": "直すべき指摘（未修正）"})
+	}
+	return map[string]any{"outcome": outcome, "self_review": sr, "codex_review": "off", "summary": "reviewed",
+		"findings": findings, "residual_findings": residual, "unverified": []string{}}
 }
 
 // env は cwd をリポジトリにした Env と、標準出力・標準エラーの取り込み先を返す。

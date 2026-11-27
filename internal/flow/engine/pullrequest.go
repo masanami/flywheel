@@ -240,6 +240,14 @@ func prInputFrom(with map[string]json.RawMessage) (PRInput, error) {
 			return in, fmt.Errorf("with.unverified must be an array: %w", err)
 		}
 	}
+	if raw, given := with["review_unverified"]; given {
+		// レビューのステップの未検証の事項。実装のステップの未検証の後ろに並べて、同じ節に載せる。
+		var more []json.RawMessage
+		if err := json.Unmarshal(raw, &more); err != nil {
+			return in, fmt.Errorf("with.review_unverified must be an array: %w", err)
+		}
+		in.Unverified = append(in.Unverified, more...)
+	}
 	if raw, given := with["cross_repo"]; given {
 		if in.CrossRepo, ok = jsonString(raw); !ok {
 			return in, fmt.Errorf("with.cross_repo must be a string")
@@ -314,8 +322,8 @@ func RenderPRBody(in PRInput) string {
 
 	fmt.Fprintf(&b, "## 残指摘（全 %d 件）\n\n", len(in.ResidualFindings))
 	if in.QualityGiven && in.Quality != "pass" && in.Quality != "skip" {
-		// 実装ステップが pass / skip 以外（逸脱で止まった等）で終わった後の経路では、/self-review の残指摘が揃っていない。
-		fmt.Fprintf(&b, "**注意: 実装ステップは %s で終わっている。以下は実装ステップが返した値で、/self-review を最後まで通した結果ではない（件数が 0 でも「指摘なし」を意味しない）。**\n\n", in.Quality)
+		// 実装ステップが pass / skip 以外（逸脱で止まった等）で終わった後の経路では、レビューの残指摘が揃っていない。
+		fmt.Fprintf(&b, "**注意: 実装ステップは %s で終わっている。以下はレビューを最後まで通した結果ではない（件数が 0 でも「指摘なし」を意味しない）。**\n\n", in.Quality)
 	}
 	switch {
 	case !in.FindingsGiven:
