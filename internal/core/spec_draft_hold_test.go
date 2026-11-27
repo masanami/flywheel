@@ -43,6 +43,13 @@ func shDrafting(t *testing.T, state SpecDraftState, attempts int) (*j2Fixture, s
 	return f, id, item.RunID
 }
 
+// shWriteDraft は課題の下書きの場所に下書きのファイルを置く。
+func shWriteDraft(t *testing.T, f *j2Fixture, id string) {
+	t.Helper()
+	cid, _ := parseChallengeID(id)
+	writeWorkspaceFile(t, f.s.workspace, specDraftPathFor(cid), "# 下書き\n")
+}
+
 // shRaise は保留を作り、作った保留と、その後の詳細を返す。
 func shRaise(t *testing.T, f *j2Fixture, runID, id string, h specDraftHold) (Hold, *ChallengeDetail) {
 	t.Helper()
@@ -123,19 +130,10 @@ func TestHoldSpecDraft_Question(t *testing.T) {
 			t.Errorf("run_id = %v", hold.RunID)
 		}
 	})
-	t.Run("AC-281〜AC-286 問いの文", func(t *testing.T) {
-		want := "仕様の下書きに、決めないと進まない問いが 2 件残りました。下書き: " + d.SpecDraft.Path + "\n" +
-			"\nQ1. 取り消しは実行中の処理にも効かせるか\n" +
-			"  1. 実行中にも効かせる（推奨）\n" +
-			"  2. 待ちの処理だけ\n" +
-			"  推奨の理由: すぐ止めたいと書いてあるため\n" +
-			"\nQ2. 記録は残すか\n" +
-			"  1. 消す\n" +
-			"  2. 残す（推奨）\n" +
-			"  3. 選べるようにする\n" +
-			"  推奨の理由: 後で追えるようにするため"
+	t.Run("問いの文は見出しだけ", func(t *testing.T) {
+		want := "仕様の下書きに、決めないと進まない問いが 2 件残りました。下書き: " + d.SpecDraft.Path
 		if hold.Question != want {
-			t.Errorf("question =\n%s\nwant\n%s", hold.Question, want)
+			t.Errorf("question = %q, want %q", hold.Question, want)
 		}
 	})
 	t.Run("AC-287 記録の label に推奨の印を入れない", func(t *testing.T) {
@@ -173,6 +171,7 @@ func TestHoldSpecDraft_OptionsByReason(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			f, id, runID := shDrafting(t, SpecDraftStateRunning, c.attempts)
+			shWriteDraft(t, f, id)
 			hold, d := shRaise(t, f, runID, id, c.hold)
 			if got := shOptionIDs(hold); !reflect.DeepEqual(got, c.want) {
 				t.Errorf("options = %v, want %v", got, c.want)
@@ -184,15 +183,13 @@ func TestHoldSpecDraft_OptionsByReason(t *testing.T) {
 	}
 }
 
-func TestHoldSpecDraft_AttemptLimitQuestionStartsAtQ1(t *testing.T) { // AC-293
+func TestHoldSpecDraft_AttemptLimitQuestionIsAHeadline(t *testing.T) {
 	t.Parallel()
 	f, id, runID := shDrafting(t, SpecDraftStateRunning, 3)
 	hold, d := shRaise(t, f, runID, id, specDraftHold{Reason: SpecDraftHoldAttemptLimit, Questions: shQuestions()})
-	for _, want := range []string{"上限（3 回）", "下書き: " + d.SpecDraft.Path, "\nQ1. 取り消しは", "\nQ2. 記録は残すか",
-		"  1. 実行中にも効かせる（推奨）\n", "  推奨の理由: 後で追えるようにするため"} {
-		if !strings.Contains(hold.Question, want) {
-			t.Errorf("question does not contain %q:\n%s", want, hold.Question)
-		}
+	want := "仕様の下書きづくりの回数の上限（3 回）に達し、決めないと進まない問いが 2 件残りました。下書き: " + d.SpecDraft.Path
+	if hold.Question != want {
+		t.Errorf("question = %q, want %q", hold.Question, want)
 	}
 	if !reflect.DeepEqual(d.SpecDraft.Questions, shQuestions()) {
 		t.Errorf("questions = %+v", d.SpecDraft.Questions)
@@ -210,6 +207,7 @@ func TestHoldSpecDraft_FailedFromPendingKeepsAnswers(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	shWriteDraft(t, f, id)
 	hold, d := shRaise(t, f, runID, id, specDraftHold{Reason: SpecDraftHoldFailed, Detail: "開始のコマンドを起動できない\n"})
 	want := "仕様の下書きづくりが失敗しました（実行 1 回）。下書き: " + d.SpecDraft.Path + "\n\n開始のコマンドを起動できない"
 	if hold.Question != want {
@@ -433,6 +431,7 @@ func TestDiscardSpecDraft_NonEmptyDirectoryIsLogged(t *testing.T) { // AC-301・
 func TestHoldSpecDraft_CountsTheFailedStartInTheSameWrite(t *testing.T) {
 	t.Parallel()
 	f, id, runID := shDrafting(t, SpecDraftStatePending, 2)
+	shWriteDraft(t, f, id)
 	hold, d := shRaise(t, f, runID, id, specDraftHold{Reason: SpecDraftHoldFailed, Detail: "起動できない", CountAttempt: true})
 	if d.SpecDraft.Attempts != 3 {
 		t.Errorf("attempts = %d, want 3", d.SpecDraft.Attempts)

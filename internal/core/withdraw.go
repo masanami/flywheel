@@ -48,6 +48,12 @@ func errWithdrawOpenDelegation(challengeID string) error {
 		"core: cannot withdraw challenge %s: it has an unfinished delegation run; wait for the run to end", challengeID)}
 }
 
+// errWithdrawSpecDraftRunning は、下書きづくりのコマンドを呼んでいる最中の課題を取り下げようとしたこと。
+func errWithdrawSpecDraftRunning(challengeID string) error {
+	return &withdrawConflictError{msg: fmt.Sprintf(
+		"core: cannot withdraw challenge %s: a spec draft command is still running; wait for it to return", challengeID)}
+}
+
 // errWithdrawReleaseInProgress は、課題の release に終わっていない（止まっていない）実行の試行があること。
 func errWithdrawReleaseInProgress(challengeID string) error {
 	return &withdrawConflictError{msg: fmt.Sprintf(
@@ -106,7 +112,7 @@ func openReleaseAttempts(ctx context.Context, tx *sql.Tx, cid int64) ([]*operati
 }
 
 // checkWithdrawable は取り下げの前提（完了・取り下げでない、着手中なら終わっていない委譲の run が無い、
-// 止まっていない release の実行の試行が無い）を調べる。
+// 結果の無い下書きづくりの実行の記録が無い、止まっていない release の実行の試行が無い）を調べる。
 //
 // release の実行の試行は `op exec` と同じ判定（releaseAttemptStale）で止まったものを開いていないとみなし、
 // その試行を stale として返す（書き込み側が interrupted として閉じる）。止まっていない試行があれば conflict
@@ -123,6 +129,12 @@ func checkWithdrawable(ctx context.Context, tx *sql.Tx, cid int64, current *Chal
 		if open {
 			return nil, errWithdrawOpenDelegation(current.ID)
 		}
+	}
+	// 開始のコマンドを呼んでいる最中は、契約の run の行がまだ無く、下の取り消しの対象にならないので、状態を問わず ① でも拒む。
+	if running, err := hasRunningSpecDraftCommand(ctx, tx, cid); err != nil {
+		return nil, err
+	} else if running {
+		return nil, errWithdrawSpecDraftRunning(current.ID)
 	}
 	// 開いた契約の run（接続ツール側の run）は、どの状態でも先に止める（CancelOpenContractRuns）。要約（①）は止める前に
 	// 呼ばれるので許し、実行（②）で拒む。
@@ -149,7 +161,8 @@ func checkWithdrawable(ctx context.Context, tx *sql.Tx, cid int64, current *Chal
 }
 
 // PrepareWithdraw は withdraw の ①（読み取り）。理由が空なら ErrValidation、課題が無ければ ErrNotFound、
-// 完了か取り下げなら ErrTerminalState、着手中で終わっていない委譲の run があれば ErrConflict。
+// 完了か取り下げなら ErrTerminalState、着手中で終わっていない委譲の run があるか、結果の無い下書きづくりの実行の記録が
+// あれば ErrConflict。
 func (s *Store) PrepareWithdraw(ctx context.Context, id string, reason string) (*WithdrawPreview, error) {
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrValidation
