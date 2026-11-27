@@ -4,6 +4,7 @@ import { useChat } from "../chat/context.ts";
 import { LOADING_TEXT } from "../labels.ts";
 import type { LiveState } from "../live/useLive.ts";
 import { ConflictFixesView } from "../parts/ConflictFixesView.tsx";
+import { SpecDocument } from "../parts/SpecDocument.tsx";
 import { NotFound } from "../shell/NotFound.tsx";
 import { CHALLENGE_VIEWS, type ChallengeView, hrefOf } from "../shell/route.ts";
 import { useScreenData } from "../shell/useScreenData.ts";
@@ -14,7 +15,8 @@ import { Items } from "./Items.tsx";
 import { PlanView } from "./PlanView.tsx";
 import { SupervisorRecords } from "./SupervisorRecords.tsx";
 import { TreeView } from "./TreeView.tsx";
-import { Waiting } from "./Waiting.tsx";
+import { Waiting, showsSpecDraftHold } from "./Waiting.tsx";
+import { canOpenSpec, specDocumentKey } from "./specLocation.ts";
 
 const VIEW_LABELS: Record<ChallengeView, string> = {
   tree: "ツリー",
@@ -73,6 +75,14 @@ export function ChallengeDetail({
         </button>
       </p>
       <Items show={show} />
+      {/* 下書きづくりの保留の所があるときは、そちらに出す（画面に 1 つだけ） */}
+      {canOpenSpec(show.challenge) && !showsSpecDraftHold(show) ? (
+        <SpecDocument
+          key={specDocumentKey(agentName, show.challenge)}
+          agentName={agentName}
+          challengeId={id}
+        />
+      ) : null}
       <ChatSessions
         agentName={agentName}
         sessions={show.challenge.chat_sessions}

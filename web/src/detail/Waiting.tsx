@@ -1,4 +1,4 @@
-import type { ShowCardResponse } from "../api/types.gen.ts";
+import type { Hold, ShowCardResponse } from "../api/types.gen.ts";
 import { HOLD_KIND_PARENT_DIRECT, PARENT_DIRECT_HOLD_NOTE } from "../labels.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { ApprovalGuide } from "../parts/ApprovalGuide.tsx";
@@ -10,6 +10,7 @@ import {
   hasOptions,
   useHoldAnswer,
 } from "../parts/HoldOptions.tsx";
+import { SpecDocument } from "../parts/SpecDocument.tsx";
 import { hrefOf } from "../shell/route.ts";
 import {
   NO_WAITING_TEXT,
@@ -17,12 +18,32 @@ import {
   waitingKindsOfActions,
 } from "../shell/waiting.ts";
 import { SpecDraftHold } from "./SpecDraftHold.tsx";
+import { canOpenSpec, specDocumentKey } from "./specLocation.ts";
 
 // 種類の語は課題の画面と同じ（shell/waiting.ts）。知らないコードは生のコードを出す。
 const waitingLabel = (a: string): string => {
   const k = waitingKindsOfActions([a])[0];
   return k ? WAITING_LABELS[k] : a;
 };
+
+// 答えを待っている問いの保留（種類が親が直接行うの保留は、問いに数えない）。
+const openQuestionHolds = (show: ShowCardResponse): Hold[] =>
+  show.holds.filter(
+    (h) =>
+      h.answer === null &&
+      h.closed_at === null &&
+      h.kind !== HOLD_KIND_PARENT_DIRECT,
+  );
+
+// この区画が下書きづくりの保留の所を出すか。出すなら、仕様の文書を開く口はその所に置く。
+export function showsSpecDraftHold(show: ShowCardResponse): boolean {
+  const holdId = show.challenge.spec_draft?.hold_id ?? null;
+  return (
+    holdId !== null &&
+    show.card.next_human_actions.includes("answer_question") &&
+    openQuestionHolds(show).some((h) => h.hold_id === holdId)
+  );
+}
 
 // あなたを待っているもの。next_human_actions ごとに出す。
 // 計画の承認・完了の承認は、それぞれの承認の画面へのリンク（ボタンは承認の画面にある）。回答・予算の増額などはターミナルのコマンドの案内を出す（答える欄は置かない）。
@@ -44,7 +65,7 @@ export function Waiting({
   const openHolds = show.holds.filter(
     (h) => h.answer === null && h.closed_at === null,
   );
-  const questions = openHolds.filter((h) => h.kind !== HOLD_KIND_PARENT_DIRECT);
+  const questions = openQuestionHolds(show);
   const parentDirect = openHolds.some(
     (h) => h.kind === HOLD_KIND_PARENT_DIRECT,
   );
@@ -101,19 +122,17 @@ export function Waiting({
             ) : null}
             {a === "answer_question"
               ? questions.map((h) => (
-                  <div
-                    key={h.hold_id}
-                    className="detail-question"
-                    data-testid="hold-question"
-                  >
+                  <div key={h.hold_id} className="detail-question">
                     <p data-testid="hold-id">保留: {h.hold_id}</p>
                     <SupervisorNote
                       findings={h.supervisor_findings}
                       recommendation={h.supervisor_recommendation}
                     />
-                    <ClampedText resetKey={h.question}>
-                      <Markdown text={h.question} />
-                    </ClampedText>
+                    <div data-testid="hold-question">
+                      <ClampedText resetKey={h.question}>
+                        <Markdown text={h.question} />
+                      </ClampedText>
+                    </div>
                     {h.task_id !== null ? (
                       <p>
                         タスク:{" "}
@@ -136,6 +155,15 @@ export function Waiting({
                         draft={specDraft}
                         challengeId={id}
                         workspacePath={workspacePath}
+                        specDocument={
+                          canOpenSpec(show.challenge) ? (
+                            <SpecDocument
+                              key={specDocumentKey(agentName, show.challenge)}
+                              agentName={agentName}
+                              challengeId={id}
+                            />
+                          ) : null
+                        }
                       />
                     ) : null}
                     {hasOptions(h) ? (

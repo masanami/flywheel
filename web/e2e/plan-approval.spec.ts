@@ -69,3 +69,20 @@ test("AC-189・AC-190・AC-192 #1046: 計画の承認に見込みと上限の額
   await expect(page.getByTestId("plan-budget-limit")).toContainText("12");
   await expect(page.getByText("上限の理由")).toHaveCount(0);
 });
+
+test("AC-339・AC-315・AC-328・AC-332 #1383: 下書きを持つ計画の承認待ちの課題で「仕様の文書を開く」を押すと、下書きの見出しが出る。幅 360px でも横にスクロールしない", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto("/#/a/alpha/challenges/C-4/approve-plan");
+  await expect(page.getByTestId("plan-approval")).toBeVisible();
+  const answers = page.getByTestId("spec-answers");
+  await expect(answers).toContainText("答えた者: スーパーバイザー");
+  await expect(answers).toContainText("添え書き");
+  await expect(page.getByTestId("spec-body")).toHaveCount(0);
+  await page.getByRole("button", { name: "仕様の文書を開く" }).click();
+  await expect(
+    page.getByRole("heading", { name: "権限チェックの仕様" }),
+  ).toBeVisible();
+  expect(await pageOverflows(page)).toBe(false);
+});
