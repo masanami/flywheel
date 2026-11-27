@@ -48,6 +48,9 @@ func promptsSubFS() (fs.FS, error) {
 	return fs.Sub(promptsFS, "prompts")
 }
 
+// judgmentJ10 は区切りを分ける判断点の指示文を引く値。
+const judgmentJ10 = core.JudgmentPoint("J10")
+
 // judgmentPromptFile は判断点ごとの指示文ファイル名（prompts/ 直下、
 // promptsSubFS からの相対パス）。
 var judgmentPromptFile = map[core.JudgmentPoint]string{
@@ -58,10 +61,12 @@ var judgmentPromptFile = map[core.JudgmentPoint]string{
 	core.JudgmentJ6: "j6.md",
 	core.JudgmentJ8: "j8.md",
 	core.JudgmentSV: "sv.md",
+	judgmentJ10:     "j10.md",
 }
 
 // judgmentPromptLimit は判断点ごとの指示文の分量の上限（バイト。UTF-8）
-// （J1: 4KiB・J2: 13312B（13KiB）・J3: 8KiB・J5: 11717B・J6: 6KiB・J8: 6KiB・SV: 7KiB。
+// （J1: 4685B・J2: 13312B（13KiB）・J3: 8KiB・J5: 11717B・J6: 6KiB・J8: 6KiB・SV: 7KiB・J10: 6KiB。
+// J1 は要求と Issue の前半（S3a）で、4096 に、j1.md へ足した節「区切り 1 つに収まるか」の 589 バイトを足した 4685 へ引き上げた（天井は 5120）。
 // J5 は #466 で 8KiB、#565 で 9KiB、#563 で 9.5KiB、#654 で 10.5KiB、#629 で 11354B（#654 の 10752 に、#629 で j5.md へ足した 602 バイトを足した値）へ引き上げた。
 // J5 は core の見直し（区切り S3a）で、11354 に、j5.md へ足した区画「委譲先が値で返したこと」の説明の 363 バイトを足した値へ引き上げた。
 // J5 は S3b のタスクの検証で、j5.md へ足した区画「対応する取り込み元」の説明とタスクの検証の扱いの 629 バイトを足した 12346 へ引き上げた。
@@ -88,18 +93,20 @@ var judgmentPromptFile = map[core.JudgmentPoint]string{
 // SV は下書きの問いに答える節を足すので、6144 から 7168（7KiB）へ引き上げた。
 // 仕様は docs/features/m3-invoker-delegation.md §指示文の歯止め）。
 var judgmentPromptLimit = map[string]int{
-	"j1.md": 4096,
-	"j2.md": 21485,
-	"j3.md": 8192,
-	"j5.md": 15048,
-	"j6.md": 6144,
-	"j8.md": 8192,
-	"sv.md": 7168,
+	"j1.md":  4685,
+	"j10.md": 6144,
+	"j2.md":  21485,
+	"j3.md":  8192,
+	"j5.md":  15048,
+	"j6.md":  6144,
+	"j8.md":  8192,
+	"sv.md":  7168,
 	// chat.md は対話の欄の実行エンジンの追加の指示（判断点ではない）。
 	// flywheel#1303 で、chat.md へ足した節「コマンドの形」（586 バイト）を足した 4682 へ引き上げた（足した節の分だけ）。
 	// chat.md へ足した、仕様づくりのスキルの後の案内の節「仕様づくりの後」（378 バイト）の分だけ上げた 5060 にした。
 	// 節「仕様づくりの後」を下書きの形に直して足した分（459 バイト）だけ上げた 5519 にした（天井は 5632）。
-	"chat.md": 5519,
+	// 節「要求を区切りに分けるとき」を足した分（635 バイト）だけ上げた 6154 にした（天井は 6656）。
+	"chat.md": 6154,
 }
 
 // briefFixedSectionsTotalLimit は J3 ブリーフの固定の節の雛形の合計の上限
