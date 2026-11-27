@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -274,10 +276,11 @@ func TestJ1OutputSchema_HasNullableBooleanFitsOneSlice(t *testing.T) {
 	}
 }
 
-// 出力の型の各項目の description は、指示文の項目名と同じ言葉である。
+// 出力の型の各項目の description は、指示文の項目名と同じ言葉である（判定〔verdict〕は指示文に項目名が無い）。
+// 全項目に description があり、判定のほかは指示文の中に同じ言葉（箇条の項目名はその形）がある。
 func TestJudgmentOutputSchemas_DescribeFieldsWithPromptNames(t *testing.T) {
 	t.Parallel()
-	type prop struct {
+	type props map[string]struct {
 		Description string `json:"description"`
 		Items       struct {
 			Properties map[string]struct {
@@ -285,38 +288,66 @@ func TestJudgmentOutputSchemas_DescribeFieldsWithPromptNames(t *testing.T) {
 			} `json:"properties"`
 		} `json:"items"`
 	}
-	var j10 struct {
-		Properties map[string]prop `json:"properties"`
+	descriptions := func(schema []byte) map[string]string {
+		var s struct {
+			Properties props `json:"properties"`
+		}
+		if err := json.Unmarshal(schema, &s); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for name, p := range s.Properties {
+			got[name] = p.Description
+			for sub, q := range p.Items.Properties {
+				got[name+"."+sub] = q.Description
+			}
+		}
+		return got
 	}
-	if err := json.Unmarshal(j10OutputSchema(), &j10); err != nil {
-		t.Fatal(err)
+	prompt := func(name string) string {
+		b, err := os.ReadFile(filepath.Join("..", "invoker", "prompts", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
 	}
-	for name, want := range map[string]string{"verdict": "判定", "reason": "理由", "evidence": "根拠", "slices": "区切り"} {
-		if got := j10.Properties[name].Description; got != want {
+
+	j10Want := map[string]string{
+		"verdict": "判定", "reason": "理由", "evidence": "根拠", "slices": "区切り",
+		"evidence.path": "場所", "evidence.note": "手がかり",
+		"slices.title": "題名", "slices.headline": "一言で", "slices.context": "位置づけ", "slices.summary": "要旨",
+		"slices.scope": "範囲", "slices.repo": "リポジトリ", "slices.depends_on": "前に済ませる区切り",
+	}
+	j10Got := descriptions(j10OutputSchema())
+	if len(j10Got) != len(j10Want) {
+		t.Errorf("j10 schema fields = %v, want exactly %v", j10Got, j10Want)
+	}
+	j10Prompt := prompt("j10.md")
+	for name, want := range j10Want {
+		if got := j10Got[name]; got != want {
 			t.Errorf("j10 %s description = %q, want %q", name, got, want)
 		}
-	}
-	for name, want := range map[string]string{"path": "場所", "note": "手がかり"} {
-		if got := j10.Properties["evidence"].Items.Properties[name].Description; got != want {
-			t.Errorf("j10 evidence.%s description = %q, want %q", name, got, want)
+		// 指示文で箇条の項目名（「- 理由:」の形）になっている項目は、その形で照合する。
+		// 区切り・場所・手がかりは箇条の項目名ではなく本文の語なので、語として照合する。
+		switch name {
+		case "verdict":
+		case "slices", "evidence.path", "evidence.note":
+			if !strings.Contains(j10Prompt, want) {
+				t.Errorf("j10 %s description %q does not appear in prompts/j10.md", name, want)
+			}
+		default:
+			if !strings.Contains(j10Prompt, "\n- "+want+":") {
+				t.Errorf("j10 %s description %q is not an item %q in prompts/j10.md", name, want, "- "+want+":")
+			}
 		}
 	}
-	for name, want := range map[string]string{
-		"title": "題名", "headline": "一言で", "context": "位置づけ", "summary": "要旨",
-		"scope": "範囲", "repo": "リポジトリ", "depends_on": "前に済ませる区切り",
-	} {
-		if got := j10.Properties["slices"].Items.Properties[name].Description; got != want {
-			t.Errorf("j10 slices.%s description = %q, want %q", name, got, want)
-		}
+
+	const fits = "区切り 1 つに収まるか"
+	if got := descriptions(j1OutputSchema())["fits_one_slice"]; got != fits {
+		t.Errorf("j1 fits_one_slice description = %q, want %q", got, fits)
 	}
-	var j1 struct {
-		Properties map[string]prop `json:"properties"`
-	}
-	if err := json.Unmarshal(j1OutputSchema(), &j1); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := j1.Properties["fits_one_slice"].Description, "区切り 1 つに収まるか"; got != want {
-		t.Errorf("j1 fits_one_slice description = %q, want %q", got, want)
+	if !strings.Contains(prompt("j1.md"), "## "+fits) {
+		t.Errorf("prompts/j1.md has no section %q", "## "+fits)
 	}
 }
 

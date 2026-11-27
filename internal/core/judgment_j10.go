@@ -42,7 +42,7 @@ type j10Output struct {
 
 // j10OutputSchema は区切りを分ける判断点の `--json-schema` に渡すスキーマを返す。
 func j10OutputSchema() []byte {
-	// 各項目の description は、指示文（prompts/j10.md）の項目名と同じ言葉にする。
+	// 各項目の description は、指示文（prompts/j10.md）の項目名と同じ言葉にする（判定〔verdict〕は指示文に項目名が無い）。
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 	object := func(props map[string]any, required ...string) map[string]any {
 		return map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}
