@@ -122,12 +122,12 @@ func j4Contains(list []string, s string) bool {
 }
 
 // j4StoredAllAnswered は、保存した run の出力が、全問に答えた出力か（問いの数は保存時に検査済み）。J4 の出力（全問 answer）と、
-// スーパーバイザーの出力（手が answer。区切り S4b-3）を読む。全問に答えていれば判定を返す。
+// スーパーバイザーの出力（手が answer。区切り S4b-3）を読む。全問に答えていれば判定を返す。answers に null の要素（答えない問い）があれば、全問に答えていない。
 func j4StoredAllAnswered(output string) ([]j4Decision, bool) {
 	var raw struct {
 		j4RawOutput
 		Hand    string `json:"hand"`
-		Answers []struct {
+		Answers []*struct {
 			Answer string `json:"answer"`
 		} `json:"answers"`
 	}
@@ -137,6 +137,9 @@ func j4StoredAllAnswered(output string) ([]j4Decision, bool) {
 	if SupervisorHand(raw.Hand) == HandAnswer && len(raw.Answers) > 0 {
 		out := make([]j4Decision, len(raw.Answers))
 		for i, a := range raw.Answers {
+			if a == nil {
+				return nil, false
+			}
 			answer := a.Answer
 			out[i] = j4Decision{QuestionIndex: i + 1, Decision: J4DecisionAnswer, Answer: &answer}
 		}

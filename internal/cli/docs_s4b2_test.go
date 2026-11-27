@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -86,9 +87,30 @@ func TestSpec_AC259_ArchSection215NotesHand4IsNotIncluded(t *testing.T) {
 	}
 }
 
-// AC-260: §21.5 に、止まり方の一覧がある（コードの止まり方の 9 つと、選べる手を、1 行ずつ）。
+// AC-260: §21.5 に、止まり方の一覧がある（コードの止まり方の全部と、選べる手を、1 行ずつ）。表の行の止まり方の集合は、コードの閉集合と同じ。
 func TestSpec_AC260_ArchSection215ListsStopKinds(t *testing.T) {
 	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection215)
+	// 逆向きを含めて、表の行の止まり方の集合がコードの閉集合と同じ（表に余分な行・重なる行が無い）。
+	var listed, closed []string
+	inTable := false
+	for _, line := range strings.Split(body, "\n") {
+		switch {
+		case strings.HasPrefix(line, "| 止まり方 |"):
+			inTable = true
+		case !strings.HasPrefix(line, "|"):
+			inTable = false
+		case inTable && !strings.HasPrefix(line, "|---"):
+			listed = append(listed, strings.Trim(strings.TrimSpace(strings.Split(line, "|")[1]), "`"))
+		}
+	}
+	for _, k := range core.StopKindValues() {
+		closed = append(closed, string(k))
+	}
+	slices.Sort(listed)
+	slices.Sort(closed)
+	if !slices.Equal(listed, closed) {
+		t.Errorf("the stop kinds of the table = %v, want the closed set %v", listed, closed)
+	}
 	for _, k := range core.StopKindValues() {
 		row := docTableRow(t, body, "| `"+string(k)+"` |")
 		for _, h := range core.SupervisorHandsFor(k) {
