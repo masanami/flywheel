@@ -399,6 +399,9 @@ export function createMockApi(
                   summary: o.summary,
                 }))
               : [],
+          spec_draft_answers: show?.challenge.spec_draft?.answers ?? [],
+          spec_is_draft: show?.challenge.spec_is_draft ?? false,
+          spec_path: show?.challenge.spec_path ?? null,
           supervisor_hands_taken: {},
           supervisor_questions: [],
           stages: m.stages,

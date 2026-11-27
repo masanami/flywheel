@@ -148,6 +148,7 @@ func newHandler(port int, fleet *Fleet, checks *checkCache, hub *eventHub, done 
 	mux.HandleFunc("/api/v1/workspaces/{name}/tree", treeHandler(fleet, cfg.now))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}", challengeHandler(fleet, checks, cfg))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/approval", approvalSummaryHandler(fleet, newGitHubSource))
+	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/spec", challengeSpecHandler(fleet))
 	mux.HandleFunc("/api/v1/workspaces/{name}/challenges/{id}/approve", approveHandler(fleet, checks, cfg, launch))
 	mux.HandleFunc("/api/v1/workspaces/{name}/chat", chatGetHandler(fleet))
 	mux.HandleFunc("/api/v1/workspaces/{name}/chat/messages", chatMessagesHandler(chat))

@@ -334,6 +334,9 @@ const summary = {
     pairs: [],
     plan: null,
     release_held: true,
+    spec_draft_answers: [],
+    spec_is_draft: false,
+    spec_path: null,
     releases: [],
     stages: {
       actual: null,
