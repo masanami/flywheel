@@ -651,7 +651,7 @@ S2 の分。S1 の分は、下の「機能全体の設計（S1・実装済み）
 - 入力は `draft_file`・`brief_file`・`brief_dir`・`repo_dir`・`base_path`（任意）・`challenge_id`。`facts` は `spec_questions`（`critique` の出力の問いの配列）の 1 つ。
 - 2 つのステップは、`add_dirs` に入力 `repo_dir`・`brief_dir` を持ち、`tools` は `Read`・`Grep`・`Glob`・`Write`・`Edit`・`Agent` だけ。
 - 作業ディレクトリは下書きの置き場（`.flywheel/specs/`）で、Git の作業ツリーでなくてよい。
-- `limits.budget_usd` は、core の定数 `SpecDraftDefaultBudgetUSD` と同じ値（試験で一致させる）。モデル・effort・ステップの上限額・時間切れは定義が持つ（仮の値。実物の実行を測って決め直す）。
+- `limits.budget_usd` は、core の定数 `SpecDraftDefaultBudgetUSD` と同じ値（試験で一致させる）。モデル・effort・ステップの上限額・時間切れは定義が持つ（2026-11-27 に実物の実行を測って決めた値。1 回あたり 0.90〜1.93 USD・2.5〜6.0 分だった）。
 - 委譲先の操作の `flow` に書ける値（`ticket`・`ticket-light`）には入れない。core がタスクの無い契約の実行（種類 `spec`）として始める。
 
 ### フローを進める仕組みに足したもの

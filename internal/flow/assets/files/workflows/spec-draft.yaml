@@ -13,11 +13,11 @@ inputs:
   base_path:    { type: string }                   # 置き換える元の文書の、リポジトリの中の相対のパス（新しい文書なら無し）
   challenge_id: { type: string, required: true }
 models:
-  main: opus                      # 仮の値（実物の実行を測って決め直す）
+  main: opus                      # 2026-11-27 に実物の実行を測って決めた
 efforts:
-  main: high                      # 仮の値
+  main: high                      # 同上
 limits:
-  budget_usd: 15                  # core の定数 SpecDraftDefaultBudgetUSD と同じ値にする（仮の値）
+  budget_usd: 15                  # core の定数 SpecDraftDefaultBudgetUSD と同じ値にする（2026-11-27 に実物の実行を測って決めた）
 facts:
   spec_questions: [$steps.critique.questions]
 steps:
@@ -32,8 +32,8 @@ steps:
     with: { draft_file: $inputs.draft_file, brief_file: $inputs.brief_file, repo_dir: $inputs.repo_dir,
             base_path: $inputs.base_path, challenge_id: $inputs.challenge_id }
     output: schemas/spec-draft-write.json
-    budget_usd: 10                # 仮の値
-    timeout: 30m                  # 仮の値
+    budget_usd: 10                # 実測して決めた値
+    timeout: 30m                  # 実測して決めた値
     on:
       ok: critique
       failure: { fail: write_failed }
@@ -49,8 +49,8 @@ steps:
     with: { draft_file: $inputs.draft_file, brief_file: $inputs.brief_file, repo_dir: $inputs.repo_dir,
             base_path: $inputs.base_path, challenge_id: $inputs.challenge_id }
     output: schemas/spec-draft-critique.json
-    budget_usd: 10                # 仮の値
-    timeout: 45m                  # 仮の値
+    budget_usd: 10                # 実測して決めた値
+    timeout: 45m                  # 実測して決めた値
     on:
       ok: { done: drafted }
       failure: { fail: critique_failed }
