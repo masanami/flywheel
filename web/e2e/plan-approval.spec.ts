@@ -86,3 +86,37 @@ test("AC-339・AC-315・AC-328・AC-332 #1383: 下書きを持つ計画の承認
   ).toBeVisible();
   expect(await pageOverflows(page)).toBe(false);
 });
+
+test("AC-309・AC-314・AC-312 #1383: 課題の詳細は、仕様の文書の場所を持つ課題で「仕様の文書を開く」を 1 つ出し、場所も記録も無い課題では出さない", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/challenges/C-4");
+  await expect(page.getByTestId("detail-title")).toBeVisible();
+  await expect(page.getByTestId("spec-open")).toHaveCount(1);
+  await page.goto("/#/a/alpha/challenges/C-3");
+  await expect(page.getByTestId("detail-title")).toHaveText(
+    "通知メールの再送制御",
+  );
+  await expect(page.getByTestId("spec-open")).toHaveCount(0);
+});
+
+test("AC-316・AC-334 #1383: 仕様の文書の場所も答えも無い計画の承認の画面には、開く口も答えの一覧も出ない", async ({
+  page,
+}) => {
+  await openPlan(page);
+  await expect(page.getByTestId("spec-open")).toHaveCount(0);
+  await expect(page.getByTestId("spec-answers")).toHaveCount(0);
+});
+
+test("AC-328・AC-329・AC-331・AC-333 #1383: 計画の承認の画面の答えの一覧に、問い・答え・答えた者・根拠の場所・添え書きの文が出る", async ({
+  page,
+}) => {
+  await page.goto("/#/a/alpha/challenges/C-4/approve-plan");
+  const items = page.getByTestId("spec-answers").getByRole("listitem");
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(0)).toContainText("権限の表は、どこに置きますか");
+  await expect(items.nth(0)).toContainText("いまの設定の読み込みに足す");
+  await expect(items.nth(0)).toContainText("答えた者: スーパーバイザー");
+  await expect(items.nth(0)).toContainText("docs/architecture.md（設定の節）");
+  await expect(items.nth(1)).toContainText("断るときの文は、短くしてほしい");
+});

@@ -106,3 +106,25 @@ test("AC-322・AC-327 #1383: 下書きのファイルがまだ無いときは、
   );
   await expect(page.getByTestId("spec-body")).toHaveCount(0);
 });
+
+test("AC-305・AC-306・AC-307・AC-336・AC-337 #1383: 答えた分は表示だけで、前の回の答えだけの保留・答えの無い保留では出ない。保留の問いの文に、選択肢と推奨の理由は出ない", async ({
+  page,
+}) => {
+  await page.goto("/#/a/beta/challenges/C-4");
+  const answered = page.getByTestId("spec-sv-answers");
+  await expect(answered).toBeVisible();
+  await expect(
+    answered.locator("input, select, textarea, [contenteditable]"),
+  ).toHaveCount(0);
+  const question = page.getByTestId("hold-question");
+  await expect(question).not.toContainText("実行中にも効かせる");
+  await expect(question).not.toContainText(
+    "課題の説明が、すぐ止めたいと書いているため",
+  );
+  // C-6 は実行 3 回で、答えは 1 回目のものだけ。C-5 は答えを持たない。
+  for (const id of ["C-6", "C-5"]) {
+    await page.goto(`/#/a/beta/challenges/${id}`);
+    await expect(page.getByTestId("spec-open")).toHaveCount(1);
+    await expect(page.getByTestId("spec-sv-answers")).toHaveCount(0);
+  }
+});
