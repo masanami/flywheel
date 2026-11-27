@@ -8,7 +8,7 @@ import (
 )
 
 // このファイルは、下書きづくりを途中でやめる 2 つの道を持つ: オーナーが課題に仕様の文書の場所を付けたとき（EditChallenge が呼ぶ）と、
-// 課題が取り下げになったとき。
+// 課題が取り下げになったとき。どちらも、開始などのコマンドを呼んでいる最中の実行があれば断る。
 
 // specDraftSkippedByEdit は作業ログ spec_draft_skipped の細目のうち、仕様の文書の場所を付けたことを表す値。
 const specDraftSkippedByEdit = "edit"
@@ -69,6 +69,16 @@ func requireNoOpenSpecDraftRun(ctx context.Context, tx *sql.Tx, cid int64) error
 		return fmt.Errorf("%w: %s has a spec draft run that is not finished", ErrConflict, formatChallengeID(cid))
 	}
 	return nil
+}
+
+// hasRunningSpecDraftCommand は、課題 cid に、結果のまだ無い下書きづくり（予算の枠 spec）の実行の記録があるか。開始などの
+// コマンドを呼んでいる最中は、接続ツールの側の実行を取り消せないので、取り下げを断る。異常終了して残った記録は、呼び出し元が
+// 先に ReapInterruptedRuns で閉じる。
+func hasRunningSpecDraftCommand(ctx context.Context, tx *sql.Tx, cid int64) (bool, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run WHERE challenge_id = ? AND budget_bucket = ? AND result IS NULL`,
+		cid, string(budgetBucketSpec)).Scan(&n)
+	return n > 0, err
 }
 
 // skipSpecDraftByEdit は、仕様の文書の場所を付ける編集の書き込みの中で、途中の状態の記録 d を skipped にする。開いている
