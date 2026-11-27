@@ -23,6 +23,9 @@ func runCreate(a Args) (any, error) {
 	if v, ok := a.Values["urgency"]; ok {
 		in.Urgency = &v
 	}
+	if v, ok := a.Values["requirement"]; ok {
+		in.Requirement = &v
+	}
 	in.Chat = a.Chat.coreMark()
 	c, err := a.Store.CreateChallenge(context.Background(), core.ChannelCLI, in)
 	if err != nil {

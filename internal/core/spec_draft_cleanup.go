@@ -161,6 +161,13 @@ func sameSpecFile(workspace, a, b string) bool {
 // removeSpecDraft は下書き p のファイルを消す。消すのは、場所のリンクをたどった先が、下書きの置き場の実体の下にある
 // 通常のファイルのときだけ。ファイルがすでに無ければ何もしない。
 func removeSpecDraft(workspace, p string) error {
+	return removeRegularFileUnder(workspace, p, specDraftDir, errSpecDraftOutside, errSpecDraftNotRegular)
+}
+
+// removeRegularFileUnder はワークスペースから見た相対のパス p のファイルを消す。消すのは、p のリンクをたどった先が、
+// 置き場 dir の実体の下にある通常のファイルのときだけ（置き場の外なら outside、通常のファイルでなければ notRegular を
+// 返す）。ファイルがすでに無ければ何もしない。
+func removeRegularFileUnder(workspace, p, dir string, outside, notRegular error) error {
 	resolved, err := resolveSpecPath(workspace, p)
 	if err != nil {
 		return err
@@ -172,12 +179,12 @@ func removeSpecDraft(workspace, p string) error {
 	if root, err = filepath.EvalSymlinks(root); err != nil {
 		return err
 	}
-	dir, err := followPath(root, specDraftDir)
+	base, err := followPath(root, dir)
 	if err != nil {
 		return err
 	}
-	if resolved == dir || !pathInside(dir, resolved) {
-		return errSpecDraftOutside
+	if resolved == base || !pathInside(base, resolved) {
+		return outside
 	}
 	info, err := os.Lstat(resolved)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
@@ -187,7 +194,7 @@ func removeSpecDraft(workspace, p string) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return errSpecDraftNotRegular
+		return notRegular
 	}
 	if err := os.Remove(resolved); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err

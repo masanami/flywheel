@@ -40,7 +40,7 @@ func (m *chatMark) coreMark() *core.ChatSessionMark {
 // 形だけが記録するコマンド。
 func needsChatMarkCheck(cmd Command, a Args) bool {
 	switch strings.Join(cmd.Path, " ") {
-	case "approve", "reject", "answer", "withdraw", "budget", "create",
+	case "approve", "reject", "answer", "withdraw", "budget", "create", "requirement create",
 		"followup drop", "followup promote", "followup done", "cycle stop":
 		return true
 	case "ingest":

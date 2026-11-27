@@ -326,6 +326,10 @@ const ActivityActionOpClose = "op_close"
 // （entity=challenge。after は下書きの場所 path と訳 reason）。
 const ActivityActionSpecDraftCleanupFailed = "spec_draft_cleanup_failed"
 
+// ActivityActionRequirementEvidenceCleanupFailed は、要求の証跡を消せなかったことの作業ログの action
+// （entity は requirement か challenge。after は証跡の場所 path と訳 reason）。
+const ActivityActionRequirementEvidenceCleanupFailed = "requirement_evidence_cleanup_failed"
+
 // ActivityActionSpecDraftRequested は、計画を作る判断点が課題を下書きづくりへ回すと決めたことの作業ログの action
 // （entity=challenge。after は下書きの場所 path・置き換える元 base_path・対象のリポジトリ repo・回した理由 reason）。
 const ActivityActionSpecDraftRequested = "spec_draft_requested"
@@ -521,15 +525,16 @@ func (r ExecutionResult) Counts() bool {
 // ChallengeOrigin は課題の出どころ（challenge.origin。マイグレーション 0011）。
 type ChallengeOrigin string
 
-// ChallengeOrigin の4値。improvement だけが改修の鍵（improvement_layer・improvement_target）を持つ。
+// ChallengeOrigin の5値。split は区切りを分ける回答で作った課題。improvement だけが改修の鍵（improvement_layer・improvement_target）を持つ。
 const (
 	ChallengeOriginIngest      ChallengeOrigin = "ingest"
 	ChallengeOriginManual      ChallengeOrigin = "manual"
 	ChallengeOriginFollowup    ChallengeOrigin = "followup"
 	ChallengeOriginImprovement ChallengeOrigin = "improvement"
+	ChallengeOriginSplit       ChallengeOrigin = "split"
 )
 
-var challengeOriginValues = []ChallengeOrigin{ChallengeOriginIngest, ChallengeOriginManual, ChallengeOriginFollowup, ChallengeOriginImprovement}
+var challengeOriginValues = []ChallengeOrigin{ChallengeOriginIngest, ChallengeOriginManual, ChallengeOriginFollowup, ChallengeOriginImprovement, ChallengeOriginSplit}
 
 // ParseChallengeOrigin は s を課題の出どころとして解釈する。前後の空白を除いた完全一致のみ受理する。
 func ParseChallengeOrigin(s string) (ChallengeOrigin, bool) {

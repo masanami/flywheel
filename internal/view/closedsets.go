@@ -8,7 +8,7 @@ type ClosedSet struct {
 	Codes []string
 }
 
-// ClosedSets は core の閉集合（課題カードの操作・修飾・状態・食い違いの種類、保留の種類、タスクの表示の区分、タスクと課題の細かい進み、統合先へ入れる進み、検証の判定、委譲先の実行の状態、不可逆操作の種類と状態、委譲先が求めること、成果物の種類、通したコンフリクトの解消の宛先、予想の例の種別、サイクルの終わった理由、サイクルが見ている実行の様子、対話の欄の発言の状態と道具の範囲、スーパーバイザーの止まり方・手・対処の結果・断りの理由・保留の処理の状態、フォローアップの出どころ）を
+// ClosedSets は core の閉集合（課題カードの操作・修飾・状態・食い違いの種類、保留の種類、タスクの表示の区分、タスクと課題の細かい進み、統合先へ入れる進み、検証の判定、委譲先の実行の状態、不可逆操作の種類と状態、委譲先が求めること、成果物の種類、通したコンフリクトの解消の宛先、予想の例の種別、サイクルの終わった理由、サイクルが見ている実行の様子、対話の欄の発言の状態と道具の範囲、スーパーバイザーの止まり方・手・対処の結果・断りの理由・保留の処理の状態、フォローアップの出どころ、要求の出どころ、区切りを分ける記録の状態）を
 // 生成物（web/src/api/types.gen.ts）へ書き出すための一覧。順序は core の定義の順。
 // 例外として CONDITIONS_AFTER_RELEASE_HEADINGS は view が持つ承認の見出しで、添字は ConditionsOutlook の値。
 // EXECUTION_RESULT_WORDS も view が持つ語で、添字は EXECUTION_RESULT_CODES と同じ（i 番目の値の語）。
@@ -125,6 +125,13 @@ func ClosedSets() []ClosedSet {
 	for _, v := range core.FollowupSourceValues() {
 		followupSources = append(followupSources, string(v))
 	}
+	var requirementOrigins, sliceSplitStates []string
+	for _, v := range core.RequirementOriginValues() {
+		requirementOrigins = append(requirementOrigins, string(v))
+	}
+	for _, v := range core.SliceSplitStateValues() {
+		sliceSplitStates = append(sliceSplitStates, string(v))
+	}
 	return []ClosedSet{
 		{Name: "CARD_ACTION_CODES", Codes: actions},
 		{Name: "CARD_MODIFIER_CODES", Codes: modifiers},
@@ -165,6 +172,8 @@ func ClosedSets() []ClosedSet {
 		{Name: "SUPERVISOR_REJECT_REASON_CODES", Codes: rejectReasons},
 		{Name: "SUPERVISOR_STATE_CODES", Codes: supervisorStates},
 		{Name: "FOLLOWUP_SOURCE_CODES", Codes: followupSources},
+		{Name: "REQUIREMENT_ORIGIN_CODES", Codes: requirementOrigins},
+		{Name: "SLICE_SPLIT_STATE_CODES", Codes: sliceSplitStates},
 	}
 }
 

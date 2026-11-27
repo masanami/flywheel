@@ -741,10 +741,14 @@ type ShowResponse struct {
 	// ReleaseHeadChanges は承認待ちの release のうち、PR の head が J5 の検証の head から動いたものの評価
 	// （CLI の show だけが足す。GitHub を読めなかった release・head が動いていない release は載せない。無ければ出さない）。
 	ReleaseHeadChanges []ReleaseHeadChange `json:"release_head_changes,omitempty"`
-	Runs               []ShowRun           `json:"runs"`
-	SourceBinding      *SourceBinding      `json:"source_binding"`
-	SourceChildren     []SourceChild       `json:"source_children"`
-	Stages             Stages              `json:"stages"`
+	// Requirement は課題が指す要求の記録（指していなければ、課題を元の課題とする記録。どちらも無ければ null）。
+	Requirement *Requirement `json:"requirement"`
+	Runs        []ShowRun    `json:"runs"`
+	// SliceSplit は区切りを分ける記録（無ければ null）。
+	SliceSplit     *SliceSplit    `json:"slice_split"`
+	SourceBinding  *SourceBinding `json:"source_binding"`
+	SourceChildren []SourceChild  `json:"source_children"`
+	Stages         Stages         `json:"stages"`
 	// SupervisorActions は課題の対処の記録（古い順。無ければ []）。
 	SupervisorActions []SupervisorAction `json:"supervisor_actions"`
 	// SupervisorHandsTaken は打った手の件数（手 → 結果が executed の対処の記録の数。failed は入れない。無ければ {}）。
@@ -767,7 +771,9 @@ func FromChallengeDetail(d *core.ChallengeDetail) ShowResponse {
 		Operations:           FromOperations(d.Operations),
 		Pairs:                FromPairs(core.Pairs(d.Expected, d.Actual)),
 		Plans:                FromPlans(d.Plans),
+		Requirement:          FromRequirement(d.Requirement),
 		Runs:                 FromShowRuns(d.Runs),
+		SliceSplit:           FromSliceSplit(d.SliceSplit),
 		SourceBinding:        FromSourceBinding(d.SourceBinding),
 		SourceChildren:       FromSourceChildren(d.SourceChildren),
 		Stages:               FromStages(d.StageFields, d.IssuesAnswer),

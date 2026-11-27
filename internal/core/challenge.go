@@ -271,6 +271,10 @@ type ChallengeDetail struct {
 	ChatSessions []ChallengeChatSession
 	// SpecDraft は下書きづくりの記録（無ければ nil）。
 	SpecDraft *SpecDraft
+	// Requirement は課題が指す要求の記録、指していなければ課題を元の課題とする記録（どちらも無ければ nil）。
+	Requirement *RequirementDetail
+	// SliceSplit は区切りを分ける記録（無ければ nil）。
+	SliceSplit *SliceSplit
 }
 
 // ChallengeChatSession は課題に紐づいた対話の欄の会話。
@@ -308,6 +312,9 @@ type CreateInput struct {
 	Spec string
 	// SpecBase は置き換える元の文書の場所。空なら場所を持たない。
 	SpecBase string
+	// Requirement は作る課題が指す要求の記録の ID（"RQ-<n>"）。nil なら指さない。無い記録・解決済みの記録は
+	// ErrValidation で、課題を作らない。
+	Requirement *string
 	// Chat は対話の欄の印。nil でなければ、書き込みの中で印を検査し（通らなければ ErrChatMarkInvalid で何も書かない）、
 	// 作った課題を印の会話に紐づける。
 	Chat *ChatSessionMark
@@ -870,6 +877,14 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 				return err
 			}
 		}
+		var requirementID *int64
+		if in.Requirement != nil {
+			rid, err := openRequirementID(ctx, tx, *in.Requirement)
+			if err != nil {
+				return err
+			}
+			requirementID = &rid
+		}
 		id, now, err := insertChallengeRow(ctx, tx, rec.at, in.Title, in.Description, in.DoneCriteria, urgency, rec.actor, ChallengeOriginManual, nil, nil)
 		if err != nil {
 			return err
@@ -887,6 +902,12 @@ func (s *Store) CreateChallenge(ctx context.Context, ch Channel, in CreateInput)
 				return err
 			}
 			after["spec_base_path"] = *specBasePath
+		}
+		if requirementID != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE challenge SET requirement_id = ? WHERE id = ?`, *requirementID, id); err != nil {
+				return err
+			}
+			after["requirement_id"] = formatRequirementID(*requirementID)
 		}
 		if err := rec.record("challenge", id, "create", nil, after); err != nil {
 			return err
@@ -1058,6 +1079,12 @@ func (s *Store) getChallenge(ctx context.Context, id string, reap bool) (*Challe
 			return err
 		}
 		if detail.SpecDraft, err = loadSpecDraft(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.Requirement, err = loadChallengeRequirement(ctx, tx, cid); err != nil {
+			return err
+		}
+		if detail.SliceSplit, err = loadSliceSplit(ctx, tx, cid); err != nil {
 			return err
 		}
 		if detail.SpecCostUSD, detail.ChatSessions, err = loadChallengeSpec(ctx, tx, cid); err != nil {
