@@ -102,6 +102,8 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 
 - `ticket`・`ticket-light` のセルフレビューを、実装のステップの指示文から外し、レビューのステップ `self-review`（指示文 `prompts/ticket-self-review.md`・出力の型 `schemas/self-review-result.json`）と直すステップ `self-review-fix` にした。`self-review` の結果は `findings`（直すべき指摘あり。`self-review-fix` へ戻り、回数は `limits.self_review` で数える。尽きたら残った指摘を PR に載せて `commit` へ）・`clean`（直すべき指摘なし。`commit` へ）・`incomplete`（最後まで行えなかった。`self_review_incomplete` で止まる）。`self-review-route` と、実装の出力の `review_incomplete`・`self_review`・`codex_review`・`residual_findings`、直し・レビュー対応の出力の `self_review` を外した。直し（`fix`）の後も `self-review` を通る。
 - レビュアーの構成・境目・Codex は `self-review` の `with` に書く（`reviewers`・`verifier`・`fix_threshold`・`codex_review`）。`ticket` はレビュアー 2 体と `claude-harness:finding-verifier`・上限 3・Codex を使う、`ticket-light` はレビュアー 2 体・疑う役なし（`none`）・上限 1・Codex を使わない。Codex のレビューは 1 回目の `self-review` だけが起動する（上の「標準のフロー ticket の値と Codex のレビュー」の実装のステップの手順を移した）。
+- `self-review-result.json` は `if`/`then` で組み合わせを縛る: `outcome` が `findings` なら `findings` は 1 件以上で `self_review` は `complete`、`clean` なら `findings` は 0 件で `complete`、`incomplete` なら `self_review` も `incomplete`。食い違った出力は型に合わない出力（`invalid_output`）になる。
+- 契約の `steps` の要素に `findings_count` を足した: 終わったステップの出力が最上位に配列 `findings` を持てばその件数（レビューのステップの指摘の数）、持たなければ `null`。core はステップの記録に写し、タスクの詳細（`show` のテキスト・`--json`・画面のステップの一覧）に出す。
 - `facts.self_review` は `$steps.self-review.self_review` から出す。PR の残指摘は `$steps.self-review.residual_findings`、レビューの未検証は pull-request の新しい `with` の `review_unverified`（実装の `unverified` の後ろに並べて載せる）から渡す。
 
 ### ワークスペースの定義（フローのカスタマイズ S1）
@@ -109,7 +111,7 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 仕様は `docs/features/flow-customization.md`。実装は `definition.go`（探し方・検査・写し）と `check.go`（写す口・確かめる口）。
 
 - **置き場**: ワークスペースの `.flywheel/flows/<名前>.yaml` に、定義を丸ごと置ける（名前は `^[a-z][a-z0-9-]*$`）。`flow start <名前>` は、置いてあればそれで始め（組み込みと同じ名前なら置き換え、無い名前なら新しいフロー）、無ければ組み込みで始める。
-- **指示文**: ワークスペースの定義が指す `prompts/<x>.md` は、`.flywheel/flows/prompts/<x>.md` があればそれ、無ければ組み込みのもの。出力の型（`schemas/`）とつなぎのスクリプト（`scripts/`）は組み込みだけで、`.flywheel/flows/schemas/`・`.flywheel/flows/scripts/` があれば `start` も `check` も誤りにする。組み込みの定義は組み込みの指示文だけを使う（ワークスペースの `prompts/` を見ない）。
+- **指示文**: ワークスペースの定義が指す `prompts/<x>.md` は、`.flywheel/flows/prompts/<x>.md` があればそれ、無ければ組み込みのもの。出力の型（`schemas/`）とつなぎのスクリプト（`scripts/`）は組み込みだけで、`.flywheel/flows/schemas/`・`.flywheel/flows/scripts/` があれば `start` も `check` も誤りにする。組み込みの定義は組み込みの指示文だけを使う（ワークスペースの `prompts/` を見ない）。定義の YAML・指示文・`.flywheel/flows`・`prompts/` がシンボリックリンクか通常のファイル（ディレクトリ）でなければ、置き場の外を読まずに `start` も `check` も誤りにする（指示文は組み込みへも落ちない）。
 - **検査**: 定義の YAML・使う指示文・組み込みの `schemas/` と `scripts/` を 1 つのディレクトリ（写し）に並べ、組み込みと同じ読み込みと検査（`workflow.LoadWithOverrides`。上書きは重ねない）にかける。通らなければ実行を始めず、契約の `failed` を返す（理由は元のファイルのパスと行）。組み込みの定義へ落として動かすことはしない。
 - **実行の写し**: 検査を通った写しを、実行のフォルダの `definition/` へ移し、その写しを定義の場所（`workflow.path`・`workflow_dir`）として始める。`resume`・`__run-detached` は写しを読むので、始めた後にワークスペースのファイルを変えても実行は変わらない。開き直すときは、YAML の sha256 の照合（いまと同じ）に加えて、写しの YAML とワークスペースから写した指示文が、始めたときの定義のハッシュのままかを確かめる。ワークスペースの定義で始めた実行は `embedded` を偽にする。組み込みの定義の実行は、いまと同じ（展開した資材を直に読む）。
 - **定義のハッシュ**: ワークスペースの定義は、YAML の中身と、ワークスペースから写した指示文（パスと中身。パスの昇順）をまとめた sha256（`definitionHash`）。組み込みは YAML の sha256（`workflow.hash` と同じ）。

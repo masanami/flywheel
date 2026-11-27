@@ -206,3 +206,49 @@ func TestPollContractRuns_StepEffortIsRecorded(t *testing.T) {
 		t.Errorf("effort after removal = %v, want NULL", got)
 	}
 }
+
+// 契約の出力の steps の findings_count（レビューのステップの指摘の数）を contract_run_step.findings_count へ写し、タスクの詳細に出す（無ければ NULL）。
+func TestPollContractRuns_StepFindingsCountIsRecorded(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	flow, two, zero := "ticket", 2, 0
+	f.pollWith(t, withSteps(&flow, []ContractStep{
+		stepOf(1, "finished", func(s *ContractStep) { s.FindingsCount = &two }),
+		stepOf(2, "finished", func(s *ContractStep) { s.FindingsCount = &zero }),
+		stepOf(3, "running", nil),
+	}))
+	for seq, want := range map[int]string{1: "2", 2: "0", 3: "~"} {
+		got := f.queryString(t, fmt.Sprintf(`SELECT COALESCE(CAST(findings_count AS TEXT), '~') FROM contract_run_step WHERE seq = %d`, seq))
+		if got.String != want {
+			t.Errorf("seq %d findings_count = %v, want %s", seq, got, want)
+		}
+	}
+}
+
+// ステップの行の findings_count が、課題の詳細の delegate.steps の要素の FindingsCount になる（NULL は nil、0 は 0）。
+func TestTaskDetail_StepFindingsCount(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	id := f.newMulti(t, "d", "P2", false, multiTask{key: "a"})
+	cid, _ := parseChallengeID(id)
+	_, tid := f.tdTask(t, id, "a")
+	f.tdContractRun(t, cid, tid, "e1", tdCR{state: "running", summary: "s"})
+	writeForTest(t, f.s, func(tx *sql.Tx) error {
+		ins := `INSERT INTO contract_run_step (contract_run_id, seq, step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used, findings_count)
+			VALUES ((SELECT id FROM contract_run WHERE external_run_id = 'e1'), ?, ?, 'llm', 1, 'finished', 'findings', '2026-11-01T00:00:00Z', '2026-11-01T00:00:05Z', 0, 0, NULL, '[]', ?)`
+		for i, v := range []any{2, 0, nil} {
+			if _, err := tx.Exec(ins, i+1, "self-review", v); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	tk, _ := f.tdTask(t, id, "a")
+	steps := tk.Detail.Delegate.Steps
+	if len(steps) != 3 || steps[0].FindingsCount == nil || *steps[0].FindingsCount != 2 || steps[1].FindingsCount == nil || *steps[1].FindingsCount != 0 || steps[2].FindingsCount != nil {
+		t.Fatalf("steps = %+v, want findings 2, 0, nil", steps)
+	}
+}

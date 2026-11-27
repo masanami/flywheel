@@ -82,14 +82,16 @@ type contractStep struct {
 	CostUSD     *float64 `json:"cost_usd"`
 	EndedAt     *string  `json:"ended_at"`
 	Effort      *string  `json:"effort"`
-	Kind        string   `json:"kind"`
-	Model       *string  `json:"model"`
-	ModelsUsed  []string `json:"models_used"`
-	Outcome     *string  `json:"outcome"`
-	Seq         int      `json:"seq"`
-	StartedAt   string   `json:"started_at"`
-	State       string   `json:"state"`
-	Step        string   `json:"step"`
+	// FindingsCount は、終わったステップの出力が指摘の一覧（最上位の配列 findings）を持てばその件数（持たなければ null）。
+	FindingsCount *int     `json:"findings_count"`
+	Kind          string   `json:"kind"`
+	Model         *string  `json:"model"`
+	ModelsUsed    []string `json:"models_used"`
+	Outcome       *string  `json:"outcome"`
+	Seq           int      `json:"seq"`
+	StartedAt     string   `json:"started_at"`
+	State         string   `json:"state"`
+	Step          string   `json:"step"`
 }
 
 // mainUnit は steps の対象の単位の名前。
@@ -255,11 +257,28 @@ func contractSteps(v *runView) []contractStep {
 				o := x.Outcome
 				cs.Outcome = &o
 			}
+			cs.FindingsCount = findingsCount(x.Output)
 			out = append(out, cs)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	return out
+}
+
+// findingsCount は、ステップの出力が最上位に配列 findings を持てばその件数を返す（無い・配列でなければ nil）。
+// レビューのステップ（self-review）の指摘の数を、ステップの記録に出すためのもの。
+func findingsCount(output json.RawMessage) *int {
+	if len(output) == 0 {
+		return nil
+	}
+	var o struct {
+		Findings *[]json.RawMessage `json:"findings"`
+	}
+	if json.Unmarshal(output, &o) != nil || o.Findings == nil {
+		return nil
+	}
+	n := len(*o.Findings)
+	return &n
 }
 
 // summarize は人が読む 1 行の要約。

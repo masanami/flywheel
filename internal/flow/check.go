@@ -200,6 +200,7 @@ func checkOne(workspace, name, builtinDir, scriptsDir, stageParent string) check
 }
 
 // workspaceNames はワークスペースの .flywheel/flows/*.yaml の名前（昇順）。置き場が無ければ空。
+// 置き場がシンボリックリンクのときも中を読み、定義ごとの検査（forbiddenDirProblems）で誤りにする。
 func workspaceNames(workspace string) ([]string, error) {
 	entries, err := os.ReadDir(FlowsDir(workspace))
 	if errors.Is(err, os.ErrNotExist) {
@@ -210,7 +211,8 @@ func workspaceNames(workspace string) ([]string, error) {
 	}
 	var names []string
 	for _, e := range entries {
-		if n, ok := strings.CutSuffix(e.Name(), ".yaml"); ok && !e.IsDir() {
+		// 通常のファイルでないもの（シンボリックリンク・ディレクトリ）も名前に入れ、検査で誤りにする。
+		if n, ok := strings.CutSuffix(e.Name(), ".yaml"); ok {
 			names = append(names, n)
 		}
 	}

@@ -63,6 +63,25 @@ func TestSelfReviewFindingsGoToFixAndBack(t *testing.T) {
 	if got := f.status(id).Facts["self_review"]; got != "complete" {
 		t.Errorf("facts.self_review = %q, want complete", got)
 	}
+	// ステップの記録に指摘の数が残る: レビューの 1 回目は 1 件・2 回目は 0 件、指摘の一覧を返さないステップは null。
+	var reviews []int
+	d := f.status(id)
+	if d.Steps == nil {
+		t.Fatal("no steps in the contract")
+	}
+	for _, s := range *d.Steps {
+		switch {
+		case s.Step == "self-review" && s.FindingsCount != nil:
+			reviews = append(reviews, *s.FindingsCount)
+		case s.Step == "self-review":
+			t.Errorf("self-review seq %d has no findings_count", s.Seq)
+		case s.FindingsCount != nil:
+			t.Errorf("%s has findings_count %d", s.Step, *s.FindingsCount)
+		}
+	}
+	if len(reviews) != 2 || reviews[0] != 1 || reviews[1] != 0 {
+		t.Errorf("self-review findings_count = %v, want [1 0]", reviews)
+	}
 }
 
 // 戻る回数の上限（ticket-light は 1）に達しても指摘が残れば、commit へ進み、残った指摘を PR に載せる。
@@ -140,5 +159,29 @@ func TestSelfReviewIncompleteFails(t *testing.T) {
 				t.Errorf("a PR was created although the review was incomplete")
 			}
 		})
+	}
+}
+
+// outcome と self_review・findings が食い違う出力は型に合わず、指摘があるのに clean で commit へ進むことはない。
+func TestSelfReviewInconsistentOutputIsInvalid(t *testing.T) {
+	f := newFixture(t, "5.3.0")
+	bad := reviewResult("findings")
+	bad["outcome"] = "clean" // 指摘が 1 件あるのに clean
+	f.respond(3, claudeStructured(bad, 1.0))
+	d, errOut, code := f.start()
+	if code != ExitOK || d.RunID == nil {
+		t.Fatalf("start exit %d\n%s", code, errOut)
+	}
+	w := waitEnd(f, *d.RunID)
+	joined := strings.Join(f.lightEvents(*d.RunID).all, " ")
+	if strings.Contains(joined, "self-review:clean") || strings.Contains(joined, "→commit") {
+		t.Errorf("an inconsistent review output was followed: %s", joined)
+	}
+	if w.State == "succeeded" || !strings.Contains(w.Summary, "invalid_output") {
+		raw, _ := json.Marshal(w)
+		t.Errorf("state %s: %s", w.State, raw)
+	}
+	if _, err := os.Stat(filepath.Join(f.ghDir, "body.1.md")); err == nil {
+		t.Errorf("a PR was created from an inconsistent review output")
 	}
 }

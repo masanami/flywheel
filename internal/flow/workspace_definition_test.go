@@ -368,3 +368,114 @@ func TestCheck(t *testing.T) {
 		t.Errorf("exported ticket: exit %d\n%s", code, out)
 	}
 }
+
+// 定義・指示文・置き場・指示文の置き場がシンボリックリンク（や通常のファイルでないもの）なら、置き場の外を読まずに
+// start も check も誤りにする（problems にファイルと理由）。指示文は組み込みへも落ちない。
+func TestWorkspaceSymlinksAreRejected(t *testing.T) {
+	outside := func(t *testing.T, name, body string) string {
+		p := filepath.Join(t.TempDir(), name)
+		writeFile(t, p, body, 0o644)
+		return p
+	}
+	symlink := func(t *testing.T, target, link string) {
+		t.Helper()
+		if err := os.RemoveAll(link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name string
+		// arrange は置いたワークスペースの定義を崩し、誤りになるはずのファイルを返す。
+		arrange func(t *testing.T, f *fixture) string
+		msg     string
+	}{
+		{"definition", func(t *testing.T, f *fixture) string {
+			src := filepath.Join(FlowsDir(f.ws), "hello.yaml")
+			data, _ := os.ReadFile(src)
+			symlink(t, outside(t, "hello.yaml", string(data)), src)
+			return src
+		}, "シンボリックリンク"},
+		{"prompt", func(t *testing.T, f *fixture) string {
+			p := filepath.Join(FlowsDir(f.ws), "prompts", "hello.md")
+			symlink(t, outside(t, "secret.md", "OUTSIDE-SECRET\n"), p)
+			return p
+		}, "シンボリックリンク"},
+		{"prompt-not-regular", func(t *testing.T, f *fixture) string {
+			p := filepath.Join(FlowsDir(f.ws), "prompts", "hello.md")
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(p, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}, "通常のファイルでない"},
+		{"prompts-dir", func(t *testing.T, f *fixture) string {
+			dir := filepath.Join(t.TempDir(), "prompts")
+			writeFile(t, filepath.Join(dir, "hello.md"), "OUTSIDE-SECRET\n", 0o644)
+			p := filepath.Join(FlowsDir(f.ws), "prompts")
+			symlink(t, dir, p)
+			return p
+		}, "シンボリックリンク"},
+		{"flows-dir", func(t *testing.T, f *fixture) string {
+			dir := filepath.Join(t.TempDir(), "flows")
+			if err := os.Rename(FlowsDir(f.ws), dir); err != nil {
+				t.Fatal(err)
+			}
+			symlink(t, dir, FlowsDir(f.ws))
+			return FlowsDir(f.ws)
+		}, "シンボリックリンク"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t, "5.3.0")
+			f.placeFlow("hello", "hello")
+			bad := c.arrange(t, f)
+			d, _, _ := f.startFlow("hello")
+			if d.State != "failed" || d.RunID != nil || !strings.Contains(d.Summary, bad) || !strings.Contains(d.Summary, c.msg) {
+				t.Errorf("start: contract = %+v; want failed naming %s", d, bad)
+			}
+			if ids, _ := runstate.List(runsDir(f.ws)); len(ids) != 0 {
+				t.Errorf("a run was created: %v", ids)
+			}
+			if _, err := os.Stat(filepath.Join(f.fdir, "calls", "1.stdin")); err == nil {
+				t.Errorf("claude was called")
+			}
+			for _, names := range [][]string{nil, {"hello"}} {
+				env, out, _ := f.env()
+				if code := Check(env, CheckOptions{Names: names, JSON: true}); code != ExitFailed {
+					t.Errorf("check %v exit %d, want 1\n%s", names, code, out)
+				}
+				var doc checkDoc
+				if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+					t.Fatalf("not JSON: %v\n%s", err, out)
+				}
+				found := false
+				for _, def := range doc.Definitions {
+					for _, p := range def.Problems {
+						found = found || (p.File == bad && strings.Contains(p.Message, c.msg))
+					}
+				}
+				if !found || strings.Contains(out.String(), "OUTSIDE-SECRET") {
+					t.Errorf("check %v: want a problem for %s\n%s", names, bad, out)
+				}
+			}
+		})
+	}
+	// 置き場がシンボリックリンクで、定義が 1 つも無くても check は通らない。
+	t.Run("flows-dir-empty", func(t *testing.T) {
+		f := newFixture(t, "5.3.0")
+		dir := t.TempDir()
+		symlink(t, dir, FlowsDir(f.ws))
+		env, out, errb := f.env()
+		if code := Check(env, CheckOptions{}); code != ExitFailed || !strings.Contains(errb.String(), "シンボリックリンク") {
+			t.Errorf("check exit %d\n%s\n%s", code, out, errb)
+		}
+	})
+}

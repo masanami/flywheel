@@ -238,7 +238,7 @@ func decodeFacts(raw json.RawMessage) map[string]string {
 	return out
 }
 
-// stepKeys は steps の要素の必須の欄（effort は任意で含めない）（値が null でよい欄も、キーは必須）。
+// stepKeys は steps の要素の必須の欄（effort・findings_count は任意で含めない）（値が null でよい欄も、キーは必須）。
 var stepKeys = []string{"seq", "step", "kind", "attempt", "state", "outcome", "started_at", "ended_at", "cost_usd", "cost_unknown", "model", "models_used"}
 
 // decodeSteps は steps を読む。配列でない・要素に必須の欄が無い・欄の型が違う・state が 4 つの値の外・seq が 1 未満・
@@ -304,6 +304,14 @@ func decodeSteps(raw json.RawMessage) []core.ContractStep {
 			if sp.Effort, ok = stepNullableString(raw); !ok {
 				return nil
 			}
+		}
+		if raw, present := e["findings_count"]; present && !isJSONNull(raw) {
+			// 任意の欄。無い・null は nil。0 以上の整数でなければ steps の全体を無いものとして扱う。
+			n, ok := stepInt(raw)
+			if !ok || n < 0 {
+				return nil
+			}
+			sp.FindingsCount = &n
 		}
 		var models []string
 		if isJSONNull(e["models_used"]) || json.Unmarshal(e["models_used"], &models) != nil {

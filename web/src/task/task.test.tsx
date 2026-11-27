@@ -1526,6 +1526,7 @@ const S = (p: Partial<StepRow> = {}): StepRow => ({
   cost_usd: 1,
   effort: null,
   ended_at: "2026-01-01T00:00:10Z",
+  findings_count: null,
   kind: "llm",
   model: null,
   models_used: [],
@@ -1686,6 +1687,27 @@ it("AC-167 AC-168 AC-169 #1229: 費用は小数 2 桁の USD、null は「—」
     "1.94 USD",
     "—",
     "2.00 USD（上限額で計上）",
+  ]);
+});
+
+it("#1416: レビューのステップの行は、結果に指摘の数を添える（0 件も出す。指摘の数の無い行と実行中の行は添えない）", async () => {
+  const sec = await openSteps([
+    S({ step: "self-review", outcome: "findings", findings_count: 2 }),
+    S({ step: "self-review-fix" }),
+    S({ step: "self-review", outcome: "clean", findings_count: 0 }),
+    S({
+      step: "self-review",
+      state: "running",
+      outcome: null,
+      ended_at: null,
+      findings_count: null,
+    }),
+  ]);
+  expect(rowsOf(sec).map((r) => r[1])).toEqual([
+    "findings（指摘 2 件）",
+    "pass",
+    "clean（指摘 0 件）",
+    "実行中…",
   ]);
 });
 

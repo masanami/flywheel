@@ -678,6 +678,7 @@ export interface TaskDelegateStep {
   cost_usd: number | null;
   effort: string | null;
   ended_at: string | null;
+  findings_count: number | null;
   kind: string;
   model: string | null;
   models_used: string[];

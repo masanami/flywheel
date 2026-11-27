@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/view"
@@ -301,6 +302,26 @@ func flowDefinitionSourceText(source string) string {
 	return escapeControl(source)
 }
 
+// writeReviewSteps は委譲先の実行のステップのうち、指摘の数を持つもの（レビューのステップ）を 1 回 1 行で書く:
+// ステップの名前・そのステップの何回目の実行か（始まった順）・指摘の数・費用・かかった時間（終わっていなければ「実行中」、費用が無ければ「-」）。
+func writeReviewSteps(b *strings.Builder, steps []core.TaskDelegateStep) {
+	nth := map[string]int{}
+	for _, sp := range steps {
+		nth[sp.Step]++
+		if sp.FindingsCount == nil {
+			continue
+		}
+		cost, took := "-", "実行中"
+		if sp.CostUSD != nil {
+			cost = formatUSD(*sp.CostUSD) + " USD"
+		}
+		if sp.EndedAt != nil {
+			took = sp.EndedAt.Sub(sp.StartedAt).Round(time.Second).String()
+		}
+		fmt.Fprintf(b, "    レビュー %s（%d 回目）: 指摘 %d 件・費用 %s・時間 %s\n", escapeControl(sp.Step), nth[sp.Step], *sp.FindingsCount, cost, took)
+	}
+}
+
 func challengeDetailText(d *core.ChallengeDetail) string {
 	var b strings.Builder
 	c := d.Challenge
@@ -359,6 +380,9 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 		if dg := t.Detail.Delegate; dg != nil && dg.Definition != nil {
 			fmt.Fprintf(&b, "    委譲先の実行 %s の定義: %s・ハッシュ %s\n", dg.RunID, flowDefinitionSourceText(dg.Definition.Source),
 				escapeControl(view.DefinitionHashPrefix(dg.Definition.SHA256)))
+		}
+		if dg := t.Detail.Delegate; dg != nil {
+			writeReviewSteps(&b, dg.Steps)
 		}
 	}
 	if c.Status == core.StatusAwaitingCompletionApproval {

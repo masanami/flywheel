@@ -647,6 +647,13 @@ func stringPtrColumn(p *string) any {
 	return *p
 }
 
+func intPtrColumn(p *int) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
 // hasDependencyCycle は、同じ呼び出しのタスクの前提（DependsOn。byKey は Key → in の添字）が循環しているかを返す。
 // 循環があると、循環の中のどのタスクも前提が満たされず、始められなくなる。
 func hasDependencyCycle(in []TaskInput, byKey map[string]int) bool {

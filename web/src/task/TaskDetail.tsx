@@ -447,9 +447,13 @@ export function stepName(step: string, nth: number): string {
   return nth >= 2 ? `${base}（${nth} 回目）` : base;
 }
 
+// 結果。指摘の数を持つステップ（レビューのステップ）は、終わっていれば指摘の数を添える。
 export function stepResult(s: Step): string {
-  if (s.state === "finished") return s.outcome ?? NO_VALUE;
-  return label(STEP_STATE_LABELS, s.state);
+  if (s.state !== "finished") return label(STEP_STATE_LABELS, s.state);
+  const base = s.outcome ?? NO_VALUE;
+  return s.findings_count !== null
+    ? `${base}（指摘 ${s.findings_count} 件）`
+    : base;
 }
 
 export function formatSeconds(sec: number): string {

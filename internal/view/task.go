@@ -137,19 +137,21 @@ func DefinitionHashPrefix(sum string) string {
 
 // TaskDelegateStep は delegate.steps の要素（ステップ 1 回ぶん）。cost_usd は USD に直した数（無ければ null）、models_used は使ったモデルの名前、
 // state は `running`・`finished`・`cancelled`・`interrupted`。effort はステップの記録の、書いた effort（無ければ null）。
+// findings_count はステップが返した指摘の数（指摘の一覧を返さないステップは null）。
 type TaskDelegateStep struct {
-	Attempt     int64    `json:"attempt"`
-	CostUnknown bool     `json:"cost_unknown"`
-	CostUSD     *float64 `json:"cost_usd"`
-	Effort      *string  `json:"effort"`
-	EndedAt     *string  `json:"ended_at"`
-	Kind        string   `json:"kind"`
-	Model       *string  `json:"model"`
-	ModelsUsed  []string `json:"models_used"`
-	Outcome     *string  `json:"outcome"`
-	StartedAt   string   `json:"started_at"`
-	State       string   `json:"state"`
-	Step        string   `json:"step"`
+	Attempt       int64    `json:"attempt"`
+	CostUnknown   bool     `json:"cost_unknown"`
+	CostUSD       *float64 `json:"cost_usd"`
+	Effort        *string  `json:"effort"`
+	EndedAt       *string  `json:"ended_at"`
+	FindingsCount *int64   `json:"findings_count"`
+	Kind          string   `json:"kind"`
+	Model         *string  `json:"model"`
+	ModelsUsed    []string `json:"models_used"`
+	Outcome       *string  `json:"outcome"`
+	StartedAt     string   `json:"started_at"`
+	State         string   `json:"state"`
+	Step          string   `json:"step"`
 }
 
 // TaskArtifact はタスクの実行の成果物 1 件。kind・ref・state は記録のまま、role は統合先の印（`integration`）か null。
@@ -199,7 +201,7 @@ func fromTaskDelegate(d *core.TaskDelegate) *TaskDelegate {
 	steps := make([]TaskDelegateStep, 0, len(d.Steps))
 	for _, sp := range d.Steps {
 		steps = append(steps, TaskDelegateStep{
-			Attempt: sp.Attempt, CostUnknown: sp.CostUnknown, CostUSD: sp.CostUSD, EndedAt: ts(sp.EndedAt), Kind: sp.Kind, Model: sp.Model,
+			Attempt: sp.Attempt, CostUnknown: sp.CostUnknown, CostUSD: sp.CostUSD, EndedAt: ts(sp.EndedAt), FindingsCount: sp.FindingsCount, Kind: sp.Kind, Model: sp.Model,
 			Effort: sp.Effort, ModelsUsed: append([]string{}, sp.ModelsUsed...), Outcome: sp.Outcome, StartedAt: FormatTimestamp(sp.StartedAt), State: sp.State, Step: sp.Step,
 		})
 	}

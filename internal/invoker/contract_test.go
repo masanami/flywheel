@@ -307,6 +307,31 @@ func TestContractCommand_StepEffort(t *testing.T) {
 	}
 }
 
+// steps の要素の findings_count は任意。0 以上の整数ならそのまま、無い・null なら nil、それ以外なら steps の全体を無いものとして扱う。
+func TestContractCommand_StepFindingsCount(t *testing.T) {
+	withCount := func(v string) string {
+		return strings.Replace(stepJSON, `"models_used"`, `"findings_count": `+v+`, "models_used"`, 1)
+	}
+	for v, want := range map[string]int{`2`: 2, `0`: 0} {
+		got := statusWithSteps(t, `"steps": [`+withCount(v)+`]`)
+		if got.Status == nil || len(got.Status.Steps) != 1 || got.Status.Steps[0].FindingsCount == nil || *got.Status.Steps[0].FindingsCount != want {
+			t.Errorf("findings_count %s: %+v", v, got.Status)
+		}
+	}
+	for name, extra := range map[string]string{"absent": `"steps": [` + stepJSON + `]`, "null": `"steps": [` + withCount(`null`) + `]`} {
+		got := statusWithSteps(t, extra)
+		if got.Status == nil || len(got.Status.Steps) != 1 || got.Status.Steps[0].FindingsCount != nil {
+			t.Errorf("%s: %+v", name, got.Status)
+		}
+	}
+	for name, v := range map[string]string{"negative": `-1`, "fraction": `1.5`, "string": `"2"`, "array": `[1]`} {
+		got := statusWithSteps(t, `"flow": "ticket", "steps": [`+withCount(v)+`]`)
+		if got.Result != core.RunResultSucceeded || got.Status == nil || got.Status.Steps != nil || got.Status.RunID != "r-1" {
+			t.Errorf("%s: want steps dropped but a normal read, got %v %+v", name, got.Result, got.Status)
+		}
+	}
+}
+
 // steps の形が合わないとき（AC-111）、steps の全体を無いものとして扱い、出力は malformed にせず、ほかの欄は従来どおり読む。
 func TestContractCommand_MalformedStepsAreDroppedWithoutMalformedOutput(t *testing.T) {
 	bad := map[string]string{

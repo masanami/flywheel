@@ -132,9 +132,23 @@ func loadBuiltinDefinition(name, builtinDir, scriptsDir string) *definition {
 	return d
 }
 
-// forbiddenDirProblems は、ワークスペースの置き場に schemas/・scripts/ があれば、その誤りを返す。
+// msgSymlink は、置き場の中のシンボリックリンクの誤り（置き場の外のファイルを指せ、Git の履歴に残らない中身で動いてしまう）。
+const msgSymlink = "シンボリックリンクは置けない（置き場の外のファイルを指せる）。実体のファイル・ディレクトリに置き換える"
+
+// forbiddenDirProblems は、ワークスペースの置き場（.flywheel/flows）や指示文の置き場（prompts/）がシンボリックリンクか
+// ディレクトリでなければ、また置き場に schemas/・scripts/ があれば、その誤りを返す。
 func forbiddenDirProblems(workspace string) workflow.Problems {
 	var ps workflow.Problems
+	for _, p := range []string{FlowsDir(workspace), filepath.Join(FlowsDir(workspace), workspacePromptsDir)} {
+		fi, err := os.Lstat(p)
+		switch {
+		case err != nil:
+		case fi.Mode()&os.ModeSymlink != 0:
+			ps = append(ps, workflow.Problem{File: p, Msg: msgSymlink})
+		case !fi.IsDir():
+			ps = append(ps, workflow.Problem{File: p, Msg: "ディレクトリでない"})
+		}
+	}
 	for _, n := range forbiddenWorkspaceDirs {
 		p := filepath.Join(FlowsDir(workspace), n)
 		if _, err := os.Lstat(p); err == nil {
@@ -159,13 +173,13 @@ func loadWorkspaceDefinition(workspace, name, builtinDir, scriptsDir, stageParen
 		d.Problems = ps
 		return d, nil
 	}
-	fi, err := os.Stat(src)
+	fi, err := os.Lstat(src)
 	if err != nil {
 		d.Problems = workflow.Problems{{File: src, Msg: fmt.Sprintf("読めない: %v", err)}}
 		return d, nil
 	}
-	if !fi.Mode().IsRegular() {
-		d.Problems = workflow.Problems{{File: src, Msg: "通常のファイルでない"}}
+	if msg := irregularMsg(fi); msg != "" {
+		d.Problems = workflow.Problems{{File: src, Msg: msg}}
 		return d, nil
 	}
 	data, err := os.ReadFile(src)
@@ -191,10 +205,15 @@ func loadWorkspaceDefinition(workspace, name, builtinDir, scriptsDir, stageParen
 		d.cleanup()
 		return nil, err
 	}
-	prompts, err := stageDefinition(stage, name, data, parsed, FlowsDir(workspace), builtinDir)
+	prompts, ps, err := stageDefinition(stage, name, data, parsed, FlowsDir(workspace), builtinDir)
 	if err != nil {
 		d.cleanup()
 		return nil, err
+	}
+	if len(ps) > 0 {
+		d.Problems = ps
+		d.cleanup()
+		return d, nil
 	}
 	stageYAML := filepath.Join(stage, name+".yaml")
 	wf, err := workflow.LoadWithOverrides(stageYAML, workflow.Options{ScriptsDir: scriptsDir}, nil)
@@ -211,16 +230,18 @@ func loadWorkspaceDefinition(workspace, name, builtinDir, scriptsDir, stageParen
 
 // stageDefinition は写しのディレクトリに、定義の YAML・組み込みの schemas/ と scripts/・定義が指す指示文を並べる。
 // 返すのはワークスペースから写した指示文（相対パス → 中身）。指示文はワークスペースの prompts/ の下を先に探し、
-// 無ければ組み込みを使う。どちらにも無い指示文は写さない（検査が「無い」と返す）。
-func stageDefinition(stage, name string, data []byte, parsed *workflow.Workflow, flowsDir, builtinDir string) (map[string][]byte, error) {
+// 無ければ組み込みを使う。どちらにも無い指示文は写さない（検査が「無い」と返す）。ワークスペースの指示文の道筋に
+// シンボリックリンクか通常のファイルでないものがあれば、写さずに誤り（Problems）として返す（組み込みへも落ちない）。
+func stageDefinition(stage, name string, data []byte, parsed *workflow.Workflow, flowsDir, builtinDir string) (map[string][]byte, workflow.Problems, error) {
 	if err := writeReadOnly(filepath.Join(stage, name+".yaml"), data, 0o444); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, dir := range forbiddenWorkspaceDirs {
 		if err := copyTree(filepath.Join(builtinDir, dir), filepath.Join(stage, dir)); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
+	var problems workflow.Problems
 	fromWorkspace := map[string][]byte{}
 	seen := map[string]bool{}
 	for _, s := range parsed.Steps {
@@ -233,21 +254,71 @@ func stageDefinition(stage, name string, data []byte, parsed *workflow.Workflow,
 		}
 		seen[rel] = true
 		if strings.HasPrefix(rel, workspacePromptsDir+string(filepath.Separator)) {
-			if b, ok := readRegular(filepath.Join(flowsDir, rel)); ok {
+			b, found, p := readWorkspaceFile(flowsDir, rel)
+			if p != nil {
+				problems = append(problems, *p)
+				continue
+			}
+			if found {
 				fromWorkspace[filepath.ToSlash(rel)] = b
 				if err := writeReadOnly(filepath.Join(stage, rel), b, 0o444); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				continue
 			}
 		}
 		if b, ok := readRegular(filepath.Join(builtinDir, rel)); ok {
 			if err := writeReadOnly(filepath.Join(stage, rel), b, 0o444); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
-	return fromWorkspace, nil
+	return fromWorkspace, problems, nil
+}
+
+// readWorkspaceFile は置き場（base）の下の rel を、シンボリックリンクをたどらずに読む。道筋のどこかが無ければ found は false
+// （組み込みへ落ちる）。道筋にシンボリックリンクがあるか、通常のファイルでなければ、その誤りを返す。
+func readWorkspaceFile(base, rel string) (data []byte, found bool, problem *workflow.Problem) {
+	parts := strings.Split(rel, string(filepath.Separator))
+	cur := base
+	for i, part := range parts {
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, false, &workflow.Problem{File: cur, Msg: fmt.Sprintf("読めない: %v", err)}
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return nil, false, &workflow.Problem{File: cur, Msg: msgSymlink}
+		}
+		if i < len(parts)-1 {
+			if !fi.IsDir() {
+				return nil, false, &workflow.Problem{File: cur, Msg: "ディレクトリでない"}
+			}
+			continue
+		}
+		if msg := irregularMsg(fi); msg != "" {
+			return nil, false, &workflow.Problem{File: cur, Msg: msg}
+		}
+	}
+	b, err := os.ReadFile(cur)
+	if err != nil {
+		return nil, false, &workflow.Problem{File: cur, Msg: fmt.Sprintf("読めない: %v", err)}
+	}
+	return b, true, nil
+}
+
+// irregularMsg は、Lstat の結果がシンボリックリンクか通常のファイルでなければ、その理由を返す（通常のファイルなら空）。
+func irregularMsg(fi os.FileInfo) string {
+	switch {
+	case fi.Mode()&os.ModeSymlink != 0:
+		return msgSymlink
+	case !fi.Mode().IsRegular():
+		return "通常のファイルでない"
+	}
+	return ""
 }
 
 // definitionHash はワークスペースの定義のハッシュ: YAML の中身と、ワークスペースから写した指示文（パスと中身。パスの昇順）を

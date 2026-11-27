@@ -15,6 +15,7 @@ import (
 
 	"github.com/masanami/flywheel/internal/flow/assets"
 	"github.com/masanami/flywheel/internal/flow/workflow"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // 展開した資材の定義を検査する。プラグインのエージェント定義は埋め込まないので、参照するエージェントの空の写しを置く。
@@ -267,6 +268,46 @@ func TestSelfReviewResultSchema(t *testing.T) {
 	for _, f := range []string{"self_review", "codex_review", "residual_findings"} {
 		if _, ok := impl[f]; ok {
 			t.Errorf("implement-result still has %s", f)
+		}
+	}
+}
+
+// レビューのステップの出力の型は、outcome と self_review と findings の食い違った組み合わせを通さない。
+func TestSelfReviewResultSchemaRejectsInconsistentCombinations(t *testing.T) {
+	data, err := fs.ReadFile(assets.FS, "workflows/schemas/self-review-result.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := workflow.ParseOutputSchema("self-review-result.json", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding := `{"file":"a.go","line":1,"severity":"high","claim":"c","evidence":"e","source":"s"}`
+	doc := func(outcome, selfReview, findings string) string {
+		return `{"outcome":"` + outcome + `","self_review":"` + selfReview + `","codex_review":"off","summary":"s","findings":[` + findings +
+			`],"residual_findings":[],"unverified":[]}`
+	}
+	cases := []struct {
+		outcome, selfReview, findings string
+		ok                            bool
+	}{
+		{"findings", "complete", finding, true},
+		{"findings", "complete", "", false},
+		{"findings", "incomplete", finding, false},
+		{"clean", "complete", "", true},
+		{"clean", "complete", finding, false},
+		{"clean", "incomplete", "", false},
+		{"incomplete", "incomplete", "", true},
+		{"incomplete", "incomplete", finding, true},
+		{"incomplete", "complete", "", false},
+	}
+	for _, c := range cases {
+		v, err := jsonschema.UnmarshalJSON(strings.NewReader(doc(c.outcome, c.selfReview, c.findings)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sc.Validate(v); (err == nil) != c.ok {
+			t.Errorf("outcome %s self_review %s findings %q: valid = %v, want %v (%v)", c.outcome, c.selfReview, c.findings, err == nil, c.ok, err)
 		}
 	}
 }
