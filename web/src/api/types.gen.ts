@@ -82,6 +82,7 @@ export interface CycleWorkStages {
   plan: number;
   release: number;
   run: number;
+  settle: number;
   supervise: number;
   verify: number;
 }

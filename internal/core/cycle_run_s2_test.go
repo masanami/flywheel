@@ -48,7 +48,7 @@ func TestRunCycle_DelegatesThenVerifiesInTheSameCycle(t *testing.T) {
 		t.Fatalf("RunCycle: %v", err)
 	}
 
-	if got := fmt.Sprint(phaseNames(res)); got != "[release ingest classify plan run verify supervise learn improve backup]" {
+	if got := fmt.Sprint(phaseNames(res)); got != "[release settle ingest classify plan run verify supervise learn improve backup]" {
 		t.Fatalf("phases = %s", got)
 	}
 	run := phaseOfResult(t, res, CyclePhaseRun)

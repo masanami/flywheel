@@ -927,6 +927,7 @@ export function seed(): Record<string, MockWorkspace> {
           plan: 1,
           release: 0,
           run: 1,
+          settle: 0,
           supervise: 0,
           verify: 0,
         },
@@ -954,6 +955,7 @@ export function seed(): Record<string, MockWorkspace> {
           plan: 0,
           release: 1,
           run: 0,
+          settle: 0,
           supervise: 0,
           verify: 1,
         },
@@ -1135,6 +1137,7 @@ function cycleWorkOf(items: MockChallenge[]): CycleWork {
     plan: n("classified"),
     release: 0,
     run: 0,
+    settle: 0,
     supervise: 0,
     verify: n("verifying"),
   };

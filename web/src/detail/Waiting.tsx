@@ -17,6 +17,7 @@ import {
   WAITING_LABELS,
   waitingKindsOfActions,
 } from "../shell/waiting.ts";
+import { SliceSplitHold } from "./SliceSplitHold.tsx";
 import { SpecDraftHold } from "./SpecDraftHold.tsx";
 import { canOpenSpec, specDocumentKey } from "./specLocation.ts";
 
@@ -165,6 +166,9 @@ export function Waiting({
                           ) : null
                         }
                       />
+                    ) : null}
+                    {show.slice_split?.hold_id === h.hold_id ? (
+                      <SliceSplitHold split={show.slice_split} />
                     ) : null}
                     {hasOptions(h) ? (
                       <HoldOptions

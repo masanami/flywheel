@@ -420,8 +420,8 @@ func TestCycle_ReleasePhaseIsFirstAndExecutesInsideTheCycle(t *testing.T) {
 	doc := cycleDoc(t, ws)
 
 	phases := doc["phases"].([]any)
-	if phases[0].(map[string]any)["phase"] != "release" || phases[1].(map[string]any)["phase"] != "ingest" {
-		t.Fatalf("phases = %v, want release first and ingest second", phaseNames(phases))
+	if phases[0].(map[string]any)["phase"] != "release" || phases[1].(map[string]any)["phase"] != "settle" || phases[2].(map[string]any)["phase"] != "ingest" {
+		t.Fatalf("phases = %v, want release, settle, ingest first", phaseNames(phases))
 	}
 	rel := phases[0].(map[string]any)
 	items := rel["items"].([]any)

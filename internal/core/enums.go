@@ -330,6 +330,10 @@ const ActivityActionSpecDraftCleanupFailed = "spec_draft_cleanup_failed"
 // （entity は requirement か challenge。after は証跡の場所 path と訳 reason）。
 const ActivityActionRequirementEvidenceCleanupFailed = "requirement_evidence_cleanup_failed"
 
+// ActivityActionRequirementResolved は、要求の記録の解決の日時を書いたことの作業ログの action
+// （entity=requirement。after は解決の日時 resolved_at と証跡の場所 evidence_path）。
+const ActivityActionRequirementResolved = "requirement_resolved"
+
 // ActivityActionSpecDraftRequested は、計画を作る判断点が課題を下書きづくりへ回すと決めたことの作業ログの action
 // （entity=challenge。after は下書きの場所 path・置き換える元 base_path・対象のリポジトリ repo・回した理由 reason）。
 const ActivityActionSpecDraftRequested = "spec_draft_requested"

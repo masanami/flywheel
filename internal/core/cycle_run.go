@@ -7,7 +7,7 @@ package core
 // （`ingest`・`classify --auto`・`plan --auto`）と同じ core の処理
 // （Store.Ingest・ClassifyAutoJ1・PlanAutoJ2）をそのまま呼び、ここは段の順・
 // 排他ロックの取得と解放・heartbeat・枠超過の段をまたぐ伝播だけを持つ。
-// 段は 実行（release）→ 取り込み → 分類（J1）→ 計画（J2）→ 委譲（run）→ 検証（verify・J5）→ 学習（learn・J6）→ 改修提案（improve・J8）→ backup の順で、
+// 段は 実行（release）→ 片付け（settle）→ 取り込み → 分類（J1）→ 計画（J2）→ 委譲（run）→ 検証（verify・J5）→ 学習（learn・J6）→ 改修提案（improve・J8）→ backup の順で、
 // 委譲と検証の段は接続ツールの宣言（connectors.json）があるときだけ実行する。
 
 import (
@@ -24,7 +24,9 @@ type CyclePhase string
 // CyclePhase の値（実行する順）。
 const (
 	// CyclePhaseRelease は承認済みの release の実行の段（ExecuteReleases と同じ処理。最初の段）。
-	CyclePhaseRelease  CyclePhase = "release"
+	CyclePhaseRelease CyclePhase = "release"
+	// CyclePhaseSettle は片付けの段（解決した要求の記録の証跡を消し、解決の日時を書く。release の直後）。
+	CyclePhaseSettle   CyclePhase = "settle"
 	CyclePhaseIngest   CyclePhase = "ingest"
 	CyclePhaseClassify CyclePhase = "classify"
 	CyclePhasePlan     CyclePhase = "plan"
@@ -127,6 +129,8 @@ type CyclePhaseResult struct {
 	ImproveItems []ImproveItem
 	// Backup は backup の段の結果（他の段は nil）。
 	Backup *BackupResult
+	// ResolvedRequirements は片付けの段が解決の日時を書いた要求の記録の ID（他の段は空）。
+	ResolvedRequirements []string
 	// SuperviseProcessed は、スーパーバイザーの判断点を 1 回呼んだ保留・子の問いの数（結果が failed・rejected のものを含む。
 	// 子の問いと下書きの問いの分は、段の中ではなく、サイクルの回りの終わりにまとめて足す。addChildQuestionSuperviseCounts）。
 	// SuperviseHands は、そのうち結果が executed の対処の手ごとの件数。他の段は 0・空。
@@ -182,7 +186,7 @@ const cycleStalledRounds = 3
 //
 //  1. サイクルの排他を取って周を開始する（生きている保持者がいれば ErrLocked。
 //     何も起動・記録しない）。以後、段の実行中は 60 秒ごとにロックの heartbeat を更新する
-//  2. 回りを、進められるものが無くなるまで繰り返す（回り = 承認済みの release の実行〔in.ConnDecl があれば〕→ 取り込み〔in.Ingest があれば〕→
+//  2. 回りを、進められるものが無くなるまで繰り返す（回り = 承認済みの release の実行〔in.ConnDecl があれば〕→ 片付け〔解決した要求の記録〕→ 取り込み〔in.Ingest があれば〕→
 //     分類（J1）→ 計画（J2）→ 委譲 → 検証（J5）を 1 回ずつ。計画・委譲・検証は in.ConnDecl があるときだけ）。回りの終わりの数え・進みの判定・間隔の待ち・
 //     歯止めは runRounds（cycle_rounds.go）。終わりの段（学習〔J6〕→ 改修提案〔J8〕）は、最後の回りの後に 1 回だけ通す。検証の段は、委譲の段が
 //     起動した委譲の run がすべて終わってから始まる（RunDelegation は合流して返る）。各段は個別の操作と同じ core の処理を呼び、前の段で状態が進んだ
@@ -298,7 +302,7 @@ func (s *Store) RunCycle(ctx context.Context, in CycleRunInput) (*CycleRunResult
 	return res, nil
 }
 
-// runCyclePhases は回りを、進められるものが無くなるまで繰り返し（進める段 = 反映・取り込み・分類・計画・委譲・完了の検証）、
+// runCyclePhases は回りを、進められるものが無くなるまで繰り返し（進める段 = 反映・片付け・取り込み・分類・計画・委譲・完了の検証）、
 // 最後に終わりの段（学び・改修の提案）を 1 回だけ通す。段ごとの結果は、回りをまたいで足し合わせる（対象の一覧と起動しなかった
 // ものの一覧は連結し、1 つだけの値は最後の回りのもの）。終わった理由（settled・stalled・rate_limited・budget・stopped）も返す。終わりの段（学び・改修の提案）は settled・budget・stalled のときだけ通す（rate_limited・stopped は通さない）。
 // どの段の結果も、途中でエラーになるまでの分は返さない（呼び出し元は runErr を返す）。ただし release の段で実行済みの結果は PartialReleaseError で運ぶ。
@@ -358,7 +362,7 @@ func (s *Store) runCyclePhases(ctx context.Context, in CycleRunInput, cycleID st
 	return phases, reason, nil
 }
 
-// runAdvancePhases は進める段（反映・取り込み・分類・計画・委譲・完了の検証）を、この順に 1 回ずつ通す（1 つの回り）。
+// runAdvancePhases は進める段（反映・片付け・取り込み・分類・計画・委譲・完了の検証）を、この順に 1 回ずつ通す（1 つの回り）。
 // 段の中身は、S3d までの 1 回のサイクルと同じ。executed には、release の段で実行済みの項目を足していく。
 func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID string, jc *JudgmentCycle, executed *[]ReleaseExecItem) ([]CyclePhaseResult, error) {
 	var phases []CyclePhaseResult
@@ -401,6 +405,17 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 	}
 	*executed = append(*executed, release.ReleaseItems...)
 	phases = append(phases, release)
+
+	if err := boundary(); err != nil {
+		return phases, err
+	}
+
+	// 片付け（解決した要求の記録の証跡を消し、解決の日時を書く。宣言を使わないので常に実行する）。
+	resolved, err := s.settleRequirements(ctx)
+	if err != nil {
+		return nil, err
+	}
+	phases = append(phases, CyclePhaseResult{Phase: CyclePhaseSettle, ResolvedRequirements: resolved})
 
 	if err := boundary(); err != nil {
 		return phases, err
@@ -545,12 +560,12 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 }
 
 // advancePhaseSkipped は、進める段 p が宣言が無いために skipped になるか（取り込みは sources.json、release・計画・委譲・検証は
-// connectors.json。分類は常に実行する）。runAdvancePhases と、止めて通さなかった段を埋める padAdvancePhases が共有する。
+// connectors.json。片付けと分類は常に実行する）。runAdvancePhases と、止めて通さなかった段を埋める padAdvancePhases が共有する。
 func advancePhaseSkipped(in CycleRunInput, p CyclePhase) bool {
 	switch p {
 	case CyclePhaseIngest:
 		return in.Ingest == nil
-	case CyclePhaseClassify:
+	case CyclePhaseSettle, CyclePhaseClassify:
 		return false
 	case CyclePhaseSupervise:
 		// 宣言の supervisor が偽（または agent.json が無い）なら、保留をスーパーバイザー待ちにしないので飛ぶ。
