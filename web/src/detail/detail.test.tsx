@@ -114,6 +114,12 @@ async function open(
 
 const q = (root: HTMLElement) => within(root);
 
+// 保留の所（hold-question は、その中の保留の問いの文の要素）
+const holdPlaces = (root: HTMLElement) =>
+  q(root)
+    .getAllByTestId("hold-question")
+    .map((e) => e.closest(".detail-question") as HTMLElement);
+
 it("AC-91 #808: 課題の詳細の画面では、上の帯の「課題」に選んでいる印が付く", async () => {
   await open(show());
   const nav = screen.getByRole("navigation", { name: "画面" });
@@ -334,6 +340,9 @@ const summary = {
     pairs: [],
     plan: null,
     release_held: true,
+    spec_draft_answers: [],
+    spec_is_draft: false,
+    spec_path: null,
     releases: [],
     stages: {
       actual: null,
@@ -1100,7 +1109,7 @@ it("AC-96・AC-105・AC-106 #1182: 開いている保留が 2 つあると、保
       ],
     }),
   );
-  const frames = q(root).getAllByTestId("hold-question");
+  const frames = holdPlaces(root);
   expect(frames).toHaveLength(2);
   expect(
     within(frames[0] as HTMLElement).getByTestId("hold-id").textContent,
@@ -1138,7 +1147,7 @@ it("AC-107 #1182: 片方の保留にボタンで答えると、送るのは答�
       },
     },
   });
-  const first = q(root).getAllByTestId("hold-question")[0] as HTMLElement;
+  const first = holdPlaces(root)[0] as HTMLElement;
   fireEvent.click(
     within(first).getAllByTestId("hold-option-button")[0] as HTMLElement,
   );
@@ -1206,7 +1215,7 @@ it("AC-147・AC-148 #1182: スーパーバイザーが関わった保留の枠�
       ],
     }),
   );
-  const frames = q(root).getAllByTestId("hold-question");
+  const frames = holdPlaces(root);
   expect(
     within(frames[0] as HTMLElement).getByTestId("hold-supervisor").textContent,
   ).toContain("調べた内容");

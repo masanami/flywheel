@@ -101,10 +101,22 @@ type SpecDraftOption struct {
 	Label string `json:"label"`
 }
 
-// SpecDraftAnswer は問いへの答え 1 件。
+// SpecDraftAnswerKind は答えの一覧の要素の種類の閉集合。
+type SpecDraftAnswerKind string
+
+// SpecDraftAnswerKind の2値。
+const (
+	SpecDraftAnswerKindAnswer SpecDraftAnswerKind = "answer"
+	SpecDraftAnswerKindNote   SpecDraftAnswerKind = "note"
+)
+
+// SpecDraftAnswer は答えの一覧の要素 1 件。問いへの答えか、オーナーの添え書き。一覧を読む所は Kind で見分ける。
 type SpecDraftAnswer struct {
-	// Attempt は何回目の実行の問いか。
-	Attempt  int    `json:"attempt"`
+	// Kind は要素の種類。種類を持たずに保存した要素は、記録を読むときに答えにする。
+	Kind SpecDraftAnswerKind `json:"kind"`
+	// Attempt は何回目の実行の問いか。添え書きでは、その保留を出した実行の回数。
+	Attempt int `json:"attempt"`
+	// Question は問いの文（添え書きでは空）。Answer は答えの文か、添え書きの文。
 	Question string `json:"question"`
 	Answer   string `json:"answer"`
 	// By は答えた者。知らない値も誤りにせず、そのまま持つ。
@@ -128,7 +140,7 @@ type SpecDraft struct {
 	Reason   string
 	State    SpecDraftState
 	Attempts int
-	// Questions はいま残っている問い、Answers は答え（追記だけ）。無ければ nil。
+	// Questions はいま残っている問い、Answers は答えと添え書き（追記だけ）。無ければ nil。
 	Questions []SpecDraftQuestion
 	Answers   []SpecDraftAnswer
 	// HoldID は開いている下書きづくりの保留の表示用の ID、HoldReason はその理由。開いている保留が無ければどちらも nil。
@@ -171,6 +183,11 @@ func loadSpecDraft(ctx context.Context, tx *sql.Tx, cid int64) (*SpecDraft, erro
 	if answers.Valid {
 		if err := json.Unmarshal([]byte(answers.String), &d.Answers); err != nil {
 			return nil, fmt.Errorf("spec_draft answers: %w", err)
+		}
+		for i := range d.Answers {
+			if d.Answers[i].Kind == "" {
+				d.Answers[i].Kind = SpecDraftAnswerKindAnswer
+			}
 		}
 	}
 	if openHold.Valid {

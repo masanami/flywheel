@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-// このファイルは仕様の文書の読み取りと、受入基準の抜き出し・識別を持つ。
+// このファイルは仕様の文書の読み取りと、受入基準の抜き出し・識別を持つ。文書の中身を読むのは readSpecFile の 1 か所で、
+// 計画が受入基準を読むときも、本文を読む口（spec_body.go）もここを通る。
 
 // maxSpecDocumentBytes は読む仕様の文書の大きさの上限。
 const maxSpecDocumentBytes = 2 << 20
@@ -22,6 +23,7 @@ var (
 	// errSpecUnreadable は仕様の文書を読めないことを表す。下の理由の誤りも、readSpecCriteria が返すときはこれを包む。
 	errSpecUnreadable  = errors.New("the spec document cannot be read")
 	errSpecTooLarge    = errors.New("the spec document is larger than 2 MiB")
+	errSpecNotRegular  = errors.New("not a regular file")
 	errSpecNoCriteria  = errors.New("the spec document has no acceptance criteria")
 	errSpecDuplicateID = errors.New("different acceptance criteria in the spec document have the same ID")
 )
@@ -104,29 +106,9 @@ func loadSpecCriteria(workspace, path string) ([]acceptanceCriterion, error) {
 
 // readSpecDocument は仕様の文書の全文と、抜き出した受入基準を返す（読めない条件は loadSpecCriteria と同じ）。
 func readSpecDocument(workspace, path string) ([]byte, []acceptanceCriterion, error) {
-	resolved, err := resolveSpecPath(workspace, path)
+	data, err := readSpecFile(workspace, path)
 	if err != nil {
 		return nil, nil, err
-	}
-	// 通常のファイルでないもの（FIFO など）は、開くと止まりうるので先に断る。
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, nil, errors.New("not a regular file")
-	}
-	f, err := os.Open(resolved)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, maxSpecDocumentBytes+1))
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(data) > maxSpecDocumentBytes {
-		return nil, nil, errSpecTooLarge
 	}
 	criteria, err := extractAcceptanceCriteria(string(data))
 	if err != nil {
@@ -136,4 +118,34 @@ func readSpecDocument(workspace, path string) ([]byte, []acceptanceCriterion, er
 		return nil, nil, errSpecNoCriteria
 	}
 	return data, criteria, nil
+}
+
+// readSpecFile は仕様の文書の全文を返す。場所の検査（resolveSpecPath）を通し、通常のファイルだけを、大きさの上限まで読む。
+// 中身は問わない。
+func readSpecFile(workspace, path string) ([]byte, error) {
+	resolved, err := resolveSpecPath(workspace, path)
+	if err != nil {
+		return nil, err
+	}
+	// 通常のファイルでないもの（FIFO など）は、開くと止まりうるので先に断る。
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errSpecNotRegular
+	}
+	f, err := os.Open(resolved)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxSpecDocumentBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxSpecDocumentBytes {
+		return nil, errSpecTooLarge
+	}
+	return data, nil
 }

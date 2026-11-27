@@ -24,7 +24,7 @@ func closedSet(t *testing.T, name string) []string {
 // AC-251: internal/view の閉じた一覧に、止まり方・手・対処の結果・supervisor_state の値がある（断りの理由・フォローアップの出どころも）。
 func TestClosedSets_Supervisor_AC251(t *testing.T) {
 	for name, want := range map[string][]string{
-		"STOP_KIND_CODES":                {"verify_uncertain", "artifact_missing", "delegate_stopped", "facts_unmet", "rework_limit", "checks_failed", "judgment_failed", "intake_unverified", "upstream_unreadable", "child_question"},
+		"STOP_KIND_CODES":                {"verify_uncertain", "artifact_missing", "delegate_stopped", "facts_unmet", "rework_limit", "checks_failed", "judgment_failed", "intake_unverified", "upstream_unreadable", "child_question", "spec_question"},
 		"SUPERVISOR_HAND_CODES":          {"reverify", "send_back", "retry", "split_followup", "replan", "defer", "escalate", "answer"},
 		"SUPERVISOR_RESULT_CODES":        {"executed", "failed", "rejected"},
 		"SUPERVISOR_REJECT_REASON_CODES": {"state_changed", "owner_answered"},

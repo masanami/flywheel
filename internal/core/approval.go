@@ -136,6 +136,12 @@ type ApprovalPreview struct {
 	ReleasesToWithdraw []string
 	RunningReleases    []string
 
+	// SpecPath・SpecIsDraft・SpecDraftAnswers は、課題の仕様の文書の場所（無ければ nil）・それが下書きか・下書きづくりの記録の
+	// 答えと添え書き（記録が無ければ nil）。PrepareApprovalFor で読んだときだけ埋める。
+	SpecPath         *string
+	SpecIsDraft      bool
+	SpecDraftAnswers []SpecDraftAnswer
+
 	// 以下は完了の承認の要約を PrepareApprovalFor で読んだときだけ埋める、完了承認画面の値（要約と同じ
 	// 読み取りで読む）。端末の要約（PrepareApproval）は埋めない。
 	// CompletionTasks は課題のタスク（最新の版のタスクと、前の版の済みのタスク）。
@@ -302,6 +308,17 @@ func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDecl
 			return err
 		}
 		preview.IssuesAnswer = answer
+		if withScreen {
+			// 要約と同じ読み取りで読む。
+			preview.SpecPath, preview.SpecIsDraft = current.SpecPath, current.SpecIsDraft()
+			draft, err := loadSpecDraft(ctx, tx, cid)
+			if err != nil {
+				return err
+			}
+			if draft != nil {
+				preview.SpecDraftAnswers = draft.Answers
+			}
+		}
 
 		if kind == ApprovalKindPlan {
 			var version int
@@ -473,7 +490,7 @@ func (s *Store) PrepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 }
 
 // PrepareApprovalFor は PrepareApproval に、計画の予算の上限をサイズごとの既定から決めるための宣言を渡す版
-// （API の承認の要約が使う。完了確認待ちなら、完了承認画面の値も同じ読み取りで読む。agent が nil でも読む）。
+// （API の承認の要約が使う。仕様の文書の値と、完了確認待ちなら完了承認画面の値も、同じ読み取りで読む。agent が nil でも読む）。
 func (s *Store) PrepareApprovalFor(ctx context.Context, id string, agent *AgentDeclaration) (*ApprovalPreview, error) {
 	return s.prepareApproval(ctx, id, agent, true)
 }
@@ -511,13 +528,13 @@ type AnswerPreview struct {
 	// Answer は入力された回答の文（選択肢で答えるときは添え書き。無ければ空）。
 	Option      string
 	OptionLabel string
-	// AnswerText は解決した回答の文（選択肢で答えるときは見出し、添え書きがあれば「見出し・改行・添え書き」。選ばないときは Answer と同じ）。
+	// AnswerText は保留に記録する回答の文（composeHoldAnswer の組み立て。選ばないときは Answer と同じ）。
 	// Options・OptionRequired はその保留の選択肢の並びと「識別の無い回答を断る」印。
 	AnswerText     string
 	Options        []HoldOption
 	OptionRequired bool
 	// SpecHoldReason は答える保留が下書きづくりの保留のときの理由（そうでなければ空）、SpecQuestions はその記録の残った問い。
-	// SpecAnswers は選択肢 answer で答えるときに記録する、問いごとの答え。
+	// SpecAnswers は選択肢 answer で答えるときに記録する、問いごとの答え（添え書きは含めない）。
 	SpecHoldReason SpecDraftHoldReason
 	SpecQuestions  []SpecDraftQuestion
 	SpecAnswers    []SpecDraftAnswer
@@ -603,23 +620,19 @@ func (s *Store) PrepareAnswerWithItems(ctx context.Context, id string, hold stri
 		if err != nil {
 			return err
 		}
-		text, chosen, err := resolveAnswerOption(opts, required, option, answer)
+		composed, err := s.composeHoldAnswer(spec, opts, required, option, answer, items)
 		if err != nil {
 			return err
 		}
 		label := ""
-		if chosen != nil {
-			for _, o := range opts {
-				if o.ID == *chosen {
-					label = o.Label
-				}
-			}
+		if composed.Chosen != nil {
+			label = composed.Chosen.Label
 		}
 
 		preview = AnswerPreview{
 			Option:         option,
 			OptionLabel:    label,
-			AnswerText:     text,
+			AnswerText:     composed.Text,
 			Options:        opts,
 			OptionRequired: required,
 			ChallengeID:    current.ID,
@@ -632,11 +645,7 @@ func (s *Store) PrepareAnswerWithItems(ctx context.Context, id string, hold stri
 			FromStatus:     fromStatus,
 		}
 		if spec != nil {
-			answers, err := s.checkSpecDraftAnswer(spec, *chosen, items)
-			if err != nil {
-				return err
-			}
-			preview.SpecHoldReason, preview.SpecQuestions, preview.SpecAnswers = *spec.HoldReason, spec.Questions, answers
+			preview.SpecHoldReason, preview.SpecQuestions, preview.SpecAnswers = *spec.HoldReason, spec.Questions, composed.Spec.Answers
 		}
 		return nil
 	})
@@ -1140,9 +1149,9 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	var holdTaskID sql.NullInt64
 	// replan は計画を作り直す回答か（--replan、または足す依頼の保留で選んだ「計画を作り直す」）。
 	replan := req.Replan
-	// spec は答える保留が下書きづくりの保留のときの記録、specAnswers は記録に足す答え。
+	// spec は答える保留が下書きづくりの保留のときの記録、specReply は記録に足す中身。
 	var spec *SpecDraft
-	var specAnswers []SpecDraftAnswer
+	var specReply specDraftReply
 
 	resolvePreceding := func(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge) (Status, error) {
 		id, question, fromStatus, raisedAt, _, err := selectAnswerHold(ctx, tx, cid, current.ID, req.HoldID)
@@ -1161,16 +1170,14 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		if err != nil {
 			return "", err
 		}
-		answerText, chosenOption, err = resolveAnswerOption(opts, required, req.Option, req.Answer)
+		// 書き込みの前に確かめる。確かめ（PrepareAnswer…）を通らない画面の回答も、ここで断る。
+		composed, err := s.composeHoldAnswer(spec, opts, required, req.Option, req.Answer, req.Items)
 		if err != nil {
 			return "", err
 		}
-		if spec != nil {
-			// 書き込みの前に確かめる。確かめ（PrepareAnswer…）を通らない画面の回答も、ここで断る。
-			specAnswers, err = s.checkSpecDraftAnswer(spec, *chosenOption, req.Items)
-			if err != nil {
-				return "", err
-			}
+		answerText, specReply = composed.Text, composed.Spec
+		if composed.Chosen != nil {
+			chosenOption = &composed.Chosen.ID
 		}
 		replan = req.Replan || isTaskAdditionReplanChoice(ctx, tx, id, chosenOption)
 		if replan {
@@ -1219,7 +1226,7 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return err
 		}
 		if spec != nil {
-			if err := applySpecDraftAnswer(ctx, tc, spec, *chosenOption, specAnswers); err != nil {
+			if err := applySpecDraftAnswer(ctx, tc, spec, *chosenOption, specReply); err != nil {
 				return err
 			}
 		}
@@ -1232,6 +1239,9 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		tc.after["hold_id"] = formatHoldID(holdID)
 		if chosenOption != nil {
 			tc.after["answer_option"] = *chosenOption
+		}
+		if len(specReply.Changed) > 0 {
+			tc.after["changed_questions"] = specReply.Changed
 		}
 		if replan {
 			tc.after["replan"] = true

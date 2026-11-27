@@ -15,7 +15,7 @@ func TestShowChallenge_SpecDraftShape(t *testing.T) { // AC-358〜AC-366・AC-37
 	got, err := json.Marshal(view.FromShowChallenge(&core.ChallengeDetail{SpecDraft: &core.SpecDraft{
 		Path: ".flywheel/specs/c-1.md", BasePath: &base, Repo: "flow-wt", Reason: "why", State: core.SpecDraftStateAwaitingOwner, Attempts: 2,
 		Questions: []core.SpecDraftQuestion{{Question: "Q?", Options: []core.SpecDraftOption{{Label: "a"}, {Label: "b"}}, Recommended: 2, Reason: "r"}},
-		Answers:   []core.SpecDraftAnswer{{Attempt: 1, Question: "P?", Answer: "yes", By: "supervisor"}},
+		Answers:   []core.SpecDraftAnswer{{Kind: core.SpecDraftAnswerKindAnswer, Attempt: 1, Question: "P?", Answer: "yes", By: "supervisor"}},
 		HoldID:    &holdID, HoldReason: &why,
 	}}))
 	if err != nil {
@@ -25,7 +25,7 @@ func TestShowChallenge_SpecDraftShape(t *testing.T) { // AC-358〜AC-366・AC-37
 	if err := json.Unmarshal(got, &doc); err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"answers":[{"answer":"yes","attempt":1,"basis":[],"by":"supervisor","question":"P?"}],"attempts":2,` +
+	const want = `{"answers":[{"answer":"yes","attempt":1,"basis":[],"by":"supervisor","kind":"answer","question":"P?"}],"attempts":2,` +
 		`"base_path":"docs/features/example.md","hold_id":"H-7","hold_reason":"spec_question","max_attempts":3,"path":".flywheel/specs/c-1.md",` +
 		`"questions":[{"options":[{"label":"a"},{"label":"b"}],"question":"Q?","reason":"r","recommended":2}],"reason":"why","repo":"flow-wt","state":"awaiting_owner"}`
 	if string(doc["spec_draft"]) != want {

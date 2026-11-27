@@ -565,7 +565,8 @@ func insertHoldKindFromTask(ctx context.Context, tc *transitionCtx, question str
 }
 
 // insertHoldWithOptions は保留を作る入口（選択肢の並び・「識別の無い回答を断る」印・止まり方を受ける）。いまある保留を作る関数は
-// 追加の指定なしでここへ委ねる。選択肢の誤りは ErrHoldOptionInvalid、止まり方が閉集合の外なら ErrValidation で断り、何も書かない。
+// 追加の指定なしでここへ委ねる。選択肢の誤りは ErrHoldOptionInvalid、止まり方が閉集合の外か、保留に渡さない下書きの問い
+// （spec_question）なら ErrValidation で断り、何も書かない。
 //
 // 計画承認待ちの課題へ作れる保留は、対話のセッションが引き取る保留（parent_direct）だけで、それ以外は ErrInvalidTransition で断る
 // （承認の待ち先が人のままで、人の対応を待つ保留は意味を持たない。保留を書く入口すべてが通るここで検査する）。
@@ -605,6 +606,10 @@ func insertHoldWithOptions(ctx context.Context, tc *transitionCtx, question stri
 	if opts.StopKind != "" {
 		if _, ok := ParseStopKind(string(opts.StopKind)); !ok {
 			return 0, fmt.Errorf("%w: unknown stop kind %q", ErrValidation, opts.StopKind)
+		}
+		if opts.StopKind == StopKindSpecQuestion {
+			// 下書きの問いは保留の前に扱う。保留に渡すと、答える手を実行できないスーパーバイザー待ちの保留ができる。
+			return 0, fmt.Errorf("%w: stop kind %q is not for a hold", ErrValidation, opts.StopKind)
 		}
 	}
 	_, optionsJSON, err := resolveHoldOptions(opts.Options)

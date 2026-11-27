@@ -111,6 +111,9 @@ const summary = (over: Partial<ApprovalSummary> = {}) => ({
     pairs: [],
     plan: plan(),
     release_held: false,
+    spec_draft_answers: [],
+    spec_is_draft: false,
+    spec_path: null,
     releases: [],
     stages: {
       actual: null,

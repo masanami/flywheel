@@ -312,10 +312,14 @@ func runAnswer(a Args) (any, error) {
 	// --choice・--text は、--option が無ければ計画の問いへの答え、あれば下書きの問いの保留への問いごとの答え。
 	perQuestion := len(a.Multi["choice"])+len(a.Multi["text"]) > 0
 	if perQuestion {
-		if hasAnswer || replan {
-			return nil, NewError(CodeUsageError, "--choice・--text は --answer・--replan と同時に指定できません")
+		if replan {
+			return nil, NewError(CodeUsageError, "--choice・--text は --replan と同時に指定できません")
 		}
 		if !hasOption {
+			// --option があれば --answer は添え書き。相手が下書きの問いの保留かどうかは core が確かめる。
+			if hasAnswer {
+				return nil, NewError(CodeUsageError, "--choice・--text と --answer を同時に指定できるのは、下書きの問いの保留へ --option answer を付けて答えるときだけです")
+			}
 			if hasHold {
 				return nil, NewError(CodeUsageError, "--choice・--text と --hold は、下書きの問いの保留へ --option answer を付けて答えるときだけ同時に指定できます")
 			}
@@ -826,6 +830,9 @@ func answerSummaryText(p *core.AnswerPreview, replan bool) string {
 		fmt.Fprintf(&b, "タスク:   %s\n", escapeControl(p.TaskTitle))
 	}
 	fmt.Fprintf(&b, "問い:     %s\n", escapeControlKeepLines(p.Question))
+	if p.SpecHoldReason != "" {
+		writeRemainingSpecQuestions(&b, p.SpecQuestions)
+	}
 	if p.Option != "" {
 		fmt.Fprintf(&b, "選択肢:   %s（%s）\n", escapeControl(p.OptionLabel), escapeControl(p.Option))
 		if p.Answer != "" {
@@ -845,6 +852,28 @@ func answerSummaryText(p *core.AnswerPreview, replan bool) string {
 		b.WriteString("範囲が変わる: 委譲を再開せず、計画を作り直して承認待ちへ戻す（既存の PR・ブランチは引き継ぐ）\n")
 	}
 	return b.String()
+}
+
+// answerSummaryRecommendedMark は回答の要約で、推奨の選択肢の見出しの後ろに付ける印。
+const answerSummaryRecommendedMark = "（推奨）"
+
+// writeRemainingSpecQuestions は、下書きづくりの記録に残った問いを、番号（Q1 から）・番号つきの選択肢・推奨の印で書く
+// （無ければ何も書かない）。番号は --choice・--text で指す番号。
+func writeRemainingSpecQuestions(b *strings.Builder, questions []core.SpecDraftQuestion) {
+	if len(questions) == 0 {
+		return
+	}
+	b.WriteString("残った問い:\n")
+	for i, q := range questions {
+		fmt.Fprintf(b, "  Q%d. %s\n", i+1, escapeControl(q.Question))
+		for j, o := range q.Options {
+			mark := ""
+			if j+1 == q.Recommended {
+				mark = answerSummaryRecommendedMark
+			}
+			fmt.Fprintf(b, "    %d. %s%s\n", j+1, escapeControl(o.Label), mark)
+		}
+	}
 }
 
 // escapeControl は外部・LLM が書きうる値（段階の欄・課題のタイトル・完了条件・不可逆操作の要約と参照）を、承認の要約へ 1 行で埋め込めるように

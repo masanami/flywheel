@@ -163,6 +163,21 @@ export const DEPENDENCY_UNMET_LABEL = "未解消";
 export const NO_ACTION_LABEL = "なし（エージェントが進める）";
 export const NO_PRIORITY_LABEL = "優先度なし";
 
+// 仕様の文書の本文を読めない訳（本文を返す口の unreadable_reason）の文。
+export const SPEC_UNREADABLE_TEXTS = {
+  missing: "ファイルがまだありません",
+  invalid_path: "場所が正しくないため開けません",
+  not_regular_file: "通常のファイルでないため開けません",
+  too_large: "2 MiB を超えているため開けません",
+  unreadable: "読み取れませんでした",
+} as const;
+
+// 下書きづくりの問いに答えた者（答えの by）の語。
+export const SPEC_ANSWERER_LABELS = {
+  supervisor: "スーパーバイザー",
+  owner: "オーナー",
+} as const;
+
 // 対応の無いコードは生のコードをそのまま出す（欠けても画面は落とさない。対応の網羅はテストが守る）。
 export function label<K extends string>(
   table: Record<K, string>,

@@ -124,7 +124,12 @@ type ApprovalSummary struct {
 	Plan                   *ApprovalPlan            `json:"plan"`
 	ReleaseHeld            bool                     `json:"release_held"`
 	Releases               []ApprovalRelease        `json:"releases"`
-	Stages                 Stages                   `json:"stages"`
+	// SpecDraftAnswers は下書きづくりの記録の答えと添え書き（課題の詳細の spec_draft.answers と同じ要素。記録が無ければ []）。
+	// SpecIsDraft は仕様の文書が下書きか。SpecPath は仕様の文書の場所（無ければ null）。
+	SpecDraftAnswers []SpecDraftAnswer `json:"spec_draft_answers"`
+	SpecIsDraft      bool              `json:"spec_is_draft"`
+	SpecPath         *string           `json:"spec_path"`
+	Stages           Stages            `json:"stages"`
 	// SupervisorHandsTaken は打った手の件数（手 → 結果が executed の対処の記録の数。failed は入れない。無ければ {}）。
 	SupervisorHandsTaken map[string]int `json:"supervisor_hands_taken"`
 	// SupervisorQuestions はスーパーバイザーが答えた子の問い（問い・答え・根拠。無ければ []）。完了の承認のときにオーナーへ見せる。
@@ -180,6 +185,9 @@ func FromApprovalPreview(p *core.ApprovalPreview, heads []core.ReleaseHead) Appr
 		Pairs:                  FromPairs(p.Pairs),
 		ReleaseHeld:            true,
 		Releases:               make([]ApprovalRelease, 0, len(heads)),
+		SpecDraftAnswers:       fromSpecDraftAnswers(p.SpecDraftAnswers),
+		SpecIsDraft:            p.SpecIsDraft,
+		SpecPath:               p.SpecPath,
 		Stages:                 FromStages(p.StageFields, p.IssuesAnswer),
 		Tasks:                  make([]ApprovalCompletionTask, 0, len(p.CompletionTasks)),
 		Title:                  p.Title,

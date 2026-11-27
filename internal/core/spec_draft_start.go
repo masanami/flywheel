@@ -68,11 +68,20 @@ func formatSpecBrief(title, description string, binding *sourceBinding, d SpecDr
 	seq := map[int]int{}
 	// 複数の行の値は、2 行目から字下げして、項目の中に収める（見出しや次の項目と読み違えないようにする）。
 	item := func(v string) string { return strings.ReplaceAll(strings.TrimRight(v, "\n"), "\n", "\n  ") }
+	var notes strings.Builder
 	for _, a := range d.Answers {
+		if a.Kind == SpecDraftAnswerKindNote {
+			fmt.Fprintf(&notes, "### %d\n%s\n", a.Attempt, strings.Trim(a.Answer, "\n"))
+			continue
+		}
 		seq[a.Attempt]++
 		fmt.Fprintf(&answers, "### %d-%d\n- 問い: %s\n- 答え: %s\n- 答えた者: %s\n", a.Attempt, seq[a.Attempt], item(a.Question), item(a.Answer), item(a.By))
+		for _, basis := range a.Basis {
+			fmt.Fprintf(&answers, "- 根拠: %s（%s）\n", oneLine(basis.Path), oneLine(basis.Locator))
+		}
 	}
 	section("これまでの問いと答え", answers.String())
+	section("オーナーの添え書き", notes.String())
 	return b.String()
 }
 
@@ -102,6 +111,8 @@ type specDraftStall struct {
 	// CountAttempt は、記録が pending のまま（開始の失敗を回数に数えていない）とき真。
 	CountAttempt bool
 	Detail       string
+	// DraftPath は記録の下書きの場所。
+	DraftPath string
 }
 
 // specDraftWork は、分類済の課題 cid の下書きづくりについて、委譲の段が行うことを返す。
@@ -138,7 +149,7 @@ func specDraftWork(ctx context.Context, tx *sql.Tx, cid int64) (startable bool, 
 		if !found || recorded || hasHold {
 			return true, nil, nil
 		}
-		return false, &specDraftStall{ChallengeID: cid, RunID: runID, CountAttempt: true,
+		return false, &specDraftStall{ChallengeID: cid, RunID: runID, CountAttempt: true, DraftPath: d.Path,
 			Detail: specDraftNotStartedDetail(RunResult(result), errText)}, nil
 	}
 	if !found {
@@ -149,7 +160,7 @@ func specDraftWork(ctx context.Context, tx *sql.Tx, cid int64) (startable bool, 
 		}
 		runID = last.Int64
 	}
-	return false, &specDraftStall{ChallengeID: cid, RunID: runID,
+	return false, &specDraftStall{ChallengeID: cid, RunID: runID, DraftPath: d.Path,
 		Detail: "下書きづくりの記録は実行中ですが、終わっていない実行がありません。"}, nil
 }
 
@@ -189,6 +200,8 @@ func selectSpecDraftWork(ctx context.Context, tx *sql.Tx, only *int64) (startabl
 
 // holdStalledSpecDraft は行き止まりの下書きづくりを、失敗の保留にする。保留を作る書き込みの中で、まだ行き止まりかを確かめ直す。
 func (s *Store) holdStalledSpecDraft(ctx context.Context, st specDraftStall) error {
+	// ファイルの確かめは書き込みの前に行う（保留の選択肢は、確かめた時点のまま）。
+	draftExists := s.specDraftFileExists(st.DraftPath)
 	_, err := s.transitionAsInvoker(context.WithoutCancel(ctx), formatRunID(st.RunID), formatChallengeID(st.ChallengeID), OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
 			_, cur, err := specDraftWork(ctx, tc.tx, tc.id)
@@ -198,7 +211,8 @@ func (s *Store) holdStalledSpecDraft(ctx context.Context, st specDraftStall) err
 			if cur == nil {
 				return errSpecDraftHoldNotEligible
 			}
-			return raiseSpecDraftHold(ctx, tc, specDraftHold{Reason: SpecDraftHoldFailed, Detail: cur.Detail, CountAttempt: cur.CountAttempt})
+			return raiseSpecDraftHold(ctx, tc, specDraftHold{Reason: SpecDraftHoldFailed, Detail: cur.Detail, CountAttempt: cur.CountAttempt,
+				DraftExists: draftExists})
 		})
 	if errors.Is(err, errSpecDraftHoldNotEligible) || errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) {
 		return nil
@@ -236,13 +250,17 @@ func (s *Store) startSpecDrafts(ctx context.Context, in DelegateInput) (res *Del
 		}
 	}
 	for _, cid := range startable {
+		if in.requeuedSpecDrafts[cid] {
+			continue
+		}
 		item, err := s.startSpecDraft(ctx, in, cid)
 		if err != nil {
 			return nil, false, err
 		}
 		appendDelegateOutcome(res, item, nil)
 	}
-	return res, len(startable)+len(stalls) > 0, nil
+	// ID を指定した呼び出しの対象が、いま実行待ちへ戻した下書きづくりなら、始めないが、対象はあったことにする。
+	return res, len(startable)+len(stalls) > 0 || (only != nil && in.requeuedSpecDrafts[*only]), nil
 }
 
 // specDraftStartContext は、下書きづくりの実行の行を作った書き込みの中で読んだ値。

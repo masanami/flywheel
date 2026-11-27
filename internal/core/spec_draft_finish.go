@@ -27,6 +27,10 @@ const (
 	specDraftDoneByFlow = "flow"
 	// flowOutcomeBudgetExhausted は、上限額に当たったステップの結果。
 	flowOutcomeBudgetExhausted = "budget_exhausted"
+	// flowOutcomeFailure は、ステップが自分で失敗と返した結果。
+	flowOutcomeFailure = "failure"
+	// specStepSummaryFact は、最後に出力を返したステップの要約が載る facts の名前。
+	specStepSummaryFact = "spec_step_summary"
 
 	maxSpecQuestions     = 10
 	minSpecOptions       = 2
@@ -69,11 +73,14 @@ func (s *Store) pollSpecDraftRun(ctx context.Context, in ContractPollInput, row 
 	case !rep.State.Terminal():
 		return rep, nil
 	}
-	held, err := s.finishSpecDraftRun(ctx, in, rep.RunID, row.ID, waitFailure)
+	held, requeued, err := s.finishSpecDraftRun(ctx, in, rep.RunID, row.ID, waitFailure)
 	if err != nil {
 		return nil, err
 	}
 	rep.Held = held
+	if requeued {
+		rep.requeuedSpecDraft = row.ChallengeID
+	}
 	return rep, nil
 }
 
@@ -83,8 +90,9 @@ type specDraftEnd struct {
 	draft  *SpecDraft
 	status Status
 	facts  map[string]string
-	// lastOutcome は最後のステップの結果（無ければ空）。
-	lastOutcome string
+	// hasStep はステップの記録が 1 件以上あるか。lastStep は最後のステップの名前、lastOutcome はその結果（無ければ空）。
+	hasStep               bool
+	lastStep, lastOutcome string
 }
 
 // loadSpecDraftEnd は終わっていない記録の実行 rowID の値を読む（終わった記録になっていれば nil）。
@@ -115,10 +123,12 @@ func loadSpecDraftEnd(ctx context.Context, tx *sql.Tx, rowID int64) (*specDraftE
 		}
 	}
 	var outcome sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT outcome FROM contract_run_step WHERE contract_run_id = ? ORDER BY seq DESC LIMIT 1`, rowID).Scan(&outcome)
+	err = tx.QueryRowContext(ctx, `SELECT step, outcome FROM contract_run_step WHERE contract_run_id = ? ORDER BY seq DESC LIMIT 1`, rowID).
+		Scan(&out.lastStep, &outcome)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
+	out.hasStep = err == nil
 	out.lastOutcome = outcome.String
 	return out, nil
 }
@@ -145,38 +155,56 @@ func requireRunningSpecDraft(ctx context.Context, tx *sql.Tx, cid int64) (*SpecD
 }
 
 // finishSpecDraftRun は、読んだ下書きづくりの実行 rowID の終わりを、記録と課題へ写す。causeRunID は終わりを読んだ実行。
+// 問いが残って問いの保留にする所では、呼べる条件（specSupervisorMayRun）を満たせば、先にスーパーバイザーを呼ぶ。requeued は、
+// その答えで全部の問いが解けて、記録を実行待ちへ戻したか。
 // waitFailure が空でなければ、待ちで返った実行（取り消せなかった実行は、状態が終わりでないまま開けておく）。
 //   - 記録が実行中でなければ、記録も保留も変えない（状態が終わりの実行を、終わった記録にするだけ）。
 //   - 課題が分類済でなければ（別の理由で人間対応待ち）、何も書かず、実行も開けたままにする（分類済へ戻った後の状態の確認が扱う）。
 //
 // held は、この呼び出しで下書きづくりの保留を作ったか。
-func (s *Store) finishSpecDraftRun(ctx context.Context, in ContractPollInput, causeRunID string, rowID int64, waitFailure string) (held bool, err error) {
+func (s *Store) finishSpecDraftRun(ctx context.Context, in ContractPollInput, causeRunID string, rowID int64, waitFailure string) (held, requeued bool, err error) {
 	var end *specDraftEnd
 	if err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) (err error) {
 		end, err = loadSpecDraftEnd(ctx, tx, rowID)
 		return err
 	})); err != nil || end == nil {
-		return false, err
+		return false, false, err
 	}
 	if end.draft == nil || end.draft.State != SpecDraftStateRunning {
 		err := s.db.Write(context.WithoutCancel(ctx), func(tx *sql.Tx) error { return s.endSpecContractRun(ctx, tx, end.run) })
 		if errors.Is(err, sql.ErrNoRows) {
 			err = nil
 		}
-		return false, classifyReadWriteErr(err)
+		return false, false, classifyReadWriteErr(err)
 	}
 	if end.status != StatusClassified {
-		return false, nil
+		return false, false, nil
 	}
 	hold, err := s.judgeSpecDraftEnd(ctx, in, end, waitFailure)
 	if err != nil {
-		return false, err
+		return false, false, err
+	}
+	// 回数の上限の後と失敗には呼ばない（理由が spec_question の保留になる所だけ）。
+	if hold != nil && hold.Reason == SpecDraftHoldQuestion && specSupervisorMayRun(in) {
+		sv, err := s.superviseSpecQuestions(ctx, in, end, hold.Questions)
+		if errors.Is(err, errSpecSupervisionInterrupted) || errors.Is(err, ErrRunInProgress) {
+			return false, false, nil // 何も書かず、次の状態の確認が同じ終わりを扱い直す
+		}
+		if err != nil {
+			return false, false, err
+		}
+		if sv != nil {
+			return s.recordSpecSupervision(context.WithoutCancel(ctx), causeRunID, end.run, sv)
+		}
 	}
 	// 判定した後は、呼び出し元の ctx の取り消しに関わらず書く。
 	ctx = context.WithoutCancel(ctx)
 	cid := end.run.ChallengeID
 	if hold == nil {
-		return false, s.completeSpecDraft(ctx, causeRunID, end.run)
+		return false, false, s.completeSpecDraft(ctx, causeRunID, end.run)
+	}
+	if hold.Reason == SpecDraftHoldFailed {
+		hold.DraftExists = s.specDraftFileExists(end.draft.Path)
 	}
 	_, err = s.transitionAsInvoker(ctx, causeRunID, formatChallengeID(cid), OpHold,
 		func(ctx context.Context, tc *transitionCtx) error {
@@ -190,9 +218,9 @@ func (s *Store) finishSpecDraftRun(ctx context.Context, in ContractPollInput, ca
 		})
 	if errors.Is(err, errSpecDraftHoldNotEligible) || errors.Is(err, sql.ErrNoRows) ||
 		errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) {
-		return false, nil
+		return false, false, nil
 	}
-	return err == nil, err
+	return err == nil, false, err
 }
 
 // completeSpecDraft は、確かめを通った下書きづくりの記録を済みにする。書き込みの中で読み直し、課題が分類済でないか記録が
@@ -270,7 +298,11 @@ func (s *Store) judgeSpecDraftEnd(ctx context.Context, in ContractPollInput, end
 		}
 	}
 
+	var failedStep *specDraftFailedStep
 	if end.run.State == ContractStateFailed || end.run.State == ContractStateCancelled {
+		if end.hasStep {
+			failedStep = &specDraftFailedStep{Step: end.lastStep, Outcome: end.lastOutcome, Summary: end.facts[specStepSummaryFact]}
+		}
 		if end.lastOutcome == flowOutcomeBudgetExhausted || end.run.CostMicros >= end.run.MaxBudget {
 			failures = append(failures, fmt.Sprintf("1 回の上限額（%s USD）に当たりました。費用: %s USD",
 				formatUSDAmount(microsToUSD(end.run.MaxBudget)), formatUSDAmount(microsToUSD(end.run.CostMicros))))
@@ -279,7 +311,7 @@ func (s *Store) judgeSpecDraftEnd(ctx context.Context, in ContractPollInput, end
 
 	switch {
 	case len(failures) > 0:
-		return &specDraftHold{Reason: SpecDraftHoldFailed, Detail: strings.Join(failures, "\n\n")}, nil
+		return &specDraftHold{Reason: SpecDraftHoldFailed, Detail: strings.Join(failures, "\n\n"), FailedStep: failedStep}, nil
 	case len(questions) == 0:
 		return nil, nil
 	case end.draft.Attempts >= SpecDraftMaxAttempts:

@@ -138,7 +138,7 @@ func (s *Store) buildSupervisorSections(ctx context.Context, decl *AgentDeclarat
 		}
 		var hb strings.Builder
 		for _, h := range offered {
-			fmt.Fprintf(&hb, "- %s: %s\n", h, supervisorHandDescription(h))
+			fmt.Fprintf(&hb, "- %s: %s\n", h, supervisorHandDescription(t.StopKind, h))
 		}
 		sections = append(sections, JudgmentDataSection{Label: "選べる手の一覧", Content: strings.TrimRight(hb.String(), "\n")})
 		if hs := formatHoldsSection(holds); hs != "" {

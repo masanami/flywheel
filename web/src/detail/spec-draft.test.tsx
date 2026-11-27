@@ -138,6 +138,17 @@ async function open(detail: ShowCardResponse, extra = {}) {
   return { root, ...ctx };
 }
 
+// 保留の所（hold-question は、その中の保留の問いの文の要素）
+const placesOf = (root: HTMLElement) =>
+  within(root)
+    .getAllByTestId("hold-question")
+    .map((e) => e.closest(".detail-question") as HTMLElement);
+const placeOf = (root: HTMLElement) => {
+  const [place, ...rest] = placesOf(root);
+  if (!place || rest.length > 0) throw new Error("保留の所が 1 つでない");
+  return place;
+};
+
 const list = (root: HTMLElement) => within(root).getByTestId("spec-questions");
 const questionsOf = (root: HTMLElement) =>
   within(list(root)).getAllByTestId("plan-question");
@@ -218,9 +229,7 @@ it.each([
         specHold("H-1", options),
       ]),
     );
-    expect(within(root).getByTestId("hold-question").textContent).toContain(
-      `下書き: ${PATH}`,
-    );
+    expect(placeOf(root).textContent).toContain(`下書き: ${PATH}`);
   },
 );
 
@@ -228,9 +237,7 @@ it("AC-379 #1357: 下書きづくりでない保留だけの課題では、下�
   const { root } = await open(
     questionDetail({ hold_id: null, hold_reason: null }, [hold("H-9")]),
   );
-  expect(within(root).getByTestId("hold-question").textContent).not.toContain(
-    ".flywheel/specs/",
-  );
+  expect(placeOf(root).textContent).not.toContain(".flywheel/specs/");
 });
 
 it("AC-380 #1357: 問いの保留では、spec-answer-guide に --option answer --choice の案内が出る（--hold は付けない）", async () => {
@@ -327,7 +334,7 @@ it("AC-389 #1357: spec-questions は、spec_draft.hold_id と同じ ID の保留
       hold("H-3"),
     ]),
   );
-  const frames = within(root).getAllByTestId("hold-question");
+  const frames = placesOf(root);
   expect(frames).toHaveLength(3);
   expect(
     frames.map((f) => within(f).queryAllByTestId("spec-questions").length),
@@ -356,6 +363,7 @@ it("#1357: 答えの by に知らない値を持つ記録でも、画面は誤�
     questionDetail({
       answers: [
         {
+          kind: "answer",
           attempt: 1,
           question: "前の問い",
           answer: "前の答え",

@@ -14,36 +14,72 @@ import (
 // ActivityActionHoldEdit は作業ログ（entity=challenge）の action。開いている保留の問いの文・選択肢の説明を書き換えたときに残す。
 const ActivityActionHoldEdit = "hold_edit"
 
-// resolveAnswerOption は回答（answer と option）を、保留の選択肢（opts・required）に照らして検査し、回答の文と選んだ識別（選んでいなければ nil）を返す。
+// resolveAnswerOption は回答（answer と option）を、保留の選択肢（opts・required）に照らして検査し、選んだ選択肢（選んでいなければ nil）を返す。
 // 誤りは ErrValidation（何も書かない）:
 //   - option が空: 回答の文が空、または required が真（出力に選択肢の識別と見出しを示す）
 //   - option が空でない: 保留が選択肢を持たない、または識別が選択肢に無い
-//
-// 回答の文は、選んだ選択肢の見出し。answer が空でなければ「見出し・改行・answer」。
-func resolveAnswerOption(opts []HoldOption, required bool, option, answer string) (text string, chosen *string, err error) {
+func resolveAnswerOption(opts []HoldOption, required bool, option, answer string) (*HoldOption, error) {
 	if option == "" {
 		if required {
-			return "", nil, fmt.Errorf("%w: this hold requires --option; choose one of: %s", ErrValidation, describeHoldOptions(opts))
+			return nil, fmt.Errorf("%w: this hold requires --option; choose one of: %s", ErrValidation, describeHoldOptions(opts))
 		}
 		if strings.TrimSpace(answer) == "" {
-			return "", nil, ErrValidation
+			return nil, ErrValidation
 		}
-		return answer, nil, nil
+		return nil, nil
 	}
 	if len(opts) == 0 {
-		return "", nil, fmt.Errorf("%w: this hold has no options, so --option cannot be used", ErrValidation)
+		return nil, fmt.Errorf("%w: this hold has no options, so --option cannot be used", ErrValidation)
 	}
 	for _, o := range opts {
-		if o.ID != option {
-			continue
+		if o.ID == option {
+			return &o, nil
 		}
-		id := o.ID
-		if strings.TrimSpace(answer) == "" {
-			return o.Label, &id, nil
-		}
-		return o.Label + "\n" + answer, &id, nil
 	}
-	return "", nil, fmt.Errorf("%w: option %q is not one of this hold's options: %s", ErrValidation, option, describeHoldOptions(opts))
+	return nil, fmt.Errorf("%w: option %q is not one of this hold's options: %s", ErrValidation, option, describeHoldOptions(opts))
+}
+
+// composedHoldAnswer は組み立てた回答。
+type composedHoldAnswer struct {
+	// Text は保留に記録する回答の文。
+	Text string
+	// Chosen は選んだ選択肢（選んでいなければ nil）。
+	Chosen *HoldOption
+	// Spec は下書きづくりの保留への回答で、記録へ足す中身（ほかの保留ではゼロ値）。
+	Spec specDraftReply
+}
+
+// composeHoldAnswer は保留への回答を検査して、回答の文を組み立てる。何も書かない。回答の確かめと回答の実行の両方がこれを呼び、
+// 作業ログにも同じ文を使う。spec は答える保留が下書きづくりの保留のときの記録（そうでなければ nil）。
+// 回答の文は、選んだ選択肢の見出し（下書きの問いに推奨と違う答えをしたときは、その問いの番号の文に差し替える）で、
+// answer が空白だけでなければ改行して続ける。選択肢を選ばなければ answer のまま。
+func (s *Store) composeHoldAnswer(spec *SpecDraft, opts []HoldOption, required bool, option, answer string, items []PlanAnswerItem) (composedHoldAnswer, error) {
+	var out composedHoldAnswer
+	chosen, err := resolveAnswerOption(opts, required, option, answer)
+	if err != nil {
+		return out, err
+	}
+	if spec != nil {
+		id := ""
+		if chosen != nil {
+			id = chosen.ID
+		}
+		if out.Spec, err = s.checkSpecDraftAnswer(spec, id, answer, items); err != nil {
+			return out, err
+		}
+	}
+	if chosen == nil {
+		out.Text = answer
+		return out, nil
+	}
+	out.Chosen, out.Text = chosen, chosen.Label
+	if len(out.Spec.Changed) > 0 {
+		out.Text = specDraftChangedAnswerText(out.Spec.Changed)
+	}
+	if strings.TrimSpace(answer) != "" {
+		out.Text += "\n" + answer
+	}
+	return out, nil
 }
 
 // describeHoldOptions は選択肢の識別と見出しの一覧（`識別 (見出し)` を `, ` 区切り）。選択肢が無ければ `(none)`。誤りの文は端末へ出るので、識別・見出しの

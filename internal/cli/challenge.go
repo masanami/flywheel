@@ -211,6 +211,44 @@ func writeChatSpec(b *strings.Builder, d *core.ChallengeDetail) {
 	}
 }
 
+// writeSpecDraftQuestions は下書きづくりの残った問いを書く（無ければ何も書かない）。番号 Qn は、記録の問いの一覧の n 番目。
+func writeSpecDraftQuestions(b *strings.Builder, questions []core.SpecDraftQuestion) {
+	if len(questions) == 0 {
+		return
+	}
+	b.WriteString("残った問い:\n")
+	for i, q := range questions {
+		fmt.Fprintf(b, "  Q%d. %s\n", i+1, escapeControl(q.Question))
+		for j, o := range q.Options {
+			mark := ""
+			if j+1 == q.Recommended {
+				mark = "（推奨）"
+			}
+			fmt.Fprintf(b, "    %d. %s%s\n", j+1, escapeControl(o.Label), mark)
+		}
+		fmt.Fprintf(b, "    推奨の理由: %s\n", escapeControl(q.Reason))
+	}
+}
+
+// writeSpecDraftSupervisorAnswers は下書きづくりの記録の、スーパーバイザーが答えた問い（問い・答え・根拠の場所）を書く
+// （無ければ何も書かない。添え書きは入れない）。
+func writeSpecDraftSupervisorAnswers(b *strings.Builder, answers []core.SpecDraftAnswer) {
+	headed := false
+	for _, a := range answers {
+		if a.Kind != core.SpecDraftAnswerKindAnswer || a.By != "supervisor" {
+			continue
+		}
+		if !headed {
+			b.WriteString("スーパーバイザーが答えた問い:\n")
+			headed = true
+		}
+		fmt.Fprintf(b, "  - 問い: %s\n    答え: %s\n", escapeControl(a.Question), escapeControl(a.Answer))
+		for _, basis := range a.Basis {
+			fmt.Fprintf(b, "    根拠: %s（%s）\n", escapeControl(basis.Path), escapeControl(basis.Locator))
+		}
+	}
+}
+
 // challengeDetailText は --json 無しの show の表示。
 func challengeDetailText(d *core.ChallengeDetail) string {
 	var b strings.Builder
@@ -238,6 +276,10 @@ func challengeDetailText(d *core.ChallengeDetail) string {
 	}
 	if sd := d.SpecDraft; sd != nil {
 		fmt.Fprintf(&b, "下書きづくり:  %s (%s)・実行 %d 回（上限 %d 回）\n", sd.State.Label(), sd.State, sd.Attempts, core.SpecDraftMaxAttempts)
+		if sd.State == core.SpecDraftStateAwaitingOwner {
+			writeSpecDraftQuestions(&b, sd.Questions)
+		}
+		writeSpecDraftSupervisorAnswers(&b, sd.Answers)
 	}
 	fmt.Fprintf(&b, "作成:          %s\n", FormatTimestamp(c.CreatedAt))
 	fmt.Fprintf(&b, "更新:          %s\n", FormatTimestamp(c.UpdatedAt))

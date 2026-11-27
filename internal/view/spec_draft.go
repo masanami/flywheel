@@ -24,7 +24,9 @@ type SpecDraftAnswer struct {
 	Attempt int              `json:"attempt"`
 	Basis   []SpecDraftBasis `json:"basis"`
 	// By は答えた者。知らない値もそのまま出す。
-	By       string `json:"by"`
+	By string `json:"by"`
+	// Kind は要素の種類（答えか添え書き）。
+	Kind     string `json:"kind"`
 	Question string `json:"question"`
 }
 
@@ -61,21 +63,26 @@ func fromSpecDraft(d *core.SpecDraft) *SpecDraft {
 		}
 		questions = append(questions, SpecDraftQuestion{Options: options, Question: q.Question, Reason: q.Reason, Recommended: q.Recommended})
 	}
-	answers := make([]SpecDraftAnswer, 0, len(d.Answers))
-	for _, a := range d.Answers {
-		basis := make([]SpecDraftBasis, 0, len(a.Basis))
-		for _, b := range a.Basis {
-			basis = append(basis, SpecDraftBasis{Locator: b.Locator, Path: b.Path})
-		}
-		answers = append(answers, SpecDraftAnswer{Answer: a.Answer, Attempt: a.Attempt, Basis: basis, By: a.By, Question: a.Question})
-	}
 	var holdReason *string
 	if d.HoldReason != nil {
 		r := string(*d.HoldReason)
 		holdReason = &r
 	}
 	return &SpecDraft{
-		Answers: answers, Attempts: d.Attempts, BasePath: d.BasePath, HoldID: d.HoldID, HoldReason: holdReason,
+		Answers: fromSpecDraftAnswers(d.Answers), Attempts: d.Attempts, BasePath: d.BasePath, HoldID: d.HoldID, HoldReason: holdReason,
 		MaxAttempts: core.SpecDraftMaxAttempts, Path: d.Path, Questions: questions, Reason: d.Reason, Repo: d.Repo, State: string(d.State),
 	}
+}
+
+// fromSpecDraftAnswers は答えの一覧を変換する（空でも `[]`）。課題の詳細と計画の承認の要約が同じ形で出す。
+func fromSpecDraftAnswers(as []core.SpecDraftAnswer) []SpecDraftAnswer {
+	out := make([]SpecDraftAnswer, 0, len(as))
+	for _, a := range as {
+		basis := make([]SpecDraftBasis, 0, len(a.Basis))
+		for _, b := range a.Basis {
+			basis = append(basis, SpecDraftBasis{Locator: b.Locator, Path: b.Path})
+		}
+		out = append(out, SpecDraftAnswer{Answer: a.Answer, Attempt: a.Attempt, Basis: basis, By: a.By, Kind: string(a.Kind), Question: a.Question})
+	}
+	return out
 }

@@ -46,7 +46,8 @@ func supervisorLimitNotice(hands []SupervisorHand) string {
 }
 
 // このファイルの後半は、答えによる再開（手 answer）の上限（区切り S4b-3）。1 つの課題で、最後のオーナーの回答より後に 3 回まで。
-// 数えるのは、その課題の、手が answer で結果が executed の対処の記録（止まり方・タスクは問わない。過去の J4 の実行の記録は数えない）。
+// 数えるのは、その課題の、手が answer で結果が executed の対処の記録（タスクは問わない。止まり方は、下書きの問い
+// spec_question を除いて問わない。下書きの側の歯止めは実行の回数の上限。過去の J4 の実行の記録は数えない）。
 
 // supervisorAnswerLimit は、1 つの課題で、スーパーバイザーが答えて再開できる回数の上限。
 const supervisorAnswerLimit = 3
@@ -59,7 +60,7 @@ const supervisorAnswerLimitNotice = "スーパーバイザーが答えて再開�
 func supervisorAnswerLimitReached(ctx context.Context, tx *sql.Tx, challengeID int64) (bool, error) {
 	n, err := countSupervisorActions(ctx, tx, SupervisorActionCountQuery{
 		ChallengeID: formatChallengeID(challengeID), AnyTask: true, Hands: []SupervisorHand{HandAnswer},
-		ExecutedOnly: true, AfterLastOwnerAnswer: true,
+		ExecutedOnly: true, AfterLastOwnerAnswer: true, ExcludeStopKinds: []StopKind{StopKindSpecQuestion},
 	})
 	return n >= supervisorAnswerLimit, err
 }

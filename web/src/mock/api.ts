@@ -6,6 +6,7 @@ import { ApiError } from "../api/error.ts";
 import { CONDITIONS_AFTER_RELEASE_HEADINGS } from "../api/types.gen.ts";
 import type {
   ApprovalSummaryResponse,
+  ChallengeSpecResponse,
   CycleStarted,
   FollowupListResponse,
   LogResponse,
@@ -79,6 +80,13 @@ const [
   CONDITIONS_AFTER_APPROVED_RELEASE_HEADING,
 ] = CONDITIONS_AFTER_RELEASE_HEADINGS;
 
+// 下書きの置き場（本物の is_draft の見分けと同じ）。
+const SPEC_DRAFT_DIR = ".flywheel/specs/";
+const isDraftPath = (path: string | null): boolean =>
+  path?.startsWith(SPEC_DRAFT_DIR) ?? false;
+// 下書きづくりが途中の状態（本物の本文を返す口が、記録の下書きの場所を読む状態）。
+const DRAFTING_STATES = ["pending", "running", "awaiting_owner"];
+
 export interface MockOptions {
   latencyMs?: number;
 }
@@ -140,8 +148,8 @@ export function createMockApi(
         improvement: null,
         integration_ref: null,
         spec_base_path: null,
-        spec_is_draft: false,
-        spec_path: null,
+        spec_is_draft: isDraftPath(m.specPath ?? null),
+        spec_path: m.specPath ?? null,
       },
       conflict_fixes: extra.conflict_fixes ?? [],
       direct_completions: m.directCompletions,
@@ -230,6 +238,29 @@ export function createMockApi(
       await wait();
       const m = itemOf(name, id);
       return showOf(name, id, m);
+    },
+    // 本物と同じく、読む場所は課題と下書きづくりの記録から決める。本文を持たない偽の課題は「ファイルがまだ無い」。
+    async challengeSpec(name, id): Promise<ChallengeSpecResponse> {
+      await wait();
+      const m = itemOf(name, id);
+      const drafting =
+        m.specDraft && DRAFTING_STATES.includes(m.specDraft.state)
+          ? m.specDraft.path
+          : null;
+      const path = m.specPath ?? drafting;
+      if (path === null)
+        throw new ApiError(
+          "not_found",
+          `課題 ${id} に仕様の文書がありません`,
+          404,
+        );
+      const body = m.specBody ?? null;
+      return {
+        body,
+        is_draft: isDraftPath(path),
+        path,
+        unreadable_reason: body === null ? "missing" : null,
+      };
     },
     async log(name, id): Promise<LogResponse> {
       await wait();
@@ -399,6 +430,9 @@ export function createMockApi(
                   summary: o.summary,
                 }))
               : [],
+          spec_draft_answers: m.specDraft?.answers ?? [],
+          spec_is_draft: isDraftPath(m.specPath ?? null),
+          spec_path: m.specPath ?? null,
           supervisor_hands_taken: {},
           supervisor_questions: [],
           stages: m.stages,

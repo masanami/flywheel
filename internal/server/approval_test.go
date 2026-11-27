@@ -116,6 +116,7 @@ func TestApprovalSummaryForPlan(t *testing.T) {
 		"pairs": `[]`, "stages": `{"actual":null,"expected":null,"figure":null,"issues":null,"issues_answer":null,"non_goals":null}`,
 		"added_tasks": `[]`, "conflict_fixes": `[]`, "followups": `[]`, "tasks": `[]`, "integration_ref": `null`, "uses_integration": `null`,
 		"supervisor_hands_taken": `{}`, "supervisor_questions": `[]`,
+		"spec_draft_answers": `[]`, "spec_is_draft": `false`, "spec_path": `null`,
 	}
 	for k, w := range want {
 		if got[k] != w {

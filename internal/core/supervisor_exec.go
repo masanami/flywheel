@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -80,6 +81,8 @@ type supervisorHandRequest struct {
 	RunID  string
 	Output SVOutput
 	Decl   *AgentDeclaration
+	// LogExtra は作業ログ supervise の after に足す項目（無ければ nil）。
+	LogExtra map[string]any
 }
 
 func (r supervisorHandRequest) actionInput(hand SupervisorHand, findings, note string, basis []SupervisorBasis, result SupervisorActionResult, reject SupervisorRejectReason) SupervisorActionInput {
@@ -121,6 +124,7 @@ func (s *Store) writeSupervisorAction(ctx context.Context, tx *sql.Tx, req super
 	if in.RejectReason != "" {
 		after["reject_reason"] = string(in.RejectReason)
 	}
+	maps.Copy(after, req.LogExtra)
 	return id, rec.record("challenge", req.Target.ChallengeID, ActivityActionSupervise, nil, after)
 }
 
