@@ -110,7 +110,7 @@ func j10Instructions(t *testing.T) string {
 
 // AC-197
 func TestInstructions_J10IsEmbedded(t *testing.T) {
-	got, err := Instructions(core.JudgmentPoint("J10"))
+	got, err := Instructions(core.JudgmentJ10)
 	if err != nil {
 		t.Fatal(err)
 	}
