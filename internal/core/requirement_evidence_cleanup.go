@@ -15,9 +15,10 @@ var (
 	errRequirementEvidenceNotRegular = errors.New("the evidence is not a regular file")
 )
 
-// discardRequirementEvidence は証跡の場所 evidencePath のファイルを消す。消すのは、場所のリンクをたどった先が、
-// 証跡の置き場の実体の下にある通常のファイルのときだけ。ファイルがすでに無ければ何もしない。消さなかった・消せなかった
-// ときは、作業ログに requirement_evidence_cleanup_failed を残す。作業ログの対象は entity と entityID。呼ぶのは、呼び出し元の書き込みが成立した後。誤りは返さない（ctx の取り消しにも
+// discardRequirementEvidence は証跡の場所 evidencePath のファイルを消す。消すのは、証跡の置き場の実体がワークスペースの実体の
+// .flywheel/ の下にあり、場所のリンクをたどった先がその下にある通常のファイルのときだけ。ファイルがすでに無ければ何もしない。
+// 消さなかった・消せなかったときは、作業ログに requirement_evidence_cleanup_failed を残す。作業ログの対象は entity と entityID。
+// 呼ぶのは、呼び出し元の書き込みが成立した後。誤りは返さない（ctx の取り消しにも
 // 従わない）。
 func (s *Store) discardRequirementEvidence(ctx context.Context, evidencePath, entity string, entityID int64, actor string) {
 	ctx = context.WithoutCancel(ctx)

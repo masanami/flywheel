@@ -65,8 +65,9 @@ const NotStartedIntegrationUnavailable NotStartedReason = "integration_unavailab
 // `cycle` の not_started の閉集合（NotStartedReasonValues）に含まれる。
 const NotStartedSpecDraftChanged NotStartedReason = "spec_draft_changed"
 
-// NotStartedSliceSplitPending は、区切りを分ける記録が途中（pending か awaiting_owner）の課題なので、計画を作る判断点を
-// 起動しなかったことを表す（ID を指定した `plan --auto` だけが出す）。
+// NotStartedSliceSplitPending は、区切りを分ける記録が途中の分類済の課題なので、計画を作る判断点を起動しなかったことを表す
+// （ID を指定した `plan --auto` だけが出す）。記録が awaiting_owner の課題は人間対応待ちなので、この理由ではなく
+// 状態の検査の ErrInvalidTransition になる。
 const NotStartedSliceSplitPending NotStartedReason = "slice_split_pending"
 
 // notStartedReasonValues は NotStartedReason の閉集合（仕様の列挙の順）。

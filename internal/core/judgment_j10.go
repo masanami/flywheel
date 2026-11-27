@@ -385,7 +385,6 @@ func (s *Store) splitOneJ10(ctx context.Context, in J1AutoInput, jc *JudgmentCyc
 		for _, r := range in.ConnDecl.Repos {
 			repos = append(repos, r.Name)
 		}
-		// 検査を通った出力は、ここでは記録にも課題にも写さない（記録は pending のまま）。
 		out, invalid := validateJ10Output(res.StructuredOutput, repos)
 		if invalid != nil {
 			if err := s.invalidateRunOutputWithReason(ctx, res.RunID, "J10: "+invalid.Error()); err != nil {
@@ -394,6 +393,9 @@ func (s *Store) splitOneJ10(ctx context.Context, in J1AutoInput, jc *JudgmentCyc
 			item.Result = RunResultInvalidOutput
 		} else {
 			item.Outcome = string(out.Verdict)
+			if item.Status, err = s.applyJ10Output(ctx, res.RunID, res.ChallengeID, out); err != nil {
+				return err
+			}
 		}
 	}
 	result.Items = append(result.Items, item)
