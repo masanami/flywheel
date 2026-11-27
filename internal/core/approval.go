@@ -136,6 +136,12 @@ type ApprovalPreview struct {
 	ReleasesToWithdraw []string
 	RunningReleases    []string
 
+	// SpecPath・SpecIsDraft・SpecDraftAnswers は、課題の仕様の文書の場所（無ければ nil）・それが下書きか・下書きづくりの記録の
+	// 答えと添え書き（記録が無ければ nil）。PrepareApprovalFor で読んだときだけ埋める。
+	SpecPath         *string
+	SpecIsDraft      bool
+	SpecDraftAnswers []SpecDraftAnswer
+
 	// 以下は完了の承認の要約を PrepareApprovalFor で読んだときだけ埋める、完了承認画面の値（要約と同じ
 	// 読み取りで読む）。端末の要約（PrepareApproval）は埋めない。
 	// CompletionTasks は課題のタスク（最新の版のタスクと、前の版の済みのタスク）。
@@ -302,6 +308,17 @@ func (s *Store) prepareApproval(ctx context.Context, id string, agent *AgentDecl
 			return err
 		}
 		preview.IssuesAnswer = answer
+		if withScreen {
+			// 要約と同じ読み取りで読む。
+			preview.SpecPath, preview.SpecIsDraft = current.SpecPath, current.SpecIsDraft()
+			draft, err := loadSpecDraft(ctx, tx, cid)
+			if err != nil {
+				return err
+			}
+			if draft != nil {
+				preview.SpecDraftAnswers = draft.Answers
+			}
+		}
 
 		if kind == ApprovalKindPlan {
 			var version int
@@ -473,7 +490,7 @@ func (s *Store) PrepareApproval(ctx context.Context, id string) (*ApprovalPrevie
 }
 
 // PrepareApprovalFor は PrepareApproval に、計画の予算の上限をサイズごとの既定から決めるための宣言を渡す版
-// （API の承認の要約が使う。完了確認待ちなら、完了承認画面の値も同じ読み取りで読む。agent が nil でも読む）。
+// （API の承認の要約が使う。仕様の文書の値と、完了確認待ちなら完了承認画面の値も、同じ読み取りで読む。agent が nil でも読む）。
 func (s *Store) PrepareApprovalFor(ctx context.Context, id string, agent *AgentDeclaration) (*ApprovalPreview, error) {
 	return s.prepareApproval(ctx, id, agent, true)
 }

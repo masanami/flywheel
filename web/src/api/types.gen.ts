@@ -874,6 +874,9 @@ export interface ApprovalSummary {
   plan: ApprovalPlan | null;
   release_held: boolean;
   releases: ApprovalRelease[];
+  spec_draft_answers: SpecDraftAnswer[];
+  spec_is_draft: boolean;
+  spec_path: string | null;
   stages: Stages;
   supervisor_hands_taken: Record<string, number>;
   supervisor_questions: SupervisorQuestion[];
@@ -955,6 +958,13 @@ export interface ApprovalCompletionTask {
   phase: string;
   spent_usd: number;
   title: string;
+}
+
+export interface ChallengeSpecResponse {
+  body: string | null;
+  is_draft: boolean;
+  path: string;
+  unreadable_reason: string | null;
 }
 
 export interface CycleStatus {

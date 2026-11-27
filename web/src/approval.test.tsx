@@ -76,6 +76,9 @@ function summary(over: Partial<ApprovalSummary> = {}): {
       pairs: [],
       plan: null,
       release_held: true,
+      spec_draft_answers: [],
+      spec_is_draft: false,
+      spec_path: null,
       supervisor_hands_taken: {},
       supervisor_questions: [],
       stages: {
