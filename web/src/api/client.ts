@@ -1,6 +1,7 @@
 import { ApiError } from "./error.ts";
 import type {
   ApprovalSummaryResponse,
+  ChallengeSpecResponse,
   ChatPostRequest,
   ChatPostResponse,
   ChatPromptAnswerRequest,
@@ -103,6 +104,8 @@ export interface ReadApi {
   // サイクルの様子。対象のサイクルのスーパーバイザーの手と費用の内訳（supervisor_actions・costs）を含む。
   cycle(name: string): Promise<CycleScreen>;
   challenge(name: string, id: string): Promise<ShowCardResponse>;
+  // 課題の仕様の文書の本文。読む場所は core が決める（送るのは課題の ID だけ）。
+  challengeSpec(name: string, id: string): Promise<ChallengeSpecResponse>;
   log(name: string, id: string): Promise<LogResponse>;
   runReport(name: string, runId: string): Promise<RunReportResponse>;
   needsHuman(): Promise<NeedsHumanResponse>;
@@ -190,6 +193,10 @@ const readApi: ReadApi = {
   cycle: (name) => get<CycleScreen>(`${ws(name)}/cycle`),
   challenge: (name, id) =>
     get<ShowCardResponse>(`${ws(name)}/challenges/${encodeURIComponent(id)}`),
+  challengeSpec: (name, id) =>
+    get<ChallengeSpecResponse>(
+      `${ws(name)}/challenges/${encodeURIComponent(id)}/spec`,
+    ),
   log: (name, id) =>
     get<LogResponse>(`${ws(name)}/log?challenge=${encodeURIComponent(id)}`),
   runReport: (name, runId) =>
@@ -281,6 +288,7 @@ export const api: ApiClient = {
   challenges: (n) => impl.challenges(n),
   cycle: (n) => impl.cycle(n),
   challenge: (n, id) => impl.challenge(n, id),
+  challengeSpec: (n, id) => impl.challengeSpec(n, id),
   log: (n, id) => impl.log(n, id),
   runReport: (n, r) => impl.runReport(n, r),
   needsHuman: () => impl.needsHuman(),

@@ -77,6 +77,9 @@ export interface MockChallenge {
   flags: Flags;
   // 下書きづくりの記録（無ければ課題の詳細の spec_draft は null）
   specDraft?: SpecDraft;
+  // 仕様の文書の場所（無ければ課題の詳細の spec_path は null）と、本文を返す口が返す本文（無ければ、ファイルがまだ無い）
+  specPath?: string;
+  specBody?: string;
 }
 
 export interface MockWorkspace {
@@ -124,6 +127,8 @@ export function mk(
     flags,
     stages,
     specDraft,
+    specPath,
+    specBody,
     ...rest
   } = p;
   return {
@@ -157,6 +162,8 @@ export function mk(
     runs: runs ?? [],
     flags: flags ?? {},
     specDraft,
+    specPath,
+    specBody,
   };
 }
 
@@ -262,8 +269,18 @@ function specQuestionChallenge(): MockChallenge {
   return mk("C-4", "予約の取り消しを足す", "awaiting_human", {
     priority: "P1",
     headline: "利用者が自分で予約を取り消せるようにする",
+    specBody: "# 予約の取り消しの仕様\n\n利用者が自分で予約を取り消せる。",
     specDraft: {
-      answers: [],
+      answers: [
+        {
+          kind: "answer",
+          attempt: 1,
+          question: "取り消した記録は、どの表に残しますか",
+          answer: "いまの作業ログに残す",
+          by: "supervisor",
+          basis: [{ path: "docs/architecture.md", locator: "作業ログの節" }],
+        },
+      ],
       attempts: 1,
       base_path: null,
       hold_id: holdId,
@@ -327,8 +344,10 @@ function specFailedChallenge(): MockChallenge {
   return {
     ...base,
     c: { ...base.c, id: "C-5", title: "予約の変更を足す" },
+    specBody: undefined,
     specDraft: base.specDraft && {
       ...base.specDraft,
+      answers: [],
       hold_reason: "spec_failed",
       path: ".flywheel/specs/c-5.md",
       questions: [],
@@ -441,6 +460,39 @@ export function seed(): Record<string, MockWorkspace> {
       headline: "閲覧者が編集ボタンを押せてしまう穴をふさぐ",
       version: 2,
       plans: [plan(1, "権限表を一箇所にまとめ、画面ごとの判定を表から引く。")],
+      // 下書きを持つ計画の承認待ち（仕様の文書を開く口と、下書きづくりの答えの一覧の画面の通しの試験が使う）
+      specPath: ".flywheel/specs/c-4.md",
+      specBody: "# 権限チェックの仕様\n\n閲覧者には、編集のボタンを出さない。",
+      specDraft: {
+        answers: [
+          {
+            kind: "answer",
+            attempt: 1,
+            question: "権限の表は、どこに置きますか",
+            answer: "いまの設定の読み込みに足す",
+            by: "supervisor",
+            basis: [{ path: "docs/architecture.md", locator: "設定の節" }],
+          },
+          {
+            kind: "note",
+            attempt: 1,
+            question: "",
+            answer: "断るときの文は、短くしてほしい",
+            by: "owner",
+            basis: [],
+          },
+        ],
+        attempts: 1,
+        base_path: null,
+        hold_id: null,
+        hold_reason: null,
+        max_attempts: 3,
+        path: ".flywheel/specs/c-4.md",
+        questions: [],
+        reason: "権限の決まりが変わる",
+        repo: "app",
+        state: "done",
+      },
     }),
     mk("C-5", "ビルドの高速化", "in_progress", {
       priority: "P2",

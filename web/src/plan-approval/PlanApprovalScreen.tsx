@@ -17,6 +17,8 @@ import { Markdown } from "../markdown/Markdown.tsx";
 import { ClampedText } from "../parts/ClampedText.tsx";
 import { FigureView } from "../parts/FigureView.tsx";
 import { PlanQuestionView } from "../parts/PlanQuestionView.tsx";
+import { SpecAnswerList } from "../parts/SpecAnswers.tsx";
+import { SpecDocument } from "../parts/SpecDocument.tsx";
 import { IssuesAnswerView, IssuesView } from "../parts/StagesDetail.tsx";
 import { CycleStartButton } from "../shell/CycleStartButton.tsx";
 import { CycleStartLine } from "../shell/CycleStartLine.tsx";
@@ -297,6 +299,19 @@ function PlanView({
           計画の本文を読む
         </a>
       </p>
+      {summary.spec_path !== null && (
+        // 計画の版か仕様の文書の場所が変わったら畳み直す（前の中身を、新しい計画の横に残さない）。
+        <SpecDocument
+          key={JSON.stringify([
+            agentName,
+            id,
+            summary.spec_path,
+            summary.version,
+          ])}
+          agentName={agentName}
+          challengeId={id}
+        />
+      )}
 
       {/* 広い画面では、左に計画の中身、右に「問いと推奨」を並べる。狭い画面では縦に並ぶ（styles.css の .plan-cols） */}
       <div className="plan-cols" data-testid="plan-cols">
@@ -388,6 +403,15 @@ function PlanView({
             </section>
           )}
           <FigureView figure={figure} />
+          {summary.spec_draft_answers.length > 0 && (
+            <section
+              aria-label="下書きづくりで答えた問い"
+              data-testid="spec-answers"
+            >
+              <h3>下書きづくりで答えた問い</h3>
+              <SpecAnswerList answers={summary.spec_draft_answers} showBy />
+            </section>
+          )}
           {legacy && summary.stages.issues !== null && (
             <IssuesView issues={summary.stages.issues} />
           )}

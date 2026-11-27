@@ -1167,6 +1167,15 @@ a.task-box:hover {
   overflow-wrap: anywhere;
 }
 
+/* 仕様の文書を開く所と、下書きづくりの答えの一覧（長いパスで画面を横に伸ばさない） */
+.spec-document {
+  margin: 0.5rem 0;
+}
+.spec-body,
+.spec-answer-list {
+  overflow-wrap: anywhere;
+}
+
 /* サイクルの画面・すべてのエージェント */
 .cycle-facts {
   display: grid;

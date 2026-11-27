@@ -6,7 +6,8 @@ test("AC-95・AC-96・AC-98 S4d-2: 課題の詳細の待ちに、選べる選択
   page,
 }) => {
   await page.goto("/#/a/alpha/challenges/C-8");
-  const frame = page.getByTestId("hold-question");
+  // 保留の所（hold-question は、その中の保留の問いの文の要素）
+  const frame = page.locator(".detail-question");
   await expect(frame).toHaveCount(1);
   await expect(frame.getByTestId("hold-id")).toContainText("H-1");
   await expect(frame.getByTestId("hold-option-button")).toHaveCount(2);
