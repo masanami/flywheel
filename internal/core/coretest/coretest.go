@@ -1636,3 +1636,21 @@ func ChallengeOrigin(t *testing.T, workspace string, id int) string {
 	}
 	return origin
 }
+
+// InsertSliceSplitHold はテスト専用のフィクスチャとして、課題 challengeID（内部整数 ID）を、区切り 2 つ（2 は 1 の後）の分ける案の
+// 分けるかの保留で待つ取り込んだ課題にする: 取り込み元の対応（externalKey）・優先度 P1・選択肢 split と single の保留・
+// 状態 awaiting_owner の区切りを分ける記録。保留はこの関数が作る。証跡のファイルは作らない。
+func InsertSliceSplitHold(t *testing.T, workspace string, challengeID int, externalKey string) {
+	t.Helper()
+	const at = "2026-11-28T00:00:00.000Z"
+	InsertSourceBinding(t, workspace, challengeID, "src", externalKey, "https://github.com/o/app/issues/1", "fp", "open", "in_policy", at)
+	InsertHoldWithOptions(t, workspace, challengeID, "分けますか", "classified", at,
+		`[{"id":"split","label":"この案で分ける","description":""},{"id":"single","label":"分けずに 1 つの課題で進める","description":""}]`, "")
+	Exec(t, workspace, `UPDATE challenge SET status = 'awaiting_human', priority = 'P1', origin = 'ingest' WHERE id = ?`, challengeID)
+	proposal := `{"reason":"r","slices":[` +
+		`{"title":"区切り A","headline":"h","context":"c","summary":"s","scope":"sc","repo":"app","depends_on":[]},` +
+		`{"title":"区切り B","headline":"h","context":"c","summary":"s","scope":"sc","repo":"app","depends_on":[1]}],"evidence":[]}`
+	Exec(t, workspace, `INSERT INTO slice_split (challenge_id, state, classify_reason, proposal, evidence_path, hold_id, created_at, updated_at)
+		SELECT ?, 'awaiting_owner', 'r', ?, ?, MAX(id), ?, ? FROM hold WHERE challenge_id = ?`,
+		challengeID, proposal, fmt.Sprintf(".flywheel/requirements/split-C-%d.md", challengeID), at, at, challengeID)
+}

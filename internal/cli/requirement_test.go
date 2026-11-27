@@ -195,7 +195,7 @@ func TestShowJSON_RequirementAndSliceSplitKeys_AC214_AC215_AC218_AC219(t *testin
 	}
 }
 
-// 案の区切りは出力の型の 7 つの項目で出し、回答の後に足す challenge_id は出さない。
+// 案の区切りは出力の型の 7 つの項目で出す。分ける回答の後の区切りは、作った課題の challenge_id も出す。
 func TestShowJSON_SliceSplitSlices_AC219(t *testing.T) {
 	ws := initializedWorkspace(t)
 	unsetEnv(t, core.ChatEnvSession)
@@ -211,8 +211,12 @@ func TestShowJSON_SliceSplitSlices_AC219(t *testing.T) {
 		t.Fatalf("slices = %v", slices)
 	}
 	want := []string{"context", "depends_on", "headline", "repo", "scope", "summary", "title"}
-	if got := sortedKeys(keysOf(slices[0].(map[string]any))); !reflect.DeepEqual(got, want) {
+	if got := sortedKeys(keysOf(slices[1].(map[string]any))); !reflect.DeepEqual(got, want) {
 		t.Errorf("slice keys = %v, want %v", got, want)
+	}
+	split0 := slices[0].(map[string]any)
+	if got := sortedKeys(keysOf(split0)); !reflect.DeepEqual(got, append([]string{"challenge_id"}, want...)) || split0["challenge_id"] != "C-9" {
+		t.Errorf("split slice = %v, want the challenge_id", split0)
 	}
 	if got := slices[1].(map[string]any)["depends_on"]; !reflect.DeepEqual(got, []any{float64(1)}) {
 		t.Errorf("depends_on = %v", got)

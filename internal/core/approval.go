@@ -1152,6 +1152,8 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	// spec は答える保留が下書きづくりの保留のときの記録、specReply は記録に足す中身。
 	var spec *SpecDraft
 	var specReply specDraftReply
+	// sliceSplit は答える保留が分けるかの保留のときの、区切りを分ける記録。
+	var sliceSplit *sliceSplitAnswer
 
 	resolvePreceding := func(ctx context.Context, tx *sql.Tx, cid int64, current *Challenge) (Status, error) {
 		id, question, fromStatus, raisedAt, _, err := selectAnswerHold(ctx, tx, cid, current.ID, req.HoldID)
@@ -1164,6 +1166,9 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 			return "", err
 		}
 		if err := requireSpecQuestionHold(spec, req.Items); err != nil {
+			return "", err
+		}
+		if sliceSplit, err = loadSliceSplitAnswer(ctx, tx, cid, id); err != nil {
 			return "", err
 		}
 		opts, required, err := loadHoldOptionsOf(ctx, tx, id)
@@ -1230,6 +1235,11 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 				return err
 			}
 		}
+		if sliceSplit != nil && chosenOption != nil && *chosenOption == sliceSplitOptionSingle {
+			if err := applySliceSplitSingle(ctx, tc, att); err != nil {
+				return err
+			}
+		}
 
 		// S3（Issue #39）: 未設定（保留の answer が無い）から値が入るので、
 		// before にそのキーを null で載せる（plan の plan_version・classify の
@@ -1279,6 +1289,12 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	if !ok {
 		return nil, nil, ErrNotFound
 	}
+	// split の回答は元の課題を取り下げるので、取り下げと同じく、異常終了した委譲の run を先に回収する。
+	if req.Option == sliceSplitOptionSplit {
+		if err := s.ReapInterruptedRuns(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
 	var c *Challenge
 	err = s.mutateAsRun(ctx, p.actor, p.channel, p.verification, p.runID, func(tx *sql.Tx, rec *activityRecorder) error {
 		if uiAnswer {
@@ -1301,6 +1317,9 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 		}
 		var err error
 		c, err = s.transitionInTx(ctx, tx, rec, p, cid, apply)
+		if err == nil && sliceSplit != nil && chosenOption != nil && *chosenOption == sliceSplitOptionSplit {
+			c, err = s.applySliceSplit(ctx, tx, rec, p, c, sliceSplit)
+		}
 		return err
 	})
 	if err != nil {
@@ -1309,6 +1328,16 @@ func (s *Store) ExecuteAnswer(ctx context.Context, req AnswerRequest, att Attest
 	// 下書きは、省く書き込みが成立した後に消す（消せなくても回答は成立している）。
 	if spec != nil && chosenOption != nil && *chosenOption == specDraftOptionSkip {
 		s.discardSpecDraft(ctx, cid, att.Actor())
+	}
+	if sliceSplit != nil && chosenOption != nil {
+		switch *chosenOption {
+		case sliceSplitOptionSingle:
+			s.discardRequirementEvidence(ctx, sliceSplit.evidencePath, "challenge", cid, att.Actor())
+		case sliceSplitOptionSplit:
+			// 元の課題は取り下げになったので、取り下げの遷移（runTransition）と同じ下書きの後始末をする。
+			s.cleanupSpecDraft(ctx, cid, att.Actor())
+			s.discardWithdrawnSpecDraft(ctx, cid, att.Actor())
+		}
 	}
 	return c, &holdOut, nil
 }
