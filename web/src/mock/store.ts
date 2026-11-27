@@ -388,7 +388,7 @@ function sliceSplitChallenge(): MockChallenge {
   });
 }
 
-// 要求の記録を指す、解決した区切りの課題。
+// 要求の記録を指す、完了した区切りの課題（同じ要求の課題が残っているので、要求は解決の前）。
 function requirementChallenge(): MockChallenge {
   return mk("C-8", "書き出しの期間を指定する", "done", {
     requirement: {
@@ -403,7 +403,7 @@ function requirementChallenge(): MockChallenge {
       id: "RQ-1",
       origin: "issue",
       origin_challenge_id: "C-10",
-      resolved_at: iso(5),
+      resolved_at: null,
       title: "書き出しを使いやすくする",
       url: "https://github.com/example/app/issues/41",
     },
