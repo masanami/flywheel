@@ -68,7 +68,7 @@ func j1OutputSchema() []byte {
 		"type": "object",
 		"properties": map[string]any{
 			"verdict":        map[string]any{"type": "string", "enum": verdicts},
-			"fits_one_slice": map[string]any{"type": []string{"boolean", "null"}},
+			"fits_one_slice": map[string]any{"type": []string{"boolean", "null"}, "description": "区切り 1 つに収まるか"},
 			"priority":       map[string]any{"type": []string{"string", "null"}, "enum": priorities},
 			"size":           map[string]any{"type": []string{"string", "null"}, "enum": sizes},
 			"reason":         map[string]any{"type": "string"},

@@ -42,20 +42,22 @@ type j10Output struct {
 
 // j10OutputSchema は区切りを分ける判断点の `--json-schema` に渡すスキーマを返す。
 func j10OutputSchema() []byte {
-	str := map[string]any{"type": "string"}
+	// 各項目の description は、指示文（prompts/j10.md）の項目名と同じ言葉にする。
+	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 	object := func(props map[string]any, required ...string) map[string]any {
 		return map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}
 	}
 	slice := object(map[string]any{
-		"title": str, "headline": str, "context": str, "summary": str, "scope": str, "repo": str,
-		"depends_on": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}},
+		"title": str("題名"), "headline": str("一言で"), "context": str("位置づけ"), "summary": str("要旨"),
+		"scope": str("範囲"), "repo": str("リポジトリ"),
+		"depends_on": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "前に済ませる区切り"},
 	}, "title", "headline", "context", "summary", "scope", "repo", "depends_on")
+	evidence := object(map[string]any{"path": str("場所"), "note": str("手がかり")}, "path", "note")
 	schema := object(map[string]any{
-		"verdict": map[string]any{"type": "string", "enum": J10VerdictValues},
-		"reason":  str,
-		"slices":  map[string]any{"type": []string{"array", "null"}, "items": slice},
-		"evidence": map[string]any{"type": "array", "items": object(map[string]any{"path": str, "note": str},
-			"path", "note")},
+		"verdict":  map[string]any{"type": "string", "enum": J10VerdictValues, "description": "判定"},
+		"reason":   str("理由"),
+		"slices":   map[string]any{"type": []string{"array", "null"}, "items": slice, "description": "区切り"},
+		"evidence": map[string]any{"type": "array", "items": evidence, "description": "根拠"},
 	}, "verdict", "reason", "evidence")
 	// 静的なリテラルなので Marshal は失敗しない。キーの順は常に辞書順。
 	b, _ := json.Marshal(schema)

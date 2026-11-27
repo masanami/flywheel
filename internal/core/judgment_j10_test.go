@@ -274,6 +274,52 @@ func TestJ1OutputSchema_HasNullableBooleanFitsOneSlice(t *testing.T) {
 	}
 }
 
+// 出力の型の各項目の description は、指示文の項目名と同じ言葉である。
+func TestJudgmentOutputSchemas_DescribeFieldsWithPromptNames(t *testing.T) {
+	t.Parallel()
+	type prop struct {
+		Description string `json:"description"`
+		Items       struct {
+			Properties map[string]struct {
+				Description string `json:"description"`
+			} `json:"properties"`
+		} `json:"items"`
+	}
+	var j10 struct {
+		Properties map[string]prop `json:"properties"`
+	}
+	if err := json.Unmarshal(j10OutputSchema(), &j10); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"verdict": "判定", "reason": "理由", "evidence": "根拠", "slices": "区切り"} {
+		if got := j10.Properties[name].Description; got != want {
+			t.Errorf("j10 %s description = %q, want %q", name, got, want)
+		}
+	}
+	for name, want := range map[string]string{"path": "場所", "note": "手がかり"} {
+		if got := j10.Properties["evidence"].Items.Properties[name].Description; got != want {
+			t.Errorf("j10 evidence.%s description = %q, want %q", name, got, want)
+		}
+	}
+	for name, want := range map[string]string{
+		"title": "題名", "headline": "一言で", "context": "位置づけ", "summary": "要旨",
+		"scope": "範囲", "repo": "リポジトリ", "depends_on": "前に済ませる区切り",
+	} {
+		if got := j10.Properties["slices"].Items.Properties[name].Description; got != want {
+			t.Errorf("j10 slices.%s description = %q, want %q", name, got, want)
+		}
+	}
+	var j1 struct {
+		Properties map[string]prop `json:"properties"`
+	}
+	if err := json.Unmarshal(j1OutputSchema(), &j1); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := j1.Properties["fits_one_slice"].Description, "区切り 1 つに収まるか"; got != want {
+		t.Errorf("j1 fits_one_slice description = %q, want %q", got, want)
+	}
+}
+
 // --- 区切りを分ける記録の作成 ---
 
 // AC-8・AC-9・AC-10・AC-29
