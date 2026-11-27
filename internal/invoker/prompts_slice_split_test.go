@@ -101,7 +101,7 @@ func TestJ1Prompt_LimitIsWithinTheCap(t *testing.T) {
 
 func j10Instructions(t *testing.T) string {
 	t.Helper()
-	got, err := Instructions(judgmentJ10)
+	got, err := Instructions(core.JudgmentJ10)
 	if err != nil {
 		t.Fatal(err)
 	}

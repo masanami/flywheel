@@ -78,10 +78,10 @@ const (
 	CostSourceUnknown  CostSource = costSourceUnknown
 )
 
-// JudgmentPoint は判断点 J1〜J6・J8・SV の閉集合（J7 は無い。J9 は過去の run を読むためにだけ内部に残す）。
+// JudgmentPoint は判断点 J1〜J6・J8・J10・SV の閉集合（J7 は無い。J9 は過去の run を読むためにだけ内部に残す）。
 type JudgmentPoint = judgmentPoint
 
-// JudgmentPoint の8値。
+// JudgmentPoint の9値。
 const (
 	JudgmentJ1 JudgmentPoint = judgmentJ1
 	JudgmentJ2 JudgmentPoint = judgmentJ2
@@ -90,6 +90,8 @@ const (
 	JudgmentJ5 JudgmentPoint = judgmentJ5
 	JudgmentJ6 JudgmentPoint = judgmentJ6
 	JudgmentJ8 JudgmentPoint = judgmentJ8
+	// JudgmentJ10 は区切りを分ける判断点。
+	JudgmentJ10 JudgmentPoint = judgmentJ10
 	// JudgmentSV はスーパーバイザーの判断点。
 	JudgmentSV JudgmentPoint = judgmentSV
 )
