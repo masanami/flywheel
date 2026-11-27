@@ -63,12 +63,12 @@ func realForbiddenSources() invoker.ForbiddenSources {
 	}
 }
 
-// allEmbeddedPromptContents は J1〜J5 の指示文とブリーフの固定の節5つ、
-// 再開の固定の文面3つ、計13件の埋め込みの実物の中身を、名前つきで返す。
+// allEmbeddedPromptContents は判断点の指示文とブリーフの固定の節5つ、
+// 再開の固定の文面3つの埋め込みの実物の中身を、名前つきで返す。
 func allEmbeddedPromptContents(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8, core.JudgmentSV} {
+	for _, j := range []core.JudgmentPoint{core.JudgmentJ1, core.JudgmentJ2, core.JudgmentJ3, core.JudgmentJ5, core.JudgmentJ6, core.JudgmentJ8, core.JudgmentSV, core.JudgmentPoint("J10")} {
 		body, err := invoker.Instructions(j)
 		if err != nil {
 			t.Fatalf("invoker.Instructions(%s): %v", j, err)
@@ -242,12 +242,15 @@ func TestForbiddenTerms_DetectsJ8ClosedValues(t *testing.T) {
 // 欄の指示文は flywheel のコマンド（answer・create・cycle status・cycle stop・show・list・approve・reject）を名指しする役目を持つので、
 // コマンドの名前の語（answer・create・status・cycle・stop・show・list・approve・reject）と、answer のフラグ（--replan・--hold）の語 replan（スーパーバイザーの手の名前と同じ文字）と hold（保留の表の名前と同じ文字）だけは
 // 禁止語から外し、残りの禁止語と金額の表記を検査する。
+// 要求を区切りに分ける節が名指しするコマンド（requirement create・dep add）の語（requirement・dep・add）と、
+// 区切りの課題を取り下げる操作の語「取り下げ」（状態の表示名と同じ文字）も外す。
 func TestChatPrompt_PassesForbiddenTermsCheck(t *testing.T) {
 	t.Parallel()
 	src := realForbiddenSources()
 	terms := slices.DeleteFunc(invoker.ForbiddenTerms(src), func(s string) bool {
 		return s == "answer" || s == "create" || s == "status" || s == "cycle" || s == "stop" || s == "replan" || s == "hold" ||
-			s == "show" || s == "list" || s == "approve" || s == "reject"
+			s == "show" || s == "list" || s == "approve" || s == "reject" ||
+			s == "requirement" || s == "dep" || s == "add" || s == "取り下げ"
 	})
 	if len(terms) == 0 {
 		t.Fatal("no forbidden terms")
@@ -262,5 +265,19 @@ func TestChatPrompt_PassesForbiddenTermsCheck(t *testing.T) {
 	// 検査が空回りしていない: 状態の語を足すと検出される。
 	if hits := invoker.FindForbiddenTerms(body+"\n"+string(core.StatusVocabulary[0].Code), terms); len(hits) == 0 {
 		t.Error("the check did not detect an inserted state code")
+	}
+}
+
+// 区切りを分ける判断点の指示文は、出力の判定の値と判断点の ID が禁止の一覧に入っても検査を通る
+// （判定の値は出力の型だけで子に伝える）。
+func TestJ10Prompt_PassesForbiddenTermsWithItsOwnVerdictValues(t *testing.T) {
+	t.Parallel()
+	body, err := invoker.Instructions(core.JudgmentPoint("J10"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	terms := append(invoker.ForbiddenTerms(realForbiddenSources()), "split", "single", "J10")
+	if hits := invoker.FindForbiddenTerms(body, terms); len(hits) != 0 {
+		t.Errorf("j10.md contains forbidden term(s): %v", hits)
 	}
 }
