@@ -356,6 +356,7 @@ it("#1357: 答えの by に知らない値を持つ記録でも、画面は誤�
     questionDetail({
       answers: [
         {
+          kind: "answer",
           attempt: 1,
           question: "前の問い",
           answer: "前の答え",

@@ -496,7 +496,7 @@ func TestSpecDraft_DetailCarriesTheRecordAndTheOpenHold(t *testing.T) { // AC-35
 		t.Fatal(err)
 	}
 	questions := []SpecDraftQuestion{{Question: "Q?", Options: []SpecDraftOption{{Label: "a"}, {Label: "b"}}, Recommended: 2, Reason: "why"}}
-	answers := []SpecDraftAnswer{{Attempt: 1, Question: "P?", Answer: "yes", By: "supervisor", Basis: []SpecDraftBasis{{Path: "docs/a.md", Locator: "§1"}}}}
+	answers := []SpecDraftAnswer{{Kind: SpecDraftAnswerKindAnswer, Attempt: 1, Question: "P?", Answer: "yes", By: "supervisor", Basis: []SpecDraftBasis{{Path: "docs/a.md", Locator: "§1"}}}}
 	why := SpecDraftHoldQuestion
 	putSpecDraft(t, f.s, id, specDraftUpdate{State: SpecDraftStateAwaitingOwner, Attempts: 2, Questions: questions, Answers: answers, HoldRowID: &holdID, HoldReason: &why})
 

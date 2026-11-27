@@ -24,7 +24,9 @@ type SpecDraftAnswer struct {
 	Attempt int              `json:"attempt"`
 	Basis   []SpecDraftBasis `json:"basis"`
 	// By は答えた者。知らない値もそのまま出す。
-	By       string `json:"by"`
+	By string `json:"by"`
+	// Kind は要素の種類（答えか添え書き）。
+	Kind     string `json:"kind"`
 	Question string `json:"question"`
 }
 
@@ -67,7 +69,7 @@ func fromSpecDraft(d *core.SpecDraft) *SpecDraft {
 		for _, b := range a.Basis {
 			basis = append(basis, SpecDraftBasis{Locator: b.Locator, Path: b.Path})
 		}
-		answers = append(answers, SpecDraftAnswer{Answer: a.Answer, Attempt: a.Attempt, Basis: basis, By: a.By, Question: a.Question})
+		answers = append(answers, SpecDraftAnswer{Answer: a.Answer, Attempt: a.Attempt, Basis: basis, By: a.By, Kind: string(a.Kind), Question: a.Question})
 	}
 	var holdReason *string
 	if d.HoldReason != nil {

@@ -7,13 +7,17 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
-// このファイルは、下書きづくりの保留への回答の規則（問いごとの答えの検査と組み立て・選択肢ごとの記録と課題の書き換え）を持つ。
+// このファイルは、下書きづくりの保留への回答の規則（問いごとの答えと添え書きの検査と組み立て・選択肢ごとの記録と課題の書き換え）を持つ。
 // どの保留かは下書きづくりの記録の保留の理由で見分ける。書き込みは、保留への回答（ExecuteAnswer）のトランザクションの中で行う。
 
 // specDraftAnsweredByOwner は答えの一覧の、オーナーの答えの by の値。
 const specDraftAnsweredByOwner = "owner"
+
+// MaxSpecDraftNoteRunes は、記録に残す添え書きの長さの上限（コードポイント）。
+const MaxSpecDraftNoteRunes = 2000
 
 const (
 	// specDraftDoneByOwner は、オーナーが選択肢 proceed で進めた（spec_draft_done の detail）。
@@ -47,50 +51,98 @@ func requireSpecQuestionHold(d *SpecDraft, items []PlanAnswerItem) error {
 	return nil
 }
 
-// checkSpecDraftAnswer は、下書きづくりの保留（記録 d）へ選択肢 option で答えてよいかを確かめる。何も書かない。
-// 返す値は、option が answer のときに答えの一覧へ足す答え。proceed は下書きを読み、読めないか受入基準が 0 件なら ErrValidation。
-func (s *Store) checkSpecDraftAnswer(d *SpecDraft, option string, items []PlanAnswerItem) ([]SpecDraftAnswer, error) {
-	if len(items) > 0 && option != specDraftOptionAnswer {
-		return nil, fmt.Errorf("%w: answers per question can only be given with the option %s", ErrValidation, specDraftOptionAnswer)
+// specDraftReply は、下書きづくりの保留への回答で、記録に足す中身。
+type specDraftReply struct {
+	// Answers は問いごとの答え（選択肢 answer のときだけ）。Note は添え書き（無ければ nil）。
+	Answers []SpecDraftAnswer
+	Note    *SpecDraftAnswer
+	// Changed は推奨と違う答えにした問いの番号（小さい順。無ければ nil）。
+	Changed []int64
+}
+
+// entries は答えの一覧の後ろへ足す要素（問いごとの答え、添え書きの順）。
+func (r specDraftReply) entries() []SpecDraftAnswer {
+	out := slices.Clone(r.Answers)
+	if r.Note != nil {
+		out = append(out, *r.Note)
 	}
+	return out
+}
+
+// specDraftChangedAnswerText は、推奨と違う答え（問いの番号 changed。小さい順）をしたときの、回答の文の見出し。
+func specDraftChangedAnswerText(changed []int64) string {
+	numbers := make([]string, len(changed))
+	for i, n := range changed {
+		numbers[i] = fmt.Sprintf("Q%d", n)
+	}
+	return "問いに答えた（推奨と違う答え: " + strings.Join(numbers, "・") + "）"
+}
+
+// specDraftNote は、次の実行へ渡す添え書き note を答えの一覧の要素にする。空白だけなら nil、長さの上限を超えれば ErrValidation。
+func specDraftNote(d *SpecDraft, note string) (*SpecDraftAnswer, error) {
+	if strings.TrimSpace(note) == "" {
+		return nil, nil
+	}
+	if n := utf8.RuneCountInString(note); n > MaxSpecDraftNoteRunes {
+		return nil, fmt.Errorf("%w: the note is %d characters; the limit is %d", ErrValidation, n, MaxSpecDraftNoteRunes)
+	}
+	return &SpecDraftAnswer{Kind: SpecDraftAnswerKindNote, Attempt: d.Attempts, Answer: note, By: specDraftAnsweredByOwner,
+		Basis: []SpecDraftBasis{}}, nil
+}
+
+// checkSpecDraftAnswer は、下書きづくりの保留（記録 d）へ選択肢 option（添え書き note）で答えてよいかを確かめる。何も書かない。
+// 返す値は、記録に足す中身。添え書きを記録に足すのは、次の実行がある answer と retry だけ。
+// proceed は下書きを読み、読めないか受入基準が 0 件なら ErrValidation。
+func (s *Store) checkSpecDraftAnswer(d *SpecDraft, option, note string, items []PlanAnswerItem) (specDraftReply, error) {
+	var reply specDraftReply
+	if len(items) > 0 && option != specDraftOptionAnswer {
+		return reply, fmt.Errorf("%w: answers per question can only be given with the option %s", ErrValidation, specDraftOptionAnswer)
+	}
+	var err error
 	switch option {
 	case specDraftOptionAnswer:
-		return ownerSpecDraftAnswers(d, items)
+		if reply.Answers, reply.Changed, err = ownerSpecDraftAnswers(d, items); err != nil {
+			return reply, err
+		}
+		reply.Note, err = specDraftNote(d, note)
+	case specDraftOptionRetry:
+		reply.Note, err = specDraftNote(d, note)
 	case specDraftOptionProceed:
 		if _, err := readSpecCriteria(s.workspace, d.Path); err != nil {
 			// 仕様の文書を読めない誤りの種類は引き継がない（回答の検査の誤りとして返す）。
-			return nil, fmt.Errorf("%w: cannot proceed with the draft: %s", ErrValidation, err.Error())
+			return reply, fmt.Errorf("%w: cannot proceed with the draft: %s", ErrValidation, err.Error())
 		}
-	case specDraftOptionRetry, specDraftOptionSkip:
+	case specDraftOptionSkip:
 	default:
-		return nil, fmt.Errorf("%w: unknown option %q for a spec draft hold", ErrValidation, EscapeControl(option, false))
+		return reply, fmt.Errorf("%w: unknown option %q for a spec draft hold", ErrValidation, EscapeControl(option, false))
 	}
-	return nil, nil
+	return reply, err
 }
 
 // ownerSpecDraftAnswers は残った問いの全部への、オーナーの答えを問いの並びの順に作る。items に無い問いの答えは、推奨の選択肢の見出し。
+// changed は推奨と違う答え（推奨でない選択肢の番号か、文）にした問いの番号（小さい順）。
 // 無い問いの番号・無い選択肢の番号・同じ問いへの 2 つの答え・番号と文の両方か無し・空の文は ErrValidation。
-func ownerSpecDraftAnswers(d *SpecDraft, items []PlanAnswerItem) ([]SpecDraftAnswer, error) {
+func ownerSpecDraftAnswers(d *SpecDraft, items []PlanAnswerItem) (answers []SpecDraftAnswer, changed []int64, err error) {
 	given := map[int64]PlanAnswerItem{}
 	for _, it := range items {
 		if it.Question < 1 || it.Question > int64(len(d.Questions)) {
-			return nil, fmt.Errorf("%w: no such question Q%d", ErrValidation, it.Question)
+			return nil, nil, fmt.Errorf("%w: no such question Q%d", ErrValidation, it.Question)
 		}
 		if _, dup := given[it.Question]; dup {
-			return nil, fmt.Errorf("%w: Q%d is answered twice", ErrValidation, it.Question)
+			return nil, nil, fmt.Errorf("%w: Q%d is answered twice", ErrValidation, it.Question)
 		}
 		if (it.Choice == nil) == (it.Text == nil) {
-			return nil, fmt.Errorf("%w: Q%d needs either a choice or a text", ErrValidation, it.Question)
+			return nil, nil, fmt.Errorf("%w: Q%d needs either a choice or a text", ErrValidation, it.Question)
 		}
 		if it.Text != nil && strings.TrimSpace(*it.Text) == "" {
-			return nil, fmt.Errorf("%w: the text for Q%d is empty", ErrValidation, it.Question)
+			return nil, nil, fmt.Errorf("%w: the text for Q%d is empty", ErrValidation, it.Question)
 		}
 		if n := len(d.Questions[it.Question-1].Options); it.Choice != nil && (*it.Choice < 1 || *it.Choice > int64(n)) {
-			return nil, fmt.Errorf("%w: choice %d is out of range for Q%d", ErrValidation, *it.Choice, it.Question)
+			return nil, nil, fmt.Errorf("%w: choice %d is out of range for Q%d", ErrValidation, *it.Choice, it.Question)
 		}
 		given[it.Question] = it
 	}
-	answers := make([]SpecDraftAnswer, len(d.Questions))
+	answers = make([]SpecDraftAnswer, len(d.Questions))
 	for i, q := range d.Questions {
 		choice := int64(q.Recommended)
 		var text *string
@@ -101,25 +153,29 @@ func ownerSpecDraftAnswers(d *SpecDraft, items []PlanAnswerItem) ([]SpecDraftAns
 			text = it.Text
 		}
 		// 実行の回数は問いを出した後、次の実行を始めるまで変わらない。
-		a := SpecDraftAnswer{Attempt: d.Attempts, Question: q.Question, By: specDraftAnsweredByOwner, Basis: []SpecDraftBasis{}}
+		if text != nil || choice != int64(q.Recommended) {
+			changed = append(changed, int64(i+1))
+		}
+		a := SpecDraftAnswer{Kind: SpecDraftAnswerKindAnswer, Attempt: d.Attempts, Question: q.Question, By: specDraftAnsweredByOwner,
+			Basis: []SpecDraftBasis{}}
 		if text != nil {
 			a.Answer = *text
 		} else {
 			if choice < 1 || choice > int64(len(q.Options)) {
-				return nil, fmt.Errorf("core: spec draft question %d has no recommended option", i+1)
+				return nil, nil, fmt.Errorf("core: spec draft question %d has no recommended option", i+1)
 			}
 			a.Answer = q.Options[choice-1].Label
 		}
 		answers[i] = a
 	}
-	return answers, nil
+	return answers, changed, nil
 }
 
 // applySpecDraftAnswer は、下書きづくりの保留への回答を、記録と課題と作業ログへ書く（回答の遷移の書き込みの中で呼ぶ）。
-// answers は checkSpecDraftAnswer が返した、足す答え。問いの一覧と実行の回数は変えない。
-func applySpecDraftAnswer(ctx context.Context, tc *transitionCtx, d *SpecDraft, option string, answers []SpecDraftAnswer) error {
+// reply は checkSpecDraftAnswer が返した、足す中身。問いの一覧と実行の回数は変えない。
+func applySpecDraftAnswer(ctx context.Context, tc *transitionCtx, d *SpecDraft, option string, reply specDraftReply) error {
 	u := specDraftUpdate{State: SpecDraftStatePending, Attempts: d.Attempts, Questions: d.Questions,
-		Answers: append(slices.Clone(d.Answers), answers...)}
+		Answers: append(slices.Clone(d.Answers), reply.entries()...)}
 	switch option {
 	case specDraftOptionProceed:
 		u.State = SpecDraftStateDone

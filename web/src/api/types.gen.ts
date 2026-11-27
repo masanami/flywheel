@@ -338,6 +338,7 @@ export interface SpecDraftAnswer {
   attempt: number;
   basis: SpecDraftBasis[];
   by: string;
+  kind: string;
   question: string;
 }
 
