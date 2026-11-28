@@ -1498,6 +1498,8 @@ export const EXECUTION_RESULT_CODES = [
   "waiting_outside",
   "delegate_ended",
   "waiting_fix_check",
+  "gate_failed",
+  "gate_unavailable",
 ] as const;
 
 export const EXECUTION_RESULT_WORDS = [
@@ -1528,6 +1530,8 @@ export const EXECUTION_RESULT_WORDS = [
   "flywheel の外での反映を待っている",
   "委譲先の実行が、入れずに終わった",
   "コンフリクトの解消の確かめを待っている",
+  "上げる前の検査が通らなかった",
+  "上げる前の検査を回せなかった",
 ] as const;
 
 export const CONDITIONS_AFTER_RELEASE_HEADINGS = [

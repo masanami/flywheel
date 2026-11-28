@@ -50,7 +50,7 @@ flywheel のエージェントの価値は、作業をこなすことよりも�
 make check
 ```
 
-ブラウザの試験（Playwright。偽の API の上で画面を操作する）は `make e2e`。手元の必須のゲート（claude-harness の品質ゲートの宣言 `.claude-harness/quality-gate.json`）は `make gate`（`make check` の後に `make e2e`）。
+ブラウザの試験（Playwright。偽の API の上で画面を操作する）は `make e2e`。タスクの PR のゲート（claude-harness の品質ゲートの宣言 `.claude-harness/quality-gate.json`）は `make gate-pr`（宛先が統合ブランチなら変えた所だけの軽い検査、ほかは `make gate`）。フルのゲートは `make gate`（`make check` の後に `make e2e`）で、統合ブランチを main へ上げる前に flywheel も回す（宣言 `.claude-harness/promotion-gate.json`）。
 初回は Playwright のブラウザを用意する。
 
 ```sh

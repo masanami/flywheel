@@ -61,6 +61,10 @@ type ReleaseExecOptions struct {
 	Connectors *ConnectorsDeclaration
 	// Agent は failure_limit と、契約のコマンドの時間の上限の出どころ。nil なら既定値。
 	Agent *AgentDeclaration
+	// Gate は昇格の前の検査の起動。HeadGit は通す中身を取り出す一時の worktree の口。統合先を使う課題で、
+	// どちらかが nil なら「入れてよい」を返さず待つ（gate_unavailable）。
+	Gate    PromotionGateRunner
+	HeadGit HeadWorktreeGit
 	// Contract は契約のコマンド（status・resume）の起動。課題に対応する契約の実行があるときに使う（nil なら読めなかったものとして扱う）。
 	Contract ContractClient
 	// CycleID は発生に持たせる周の ID（"Y-<n>"）。空なら周を持たない（NULL）。形式不正は ErrValidation。
@@ -349,7 +353,11 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		if open, err := latestOperationExecution(ctx, tx, opID); err != nil {
 			return err
 		} else if open != nil && open.open() {
-			if !releaseAttemptStale(open, at) {
+			stale, err := releaseAttemptStaleForChallenge(ctx, tx, r.ChallengeID, open, at)
+			if err != nil {
+				return err
+			}
+			if !stale {
 				notStarted = &NotStarted{ChallengeID: cid, OperationID: formatOperationID(opID), Reason: NotStartedInProgress,
 					Detail: fmt.Sprintf("%d", open.ID)}
 				return nil

@@ -13,7 +13,7 @@
 //   - 作業ツリーの外側から呼ぶ git は、必ず GIT_DIR と GIT_WORK_TREE を明示する
 //     （作業ツリーの .git は書き換え可能なポインタのファイルのため。worktree は
 //     元のクローンが持つ管理ディレクトリを自分で突き止めて GIT_DIR にする）。
-//   - git clone を実行しない。git fetch を実行してよいのは FetchHead（J5 が PR の head の 1 コミットを
+//   - git clone を実行しない。git fetch を実行してよいのは FetchHead（J5 と昇格の前の検査が PR の head の 1 コミットを
 //     一時の ref へ取る口）だけで、他の口は fetch しない。作業ツリーの変更を消さない（reset・
 //     clean・checkout -- をしない〔SwitchTree のブランチの切り替えは強制せず、変更を消さない〕。例外は Workspace.CommitPaths がコミットの後に本物の
 //     index の対象パスを HEAD に合わせる `reset -q -- <パス>` だけで、作業ツリーには触れない）。

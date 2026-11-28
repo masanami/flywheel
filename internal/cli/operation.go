@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/masanami/flywheel/internal/adapters/git"
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
 	"github.com/masanami/flywheel/internal/view"
@@ -76,15 +77,19 @@ func runOpExec(a Args) (any, error) {
 		return nil, mapCoreErr(err)
 	}
 
+	launcher := invoker.NewLauncherWithLookPath(a.LookPath)
 	res, runErr := a.Store.ExecuteReleases(ctx, ids, core.ReleaseExecOptions{
 		Checks:     newCheckSource(a.lookPath()),
 		Compare:    newCompareSource(a.lookPath()),
 		Connectors: conn,
 		Agent:      decl,
 		// 契約のコマンド（status・resume）の起動。claude は起動しない。
-		Contract: invoker.NewLauncherWithLookPath(a.LookPath),
-		Trigger:  core.ReleaseExecTriggerOpExec,
-		CycleID:  cyc.ID,
+		Contract: launcher,
+		// 昇格の前の検査の起動と、通す中身を取り出す一時の worktree。
+		Gate:    launcher,
+		HeadGit: git.New(),
+		Trigger: core.ReleaseExecTriggerOpExec,
+		CycleID: cyc.ID,
 	})
 
 	endResult := core.CycleResultCompleted

@@ -9,7 +9,7 @@ BINARY := $(BUILD_DIR)/flywheel
 NPM := npm
 WEB_DIR := web
 
-.PHONY: check gate e2e e2e-real ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
+.PHONY: check gate gate-pr e2e e2e-real ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
 
 ## check はすべての品質ゲートを順に実行する。1 つでも失敗すれば非 0 で終わる。
 ## UI の lint・テスト・ビルドを先に実行し、その成果物を埋め込んだ状態で go test・go build を行う。
@@ -39,8 +39,13 @@ e2e: ui-install
 	@echo "==> npm run e2e (web)"
 	cd $(WEB_DIR) && $(NPM) run e2e
 
-## gate: 手元の必須のゲート（claude-harness の品質ゲートの宣言 .claude-harness/quality-gate.json が呼ぶ）。
-## make check に続けて make e2e を流す。CI は同じ 2 つを別の手順で流す。
+## gate-pr: タスクの PR の品質ゲート（claude-harness の品質ゲートの宣言 .claude-harness/quality-gate.json が呼ぶ）。
+## PR の宛先が統合ブランチなら変えた所だけの軽い検査、それ以外と宛先を判定できないときは make gate（scripts/gate-pr.sh）。
+gate-pr:
+	@MAKE="$(MAKE)" sh scripts/gate-pr.sh
+
+## gate: フルのゲート。make check に続けて make e2e を流す（CI は同じ 2 つを別の手順で流す）。
+## 統合ブランチを反映先へ上げる前に flywheel が回す（昇格の前の検査の宣言 .claude-harness/promotion-gate.json が呼ぶ）。
 gate:
 	$(MAKE) check
 	$(MAKE) e2e
