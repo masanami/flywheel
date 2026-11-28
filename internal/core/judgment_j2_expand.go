@@ -485,7 +485,7 @@ func (s *Store) prepareJ2Expand(ctx context.Context, ch Challenge, in J2AutoInpu
 	sections = append(sections, JudgmentDataSection{Label: labelExpandBudget, Content: fmt.Sprintf(
 		"上限: %s USD\n上限までの残り（上限 − 見込み）: %s USD\n見込み: %s USD",
 		formatUSDAmount(microsToUSD(limit)), formatUSDAmount(microsToUSD(limit-estimate)), formatUSDAmount(microsToUSD(estimate)))})
-	sections = append(sections, JudgmentDataSection{Label: "対象リポジトリと操作の宣言", Content: formatJ2DeclarationSection(in.ConnDecl, hasSrc, in.AgentDecl)})
+	sections = append(sections, JudgmentDataSection{Label: "対象リポジトリと操作の宣言", Content: formatJ2DeclarationSection(in.ConnDecl, hasSrc, in.AgentDecl, s.j2FlowHints(ctx, in))})
 	return sections, true, nil
 }
 

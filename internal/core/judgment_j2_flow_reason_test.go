@@ -152,7 +152,7 @@ func TestJ2FlowReason_SchemaAddsOnlyFlowReason(t *testing.T) {
 func TestJ2FlowReason_InputOperationLines(t *testing.T) {
 	t.Parallel()
 	vc := j2FlowContext(t)
-	out := formatJ2DeclarationSection(vc.Conn, false, vc.Agent)
+	out := formatJ2DeclarationSection(vc.Conn, false, vc.Agent, nil)
 	lines := map[string]string{}
 	for _, l := range strings.Split(out, "\n") {
 		if i := strings.Index(l, "- id: "); i >= 0 {
