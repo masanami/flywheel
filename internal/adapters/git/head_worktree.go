@@ -10,8 +10,8 @@ import (
 )
 
 // このファイルは core.HeadWorktreeGit（J5 が PR の head を読む一時の worktree）の実装を持つ。
-// 元のクローンの checkout と index は変えない。`git clone` は実行しない。`git fetch` は J5 の head を読む
-// ためだけの口（FetchHead）に限り、head の 1 コミットを一時の ref へ取る。他の口は fetch しない。
+// 元のクローンの checkout と index は変えない。`git clone` は実行しない。`git fetch` は J5 と昇格の前の検査が head を
+// 取り出すためだけの口（FetchHead）に限り、head の 1 コミットを一時の ref へ取る。他の口は fetch しない。
 
 // HasCommit は core.HeadWorktreeGit の実装。クローンが無いときと、git が「無い」と答えたときは
 // (false, nil)。

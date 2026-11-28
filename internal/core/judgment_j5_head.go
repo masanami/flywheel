@@ -10,8 +10,8 @@ package core
 // クローン）から、ワークスペースの
 // .flywheel/worktrees/.j5-heads/<リポジトリ名>/<pid>-<ホスト>-<乱数>/ へ作る。主クローンの checkout も委譲の子のスロットも
 // 変えない。手元のクローンに head のコミットが無い PR は、head の 1 コミットだけを一時の ref
-// （refs/flywheel/j5-heads/ の下）へ fetch して取り出す（#509。J5 の head を読むためだけの例外で、
-// 他の口は fetch しない）。一時の ref は検証が終わったら消す。fetch に失敗したときは取り出さず、
+// （refs/flywheel/j5-heads/ の下）へ fetch して取り出す（#509。J5 の head を読むためと、昇格の前の検査
+// 〔promotion_gate.go〕が通す中身を取り出すためだけの例外で、他の口は fetch しない）。一時の ref は検証が終わったら消す。fetch に失敗したときは取り出さず、
 // そのことを注記して差分だけを渡す。
 //
 // PR が複数あるときに取り出すのは 1 件（open を優先し、無ければマージ済みの最初の 1 件）で、

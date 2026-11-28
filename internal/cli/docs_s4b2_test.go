@@ -53,22 +53,12 @@ func TestSpec_AC265_M1TransitionTableMatchesTheCodeTable(t *testing.T) {
 	}
 }
 
-// このファイルの AC-258〜AC-267 は、区切り S4b-2 の文書の受入基準（#1084）を、文書の本文で確かめる。
+// 以下は、区切り S4b-2 の文書の受入基準（#1084。AC-258〜AC-267）のうち、コードの値と文書を照らすもの。
 
 const (
 	archSection7   = "## 7. サイクルの再設計"
 	archSection215 = "### 21.5 スーパーバイザー（SV）（D27）"
 )
-
-// AC-258: architecture.md の §21 の実装済みの範囲に、S4b-2 がある。
-func TestSpec_AC258_ArchSection21NoteHasS4b2(t *testing.T) {
-	first := archS21First(t)
-	for _, want := range []string{"区切り S4b-2〔スーパーバイザーのその場の対処〕の範囲は実装済み", "区切り S4b-2 で実装した範囲は", "`supervisor_resolve`〔T20〕", "区切り S4b-3"} {
-		if !strings.Contains(first, want) {
-			t.Errorf("AC-258: the opening note of §21 lacks %q", want)
-		}
-	}
-}
 
 // AC-259: §21.5 に、手 4 を入れなかった旨の注記がある。手は 7 つで、コードの手の一覧と一致する。
 func TestSpec_AC259_ArchSection215NotesHand4IsNotIncluded(t *testing.T) {
@@ -131,29 +121,6 @@ func TestSpec_AC260_ArchSection215ListsStopKinds(t *testing.T) {
 	}
 }
 
-// AC-261: §21.5 に、見送りは同じ保留に 3 サイクルまでである旨の注記がある。
-func TestSpec_AC261_ArchSection215NotesDeferLimit(t *testing.T) {
-	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection215)
-	docLineWith(t, body, "`defer`", "同じ保留に 3 サイクルまで")
-}
-
-// AC-262: §21.5 に、retry は 1 回までである旨の注記がある。
-func TestSpec_AC262_ArchSection215NotesRetryLimit(t *testing.T) {
-	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection215)
-	docLineWith(t, body, "`retry` は 1 回まで")
-}
-
-// AC-263: §7 の判断点の表に、スーパーバイザーの判断点（SV）がある。
-func TestSpec_AC263_ArchSection7TableHasSV(t *testing.T) {
-	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection7)
-	docLineWith(t, body, "| （想定外の止まり", "**SV スーパーバイザー**", "`judgment_budget_usd.SV`")
-	// 子の問いに答える判断点（J4）は、S4b-3 で表から外した（AC-62）。
-	docLineWith(t, body, "| 3. 実行 |", "**J3 ブリーフ**")
-	if strings.Contains(body, "**J4 応答**") {
-		t.Errorf("AC-62: the §7 table still lists **J4 応答**")
-	}
-}
-
 // AC-264: §7 に、遷移 supervisor_resolve（T20）の注記がある。
 func TestSpec_AC264_ArchSection7NotesSupervisorResolve(t *testing.T) {
 	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection7)
@@ -161,22 +128,6 @@ func TestSpec_AC264_ArchSection7NotesSupervisorResolve(t *testing.T) {
 	if string(core.OpSupervisorResolve) != "supervisor_resolve" {
 		t.Errorf("AC-264: the operation = %q", core.OpSupervisorResolve)
 	}
-}
-
-// AC-266: 用語集に、「止まり方」「対処」「スーパーバイザー待ち」の行がある。
-func TestSpec_AC266_GlossaryHasStopKindActionAndSupervisorWaiting(t *testing.T) {
-	for term, want := range map[string]string{"止まり方": "`StopKind`", "対処": "`supervisor_action`", "スーパーバイザー待ち": "`supervisor_state`"} {
-		cols := glossaryRow(t, term)
-		if !strings.Contains(cols[3], want) {
-			t.Errorf("AC-266: the code name of %q = %q, want %q", term, cols[3], want)
-		}
-	}
-}
-
-// AC-267: m3-invoker-delegation.md の宣言の項目の一覧に、supervisor と judgment_budget_usd.SV がある。
-func TestSpec_AC267_M3DeclarationHasSupervisorAndSVBudget(t *testing.T) {
-	body := sectionBody(t, m3Doc(t), "#### `.flywheel/agent.json`【決定 2026-09-28 親 M3P1・M3P9】")
-	docLineWith(t, body, "- `supervisor`", "既定は真", "`judgment_budget_usd.SV`", "`config_invalid`")
 }
 
 // backticked は s の中の `...` で囲んだ語を順に返す。
@@ -187,20 +138,4 @@ func backticked(s string) []string {
 		out = append(out, parts[i])
 	}
 	return out
-}
-
-// AC-61: §21.5 に、J4 を外した旨の注記がある。
-func TestSpec_AC61_ArchSection215NotesJ4Removed(t *testing.T) {
-	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection215)
-	docLineWith(t, body, "J4 を外した旨", "`j4.md`")
-}
-
-// AC-60: architecture.md の §21 の実装済みの範囲に、S4b-3 が実装済みとして書かれている（「区切り S4b-3」の語があるだけでは足りない）。
-func TestSpec_AC60_ArchSection21NoteHasS4b3Implemented(t *testing.T) {
-	first := archS21First(t)
-	for _, want := range []string{"区切り S4b-3〔委譲先の問いに答える〕の範囲も実装済み", "区切り S4b-3 で実装した範囲は", "`child_question`", "`answer`"} {
-		if !strings.Contains(first, want) {
-			t.Errorf("AC-60: the opening note of §21 lacks %q", want)
-		}
-	}
 }

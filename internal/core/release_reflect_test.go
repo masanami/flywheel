@@ -43,6 +43,9 @@ type reflFixture struct {
 	agent   *AgentDeclaration
 	cmp     *fakeCompare
 	cycleID string
+	// gate・headGit は昇格の前の検査の偽の口（useIntegration が入れる）。
+	gate    PromotionGateRunner
+	headGit HeadWorktreeGit
 }
 
 func newReflFixture(t *testing.T) *reflFixture {
@@ -68,7 +71,7 @@ func newReflFixture(t *testing.T) *reflFixture {
 func (f *reflFixture) opts() ReleaseExecOptions {
 	return ReleaseExecOptions{
 		Checks: f.fake, Compare: f.cmp, Connectors: f.conn, Agent: f.agent, Contract: f.client,
-		Trigger: ReleaseExecTriggerOpExec, CycleID: f.cycleID, Now: func() time.Time { return f.now },
+		Trigger: ReleaseExecTriggerOpExec, CycleID: f.cycleID, Gate: f.gate, HeadGit: f.headGit, Now: func() time.Time { return f.now },
 	}
 }
 

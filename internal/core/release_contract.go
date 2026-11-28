@@ -455,6 +455,15 @@ func (s *Store) landToRun(ctx context.Context, row *operationRow, opts ReleaseEx
 		j.detail = fmt.Sprintf("the contract run says %q (%d candidates); upstream has %q", got, n, passRef)
 		return j, nil
 	}
+	// 統合ブランチを反映先へ上げる前の検査。通らなければ（回せなければ）「入れてよい」を返さない。
+	gate, err := s.runPromotionGate(ctx, row, opts, passRef)
+	if err != nil {
+		return releaseJudgment{}, err
+	}
+	if !gate.passed {
+		j.result, j.detail = gate.result, gate.detail
+		return j, nil
+	}
 	// 承認が取り消された・実行された操作へ「入れてよい」を返さない（読んだ後に別の経路が変えたときの確認）。
 	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		cur, err := loadOperationRow(ctx, tx, row.ID)
@@ -474,10 +483,10 @@ func (s *Store) landToRun(ctx context.Context, row *operationRow, opts ReleaseEx
 		return releaseJudgment{}, err
 	}
 	if why != "" {
-		j.result, j.detail = ExecutionResultLandUnconfirmed, why
+		j.result, j.detail = ExecutionResultLandUnconfirmed, appendDetail(gate.detail, why)
 		return j, nil
 	}
-	j.result, j.landDeliveredRunID = ExecutionResultLandSent, run.row.ID
+	j.result, j.detail, j.landDeliveredRunID = ExecutionResultLandSent, gate.detail, run.row.ID
 	return j, nil
 }
 
