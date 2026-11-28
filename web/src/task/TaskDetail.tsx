@@ -12,6 +12,7 @@ import { useChat } from "../chat/context.ts";
 import {
   CONFLICT_FIX_PENDING_TEXT,
   DELEGATE_STATE_LABELS,
+  FLOW_DEFINITION_SOURCE_LABELS,
   FLOW_LABELS,
   HOLD_KIND_PARENT_DIRECT,
   LANDING_LABELS,
@@ -408,6 +409,15 @@ function DelegateSection({ d }: { d: NonNullable<Task["delegate"]> }) {
           <span data-testid="delegate-flow">{label(FLOW_LABELS, d.flow)}</span>
         </p>
       ) : null}
+      {d.definition !== null ? (
+        <p>
+          定義:{" "}
+          <span data-testid="delegate-definition">
+            {label(FLOW_DEFINITION_SOURCE_LABELS, d.definition.source)}
+            （ハッシュ {d.definition.sha256_prefix}）
+          </span>
+        </p>
+      ) : null}
       <p data-testid="delegate-summary" style={{ whiteSpace: "pre-wrap" }}>
         {d.summary}
       </p>
@@ -437,9 +447,13 @@ export function stepName(step: string, nth: number): string {
   return nth >= 2 ? `${base}（${nth} 回目）` : base;
 }
 
+// 結果。指摘の数を持つステップ（レビューのステップ）は、終わっていれば指摘の数を添える。
 export function stepResult(s: Step): string {
-  if (s.state === "finished") return s.outcome ?? NO_VALUE;
-  return label(STEP_STATE_LABELS, s.state);
+  if (s.state !== "finished") return label(STEP_STATE_LABELS, s.state);
+  const base = s.outcome ?? NO_VALUE;
+  return s.findings_count !== null
+    ? `${base}（指摘 ${s.findings_count} 件）`
+    : base;
 }
 
 export function formatSeconds(sec: number): string {

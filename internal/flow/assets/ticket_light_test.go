@@ -86,10 +86,10 @@ func TestTicketLightStepIDsAreTicketMinusAnalysisAndE2EPlusBranch(t *testing.T) 
 }
 
 // AC-3・AC-10: 簡略なフローの定義の表に無いステップは、種類・遷移・with（model・effort を除く）が ticket と一致する。
-// 表にあるのは次の 6 つだけで、ほかは 1 つも違わない（respond の指示文は ticket と同じ ticket-respond.md）。
+// 表にあるのは次の 8 つだけで、ほかは 1 つも違わない（respond の指示文は ticket と同じ ticket-respond.md。self-review の指示文も ticket と同じで、with だけが違う）。
 func TestTicketLightStepsOutsideTheTableMatchTicket(t *testing.T) {
 	ticket, light := parseEmbedded(t, "ticket"), parseEmbedded(t, "ticket-light")
-	inTable := map[string]bool{"integration-route": true, "integration": true, "workspace": true, "implement": true, "fix": true, "sync": true}
+	inTable := map[string]bool{"integration-route": true, "integration": true, "workspace": true, "implement": true, "fix": true, "sync": true, "self-review": true, "self-review-fix": true}
 	for _, ls := range light.Steps {
 		ts := ticket.Step(ls.ID)
 		if ts == nil {
@@ -105,6 +105,9 @@ func TestTicketLightStepsOutsideTheTableMatchTicket(t *testing.T) {
 	}
 	if got := light.Step("respond").Prompt; got != "prompts/ticket-respond.md" {
 		t.Errorf("respond prompt = %q", got)
+	}
+	if got := light.Step("self-review").Prompt; got != ticket.Step("self-review").Prompt {
+		t.Errorf("self-review prompt = %q, want ticket's %q", got, ticket.Step("self-review").Prompt)
 	}
 }
 
@@ -140,12 +143,15 @@ func TestTicketLightTableDifferences(t *testing.T) {
 	}
 }
 
-// AC-4: 上限（limits）は ticket と一致する。facts と overridable の無さもここで確かめる。
+// AC-4: 上限（limits）は、レビューから直すステップへ戻る回数（self_review。標準 3・簡略 1）を除いて ticket と一致する。facts と overridable の無さもここで確かめる。
 func TestTicketLightLimitsAndFactsMatchTicketAndHaveNoOverridable(t *testing.T) {
 	ticket, light := parseEmbedded(t, "ticket"), parseEmbedded(t, "ticket-light")
 	text := func(w *workflow.Workflow) string {
 		var parts []string
 		for _, l := range w.Limits {
+			if l.Name == "self_review" {
+				continue // TestEmbeddedSelfReviewWithDefaults が値を確かめる
+			}
 			parts = append(parts, fmt.Sprintf("%s=%v", l.Name, l.Value))
 		}
 		for _, f := range w.Facts {
@@ -176,6 +182,9 @@ func TestTicketLightStepsDefinition(t *testing.T) {
 	}
 	if s := light.Step("fix"); s.Agent != "" || s.Prompt != "prompts/ticket-light-fix.md" {
 		t.Errorf("fix agent %q prompt %q", s.Agent, s.Prompt)
+	}
+	if s := light.Step("self-review-fix"); s.Agent != "" || s.Prompt != "prompts/ticket-light-self-review-fix.md" {
+		t.Errorf("self-review-fix agent %q prompt %q", s.Agent, s.Prompt)
 	}
 	for _, b := range light.Step("implement").With {
 		if b.Name == "codex_review" || b.Name == "critical_design" {
@@ -220,62 +229,34 @@ func TestTicketLightLLMStepsReferenceVariables(t *testing.T) {
 			t.Errorf("%s model %q effort %q, want %q for both", st.ID, st.Model, st.Effort, want)
 		}
 	}
-	// implement・fix・commit・sync-resolve・land-sync-resolve・respond・merge
-	if seen != 7 {
-		t.Errorf("llm steps = %d, want 7", seen)
+	// implement・self-review・self-review-fix・fix・commit・sync-resolve・land-sync-resolve・respond・merge
+	if seen != 9 {
+		t.Errorf("llm steps = %d, want 9", seen)
 	}
 }
 
-// 偽の禁止語。軽いセルフレビューの指示文は、否定の文にも書かない。
-var lightForbidden = []string{"/self-review", "finding-verifier", "design-deviation-verifier", "codex-review-runner", "feature-implementer"}
+// 偽の禁止語。簡略なフローの実装・直しの指示文は、否定の文にも書かない（レビューはレビューのステップが行う）。
+var lightForbidden = []string{"/self-review", "finding-verifier", "design-deviation-verifier", "codex-review-runner", "feature-implementer",
+	"claude-harness:code-reviewer", "claude-harness:design-reviewer", "self_review", "residual_findings"}
 
-// AC-20〜AC-30・AC-81・AC-82: ticket-light-implement.md の文面。
-func TestTicketLightImplementPrompt(t *testing.T) {
+// 簡略なフローの実装・直し・直すステップの指示文は、レビュアーを呼ばず、セルフレビューの欄を返さない。
+func TestTicketLightPromptsLeaveReviewToTheReviewStep(t *testing.T) {
+	for _, name := range []string{"ticket-light-implement.md", "ticket-light-fix.md", "ticket-light-self-review-fix.md"} {
+		p := readPrompt(t, name)
+		for _, w := range lightForbidden {
+			if strings.Contains(p, w) {
+				t.Errorf("%s contains %q", name, w)
+			}
+		}
+	}
 	p := readPrompt(t, "ticket-light-implement.md")
-	for _, w := range lightForbidden {
-		if strings.Contains(p, w) {
-			t.Errorf("ticket-light-implement.md contains %q", w)
-		}
-	}
-	cases := []struct {
-		ac    string
-		terms []string
-	}{
-		{"AC-21・AC-24", []string{"並べて", "`claude-harness:code-reviewer`", "`claude-harness:design-reviewer`"}},
-		{"AC-25", []string{"中以上", "直す"}},
-		{"AC-26", []string{"`/quality-check`", "通"}},
-		{"AC-27", []string{"直した指摘だけ", "確かめ"}},
-		{"AC-28", []string{"`residual_findings`", "全件", "直さなかった指摘", "確かめ直しで残った指摘"}},
-		{"AC-29", []string{"`self_review`", "`complete`", "最後まで行えたら"}},
-		{"AC-30", []string{"範囲を超える", "`deviation`", "`deviation_report`"}},
-		{"AC-82", []string{"`codex_review`", "`off`"}},
-	}
-	for _, c := range cases {
-		if !hasSentenceWith(p, c.terms...) {
-			t.Errorf("%s: no single sentence of ticket-light-implement.md has all of %q", c.ac, c.terms)
-		}
-	}
-}
-
-// AC-31〜AC-36・AC-84: ticket-light-fix.md の文面。
-func TestTicketLightFixPrompt(t *testing.T) {
-	p := readPrompt(t, "ticket-light-fix.md")
-	for _, w := range lightForbidden {
-		if strings.Contains(p, w) {
-			t.Errorf("ticket-light-fix.md contains %q", w)
-		}
-	}
-	cases := []struct {
-		ac    string
-		terms []string
-	}{
-		{"AC-34", []string{"`claude-harness:code-reviewer`", "`claude-harness:design-reviewer`", "並べて"}},
-		{"AC-35", []string{"`residual_findings`", "全件"}},
-		{"AC-36", []string{"`self_review`", "返す"}},
-	}
-	for _, c := range cases {
-		if !hasSentenceWith(p, c.terms...) {
-			t.Errorf("%s: no single sentence of ticket-light-fix.md has all of %q", c.ac, c.terms)
+	for _, terms := range [][]string{
+		{"`/quality-check`", "通"},
+		{"範囲を超える", "`deviation`", "`deviation_report`"},
+		{"セルフレビューはこのステップでは行わない"},
+	} {
+		if !hasSentenceWith(p, terms...) {
+			t.Errorf("no single sentence of ticket-light-implement.md has all of %q", terms)
 		}
 	}
 }
@@ -283,7 +264,8 @@ func TestTicketLightFixPrompt(t *testing.T) {
 // AC-37: ハッシュの一覧に、S2 で足した資材の行がある。
 func TestSumsListTicketLightMaterials(t *testing.T) {
 	sums := string(assets.Sums())
-	for _, f := range []string{"workflows/ticket-light.yaml", "workflows/prompts/ticket-light-implement.md", "workflows/prompts/ticket-light-fix.md", "workflows/scripts/ticket-light-branch.sh", "workflows/schemas/ticket-light-branch.json"} {
+	for _, f := range []string{"workflows/ticket-light.yaml", "workflows/prompts/ticket-light-implement.md", "workflows/prompts/ticket-light-fix.md", "workflows/prompts/ticket-light-self-review-fix.md",
+		"workflows/prompts/ticket-self-review.md", "workflows/prompts/ticket-self-review-fix.md", "workflows/schemas/self-review-result.json", "workflows/scripts/ticket-light-branch.sh", "workflows/schemas/ticket-light-branch.json"} {
 		if !strings.Contains(sums, "  "+f+"\n") {
 			t.Errorf("SHA256SUMS has no line for %s", f)
 		}

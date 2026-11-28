@@ -12,7 +12,7 @@ import (
 	"github.com/masanami/flywheel/internal/flow"
 )
 
-// このファイルは `flywheel flow`（start・status・resume・cancel と、切り離して進める内部の入口 __run-detached）の
+// このファイルは `flywheel flow`（start・status・resume・cancel・export・check と、切り離して進める内部の入口 __run-detached）の
 // 配線を持つ。進め方・契約の JSON の組み立てはすべて internal/flow にあり、ここは引数を渡して終了コードを返すだけ。
 // 組み込みのフローは内部向けのコマンドで、flywheel help には「内部向け」の印つきで出す（__run-detached は出さない）。
 
@@ -148,6 +148,22 @@ func runFlowCancel(a Args) (any, error) {
 	return rawExit{flow.Cancel(env, a.Positional[0])}, nil
 }
 
+func runFlowExport(a Args) (any, error) {
+	env, cerr := flowEnv(a)
+	if cerr != nil {
+		return nil, cerr
+	}
+	return rawExit{flow.Export(env, a.Positional[0])}, nil
+}
+
+func runFlowCheck(a Args) (any, error) {
+	env, cerr := flowEnv(a)
+	if cerr != nil {
+		return nil, cerr
+	}
+	return rawExit{flow.Check(env, flow.CheckOptions{Names: a.Positional, JSON: a.Bools["json"]})}, nil
+}
+
 func runFlowRunDetached(a Args) (any, error) {
 	env, cerr := flowEnv(a)
 	if cerr != nil {
@@ -180,6 +196,9 @@ func flowCommands() []Command {
 			Run: runFlowResume,
 		},
 		{Path: []string{"flow", "cancel"}, MinPositional: 1, MaxPositional: 1, Run: runFlowCancel},
+		// 写す口と確かめる口（ワークスペースの定義 .flywheel/flows/<名前>.yaml）。
+		{Path: []string{"flow", "export"}, MinPositional: 1, MaxPositional: 1, Run: runFlowExport},
+		{Path: []string{"flow", "check"}, MinPositional: 0, MaxPositional: UnlimitedPositional, Run: runFlowCheck},
 		{Path: []string{"flow", flow.DetachedRunnerCmd}, MinPositional: 1, MaxPositional: 1, Run: runFlowRunDetached},
 	}
 }

@@ -38,10 +38,12 @@ type State struct {
 	WorkflowDir string                     `json:"workflow_dir"`
 	CLIVersion  string                     `json:"cli_version,omitempty"`
 	Embedded    bool                       `json:"embedded,omitempty"`
-	LastSeq     int                        `json:"last_seq"`
-	Cancel      *CancelRequested           `json:"cancel_requested,omitempty"`
-	Cancelled   *RunCancelled              `json:"cancelled,omitempty"`
-	Units       []*Unit                    `json:"units"`
+	// Definition は run_started に記録した定義の出どころとハッシュ（この版より前の run には無い）。
+	Definition *DefinitionRecord `json:"definition,omitempty"`
+	LastSeq    int               `json:"last_seq"`
+	Cancel     *CancelRequested  `json:"cancel_requested,omitempty"`
+	Cancelled  *RunCancelled     `json:"cancelled,omitempty"`
+	Units      []*Unit           `json:"units"`
 	// Facts は run_started に記録した facts の宣言の写し（名前 → 段と欄）。無ければ（宣言の無いワークフロー・この版より前の run）
 	// facts は出ない。
 	FactSources map[string][]FactSource `json:"fact_sources,omitempty"`
@@ -310,7 +312,7 @@ func Apply(s *State, ev *Event) (*State, error) {
 		s = &State{
 			RunID: p.RunID, Workflow: p.Workflow.WorkflowRef, Overrides: p.Workflow.OverrideRecord, Inputs: p.Inputs, Limits: p.Limits,
 			FactSources: p.Facts, ReleaseOn: p.ReleaseOn, Models: p.Models, Efforts: p.Efforts, Status: StatusRunning, CreatedAt: ev.TS, Origin: p.Origin, Cwd: p.Cwd, PID: p.PID, PIDStart: p.PIDStart,
-			ScriptsDir: p.ScriptsDir, WorkflowDir: p.WorkflowDir, CLIVersion: p.CLIVersion, Embedded: p.Embedded, Units: []*Unit{},
+			ScriptsDir: p.ScriptsDir, WorkflowDir: p.WorkflowDir, CLIVersion: p.CLIVersion, Embedded: p.Embedded, Definition: p.Definition, Units: []*Unit{},
 		}
 		for _, k := range p.Units {
 			u := &Unit{Key: k, Status: StatusRunning, CurrentStep: p.EntryStep, Rounds: []*Round{}}

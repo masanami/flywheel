@@ -16,6 +16,8 @@ type TaskDelegate struct {
 	Summary       string
 	// Flow は委譲の実行の記録（contract_run.flow）の値（NULL は nil。ステップの行の有無に依らない）。
 	Flow *string
+	// Definition は委譲の実行が動いたフローの定義の出どころとハッシュ（contract_run.definition_source・definition_sha256。どちらかが NULL なら nil）。
+	Definition *ContractDefinition
 	// Steps は委譲の実行のステップの行（contract_run_step）を、始まった順（seq の昇順）に、すべての種類で持つ。行が無ければ空（nil にしない）。
 	Steps []TaskDelegateStep
 }
@@ -29,13 +31,15 @@ type TaskDelegateStep struct {
 	EndedAt     *time.Time
 	Kind        string
 	// Effort はステップの記録（contract_run_step.effort）の、書いた effort（NULL は nil）。
-	Effort     *string
-	Model      *string
-	ModelsUsed []string
-	Outcome    *string
-	StartedAt  time.Time
-	State      string
-	Step       string
+	Effort *string
+	// FindingsCount はステップの記録（contract_run_step.findings_count）の、ステップが返した指摘の数（NULL は nil）。
+	FindingsCount *int64
+	Model         *string
+	ModelsUsed    []string
+	Outcome       *string
+	StartedAt     time.Time
+	State         string
+	Step          string
 }
 
 // TaskArtifactView は課題の詳細のタスクの成果物 1 件。Kind・Ref・State は記録のまま。Role は統合先の印（`integration`）か nil。
@@ -81,18 +85,21 @@ func loadTaskDetail(ctx context.Context, tx *sql.Tx, cid int64, t *Task, integra
 	tid := taskIntID(t)
 
 	var state, summary, reqKind, facts, landRef, verifiedRef string
-	var flow sql.NullString
+	var flow, defSource, defSHA sql.NullString
 	var startRun, contractRunID int64
 	var ended bool
 	err := tx.QueryRowContext(ctx, `SELECT state, summary, COALESCE(requested_kind, ''), COALESCE(facts, ''), COALESCE(land_ref, ''), COALESCE(verified_ref, ''),
-		start_run_id, ended_at IS NOT NULL, flow, id FROM contract_run
+		start_run_id, ended_at IS NOT NULL, flow, definition_source, definition_sha256, id FROM contract_run
 		WHERE challenge_id = ? AND task_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`, cid, tid, contractRunKindTask).
-		Scan(&state, &summary, &reqKind, &facts, &landRef, &verifiedRef, &startRun, &ended, &flow, &contractRunID)
+		Scan(&state, &summary, &reqKind, &facts, &landRef, &verifiedRef, &startRun, &ended, &flow, &defSource, &defSHA, &contractRunID)
 	switch {
 	case err == nil:
 		dg := &TaskDelegate{RunID: formatRunID(startRun), State: ContractState(state), Summary: summary, Steps: []TaskDelegateStep{}}
 		if flow.Valid {
 			dg.Flow = &flow.String
+		}
+		if defSource.Valid && defSHA.Valid {
+			dg.Definition = &ContractDefinition{Source: defSource.String, SHA256: defSHA.String}
 		}
 		steps, serr := loadTaskDelegateSteps(ctx, tx, contractRunID)
 		if serr != nil {
@@ -183,7 +190,7 @@ func loadTaskDetail(ctx context.Context, tx *sql.Tx, cid int64, t *Task, integra
 
 // loadTaskDelegateSteps は委譲の実行のステップの行を seq の昇順で読む（行が無ければ空）。
 func loadTaskDelegateSteps(ctx context.Context, tx *sql.Tx, contractRunID int64) ([]TaskDelegateStep, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used, effort
+	rows, err := tx.QueryContext(ctx, `SELECT step, kind, attempt, state, outcome, started_at, ended_at, cost_usd, cost_unknown, model, models_used, effort, findings_count
 		FROM contract_run_step WHERE contract_run_id = ? ORDER BY seq`, contractRunID)
 	if err != nil {
 		return nil, err
@@ -194,9 +201,9 @@ func loadTaskDelegateSteps(ctx context.Context, tx *sql.Tx, contractRunID int64)
 		var sp TaskDelegateStep
 		var outcome, ended, model, effort sql.NullString
 		var started, models string
-		var cost sql.NullInt64
+		var cost, findings sql.NullInt64
 		var unknown int64
-		if err := rows.Scan(&sp.Step, &sp.Kind, &sp.Attempt, &sp.State, &outcome, &started, &ended, &cost, &unknown, &model, &models, &effort); err != nil {
+		if err := rows.Scan(&sp.Step, &sp.Kind, &sp.Attempt, &sp.State, &outcome, &started, &ended, &cost, &unknown, &model, &models, &effort, &findings); err != nil {
 			return nil, err
 		}
 		sp.CostUnknown = unknown != 0
@@ -208,6 +215,10 @@ func loadTaskDelegateSteps(ctx context.Context, tx *sql.Tx, contractRunID int64)
 		}
 		if effort.Valid {
 			sp.Effort = &effort.String
+		}
+		if findings.Valid {
+			n := findings.Int64
+			sp.FindingsCount = &n
 		}
 		if cost.Valid {
 			v := microsToUSD(cost.Int64)

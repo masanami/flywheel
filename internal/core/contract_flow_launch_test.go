@@ -435,6 +435,8 @@ type flowShimClient struct {
 	mu    sync.Mutex
 	inner *integFlowClient
 	raw   [][]string // 届いた flow のコマンド（start のもの）
+	// checks は届いた委譲の前の確かめのコマンド。
+	checks [][]string
 }
 
 func legacyCommand(cmd []string) []string {
@@ -464,6 +466,14 @@ func legacyCommand(cmd []string) []string {
 func (c *flowShimClient) with(in ContractLaunchInput) ContractLaunchInput {
 	in.Command = legacyCommand(in.Command)
 	return in
+}
+
+// CheckFlow は委譲の前の確かめ。届いた確かめのコマンドを残し、組み込みの定義が通ったことを返す。
+func (c *flowShimClient) CheckFlow(_ context.Context, in ContractLaunchInput) (FlowCheckOutput, error) {
+	c.mu.Lock()
+	c.checks = append(c.checks, in.Command)
+	c.mu.Unlock()
+	return passingFlowCheck(in), nil
 }
 
 func (c *flowShimClient) Start(ctx context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {

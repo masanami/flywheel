@@ -51,7 +51,7 @@ func TestStartPassesTheMarkerToClaudeOnly(t *testing.T) {
 	id := *d.RunID
 	f.waitState(id, "waiting")
 	f.waitRunnerExit(id)
-	for n := 1; n <= 3; n++ {
+	for n := 1; n <= 4; n++ {
 		if got := f.claudeMarker(n); got != "R-77" {
 			t.Errorf("claude call %d: FLYWHEEL_DELEGATED_RUN = %q, want R-77 (AC-49)", n, got)
 		}
@@ -108,17 +108,17 @@ func TestStartPassesPermissionModeDefault(t *testing.T) {
 func TestResumeUsesItsOwnMarkerAndPermissionMode(t *testing.T) {
 	f := newFixture(t, "5.3.0")
 	id := f.runToReview() // start は auto・R-start
-	f.respond(4, claudeStructured(map[string]any{"outcome": "no_change", "summary": "nothing", "human_question": "", "self_review": "not_run"}, 1.0))
+	f.respond(5, claudeStructured(map[string]any{"outcome": "no_change", "summary": "nothing", "human_question": ""}, 1.0))
 	_, errOut, code := f.resume(ResumeOptions{ID: id, Unit: "main", Input: "respond", HasInput: true, PermissionMode: "acceptEdits", DelegatedRun: "R-resume"})
 	if code != ExitOK {
 		t.Fatalf("resume exit %d\n%s", code, errOut)
 	}
 	f.waitRunnerExit(id)
 	f.waitState(id, "waiting")
-	if got := f.claudeMarker(4); got != "R-resume" {
+	if got := f.claudeMarker(5); got != "R-resume" {
 		t.Errorf("FLYWHEEL_DELEGATED_RUN after resume = %q, want R-resume (AC-50)", got)
 	}
-	if !hasPair(f.claudeArgv(4), "--permission-mode", "acceptEdits") {
-		t.Errorf("argv after resume lacks --permission-mode acceptEdits (AC-59): %v", f.claudeArgv(4))
+	if !hasPair(f.claudeArgv(5), "--permission-mode", "acceptEdits") {
+		t.Errorf("argv after resume lacks --permission-mode acceptEdits (AC-59): %v", f.claudeArgv(5))
 	}
 }

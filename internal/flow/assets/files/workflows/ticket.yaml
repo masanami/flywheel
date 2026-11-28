@@ -36,6 +36,10 @@
 #   - resolve の後に integration-route（select）と integration（pull-request の action: ensure-base）を置く（#409 の S3b-1）。uses_integration が true の
 #     実行だけが、統合ブランチ（integration/<challenge_id を小文字にしたもの>）を origin に確かめ、無ければ既定ブランチの先頭から作る。
 #     resolve の integration_unsupported は外し、作れなかったときの integration_create_failed を足した（docs/harness-runtime-design.md §5.6.3）
+#   - flywheel への移植の後（flywheel#1416）: セルフレビューを implement の外のレビューのステップ（self-review）と直すステップ（self-review-fix）にした。
+#     self-review は findings（直すべき指摘あり）なら self-review-fix へ戻り（回数は limits.self_review で数える。尽きたら残った指摘を PR に載せて commit へ）、
+#     clean（直すべき指摘なし）なら commit へ、incomplete（最後まで行えなかった）なら self_review_incomplete で止まる。self-review-route は外した。
+#     Codex のレビューも implement から self-review へ移した。facts.self_review は self-review の出力から出す
 schema: harness.workflow/v1
 id: ticket
 description: 1チケット（=1 Issue）の実装フロー。PR 作成後のレビュー・マージのラウンドまでを含む
@@ -54,10 +58,10 @@ efforts:
 limits:
   budget_usd: 40                    # この unit 全ラウンドの累計上限（仮の値。shadow run で較正する。§12）
   rework: 3                         # Phase 4→8 の差し戻し上限（W2・Q8）
-  self_review: 1                    # /self-review を実行しなかった implement を戻す上限（#381）
+  self_review: 3                    # レビュー（self-review）から直すステップ（self-review-fix）へ戻る回数の上限（この unit の累計）
   sync_resolve: 3                   # 取り込みの衝突を LLM に直させる回数（この unit の累計。sync と land-sync の両方で数える）
 facts:                              # 接続契約の facts に出す値（名前 → $steps.<段>.<欄>）。最後に成功して終わり、その欄を返した段の値になる（#388 の S3-4）
-  self_review: [$steps.implement.self_review, $steps.fix.self_review, $steps.respond.self_review]
+  self_review: [$steps.self-review.self_review]   # レビューのステップが最後まで行えたか（complete になる道でしか PR へ進まない）
 overridable:                        # 上書きで付け替えてよい遷移と候補（docs/harness-runtime-overrides.md §5.2。保守側だけ＝O2 と、quality の省略＝#326）
   routes:
     merge-route.integration: [merge, human-merge]   # 統合ブランチ宛も人のマージにできる
@@ -124,24 +128,50 @@ steps:
     prompt: prompts/ticket-implement.md
     session: new
     add_dirs: [ $steps.resolve.task_dir ]
-    with: { issue: $steps.resolve.issue, task_file: $steps.resolve.task_file, critical_design: $steps.analyze.critical_design, codex_review: "on" }
+    with: { issue: $steps.resolve.issue, task_file: $steps.resolve.task_file, critical_design: $steps.analyze.critical_design }
     output: schemas/implement-result.json
     budget_usd: 15
     timeout: 90m
     on:
-      pass:      self-review-route                  # #381: /self-review を実行したかを見てから commit へ
-      skip:      self-review-route                  # I7: 未検証は pull-request が本文に明記する。skip でも /self-review は省けない（#381）
+      pass:      self-review                        # セルフレビューは実装のステップの外のレビューのステップで行う（省けない）
+      skip:      self-review                        # I7: 未検証は pull-request が本文に明記する。skip でもレビューは省けない
       failure:   { fail: quality_gate }             # W2: 初回 failure は再委譲しない
       deviation: { gate: design-deviation }         # I8
-      review_incomplete: { fail: self_review_incomplete }  # #262: セルフレビューと合流できないまま PR へ進めない
 
-  self-review-route:                                # #381: 変更の種類（テストだけ・文書だけを含む）に関わらず /self-review を必須にする
-    kind: select
-    value: $steps.implement.self_review
+  self-review:                                      # レビューのステップ。レビュアー（と指摘を疑う役・Codex）を並べて呼び、指摘を返す（直さない）
+    kind: llm
+    prompt: prompts/ticket-self-review.md
+    model: $models.main
+    effort: $efforts.main
+    session: new                                    # 実装の文脈を持たない目で見る
+    add_dirs: [ $steps.resolve.task_dir ]
+    with: { issue: $steps.resolve.issue, task_file: $steps.resolve.task_file, base: $steps.resolve.base,
+            critical_design: $steps.analyze.critical_design,
+            reviewers: "claude-harness:code-reviewer,claude-harness:design-reviewer",   # 使うレビュアー（カンマ区切り）
+            verifier: "claude-harness:finding-verifier",                                # 指摘を疑う役（置かないなら none）
+            fix_threshold: medium,                                                      # 直すべき指摘とみなす重さの境目（high・medium・low）
+            codex_review: "on" }                                                        # Codex のレビューを並べるか（on・off）
+    output: schemas/self-review-result.json
+    budget_usd: 8
+    timeout: 60m
     on:
-      complete:   commit
-      incomplete: { goto: implement, limit: self_review, exhausted: { fail: self_review_incomplete } }
-      not_run:    { goto: implement, limit: self_review, exhausted: { fail: self_review_incomplete } }
+      findings:   { goto: self-review-fix, limit: self_review, exhausted: commit }   # 尽きたら残った指摘を PR に載せて進む
+      clean:      commit
+      incomplete: { fail: self_review_incomplete }  # #262: レビューを最後まで行えないまま PR へ進めない
+
+  self-review-fix:                                  # 直すステップ。渡された指摘だけを直し、必須ゲートを通してレビューへ戻る
+    kind: llm
+    agent: claude-harness:feature-implementer
+    prompt: prompts/ticket-self-review-fix.md
+    session: continue:implement
+    with: { findings: $steps.self-review.findings }
+    output: schemas/fix-result.json
+    budget_usd: 8
+    timeout: 60m
+    on:
+      pass:      self-review
+      failure:   { fail: quality_gate }
+      deviation: { gate: design-deviation }         # W3: 逸脱は再試行しない
 
   fix:                                              # W1: スコープ付き修正（Step a〜e を開始しない）
     kind: llm
@@ -153,7 +183,7 @@ steps:
     budget_usd: 8
     timeout: 60m
     on:
-      pass:      commit
+      pass:      self-review                        # 直した後もレビューのステップを通す
       failure:   { fail: quality_gate }
       deviation: { gate: design-deviation }         # W3: 逸脱は再試行しない
 
@@ -238,8 +268,9 @@ steps:
       summary: $steps.implement.summary
       behaviors: $steps.implement.behaviors         # #304: 振る舞いの一覧（テスト名・ケース名・シグネチャと保証すること）
       quality: $steps.implement.outcome
-      residual_findings: $steps.implement.residual_findings
+      residual_findings: $steps.self-review.residual_findings   # 最後のレビューで直っていない指摘の全件
       unverified: $steps.implement.unverified
+      review_unverified: $steps.self-review.unverified          # レビューのステップの未検証（Codex が完了しなかった等）
       cross_repo: $steps.implement.cross_repo_attestation
     on: { opened: ci, updated: ci }
 

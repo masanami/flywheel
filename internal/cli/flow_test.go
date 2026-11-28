@@ -131,7 +131,7 @@ func TestFlowCommandsAreResolvedOutsideTheIFAPITable(t *testing.T) {
 			t.Errorf("%v must not open the store (the paths are decided from --workspace)", c.Path)
 		}
 	}
-	if got, want := strings.Join(names, ","), "flow start,flow status,flow resume,flow cancel,flow __run-detached"; got != want {
+	if got, want := strings.Join(names, ","), "flow start,flow status,flow resume,flow cancel,flow export,flow check,flow __run-detached"; got != want {
 		t.Errorf("flow commands = %s, want %s", got, want)
 	}
 }
@@ -487,5 +487,41 @@ func TestFlowResume_RejectsModelFlag(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(events); string(b) != "{}\n" {
 		t.Errorf("the run record changed: %q", b)
+	}
+}
+
+// flow export と flow check が cli を通って届く: export は書き出した場所を出し、2 度目は上書きせず 0 でない終了コード。
+// check --json は約束の形の JSON を出し、終了コードは結果（ok）に合う。壊した定義では 1。
+func TestFlowExportAndCheckThroughTheCLI(t *testing.T) {
+	bin := fakeFlowPlugin(t, "5.3.0")
+	ws := flowWorkspaceDir(t)
+	env := flowChildEnv(bin)
+	out, errOut, code := runFlowChild(t, env, ws, "export", "--workspace", ws, "reflect")
+	dst := filepath.Join(ws, ".flywheel", "flows", "reflect.yaml")
+	if code != 0 || strings.TrimSpace(out) != dst {
+		t.Fatalf("export: exit %d out %q err %q", code, out, errOut)
+	}
+	if _, errOut, code := runFlowChild(t, env, ws, "export", "--workspace", ws, "reflect"); code == 0 || !strings.Contains(errOut, "上書きしない") {
+		t.Errorf("second export: exit %d err %q", code, errOut)
+	}
+	out, errOut, code = runFlowChild(t, env, ws, "check", "--json", "--workspace", ws)
+	var doc struct {
+		Definitions []struct {
+			Name, Source, Kind string
+			OK                 bool `json:"ok"`
+		} `json:"definitions"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || len(doc.Definitions) != 1 {
+		t.Fatalf("check --json: %v\n%s\n%s", err, out, errOut)
+	}
+	if d := doc.Definitions[0]; d.Name != "reflect" || d.Source != "workspace" || d.Kind != "replace" || !d.OK || code != 0 {
+		t.Errorf("check: exit %d %+v\n%s", code, d, out)
+	}
+	if err := os.WriteFile(dst, []byte("id: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, code = runFlowChild(t, env, ws, "check", "--workspace", ws)
+	if code != 1 || !strings.Contains(out, "通らなかった") || !strings.Contains(out, dst) {
+		t.Errorf("check of a broken definition: exit %d\n%s", code, out)
 	}
 }

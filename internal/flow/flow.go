@@ -3,7 +3,8 @@
 // main b4d6154 の runtime/internal/cli から写して直したもの。
 //
 // 置き場は呼び出し元が渡すワークスペース（cli が --workspace から決める）の値だけから決める（HARNESS_* の置き場の環境変数は読まない）: 実行のフォルダは <ws>/.flywheel/flow/runs/<実行の識別>/、
-// 資材は <ws>/.flywheel/flow/runtime/<版>/。定義の上書き（.claude-harness/overrides/）は読まず、埋め込んだ定義を読む。
+// 資材は <ws>/.flywheel/flow/runtime/<版>/。定義の上書き（.claude-harness/overrides/）は読まない。定義は、ワークスペースの
+// <ws>/.flywheel/flows/<名前>.yaml があればそれ（definition.go）、無ければ埋め込んだものを読む。
 //
 // このパッケージは internal/flow/workflow・runstate・engine・assets と標準ライブラリだけを import する。
 // core・ストア・invoker・server・view・adapters・cli は import しない（internal/cli だけがこのパッケージを import する）。
@@ -83,12 +84,16 @@ func tools(eng *engine.Engine, env Env) {
 	eng.GhBin = env.Getenv("HARNESS_GH_BIN")
 }
 
-// reopen は run を記録した定義で開き直す。
+// reopen は run を記録した定義で開き直す。ワークスペースの定義で始めた run は、実行のフォルダの写しを読み、
+// 写しが始めたときのハッシュのままかも確かめる。
 func reopen(run *runstate.Run, st *runstate.State) (*engine.Engine, error) {
+	if err := verifyDefinitionCopy(st); err != nil {
+		return nil, err
+	}
 	return engine.Reopen(run, st)
 }
 
-// flowName は start に渡せるフローの名前（埋め込んだ定義の名前。パスは受け付けない）。
+// flowName は start に渡せるフローの名前（定義のファイルの名前。パスは受け付けない）。
 var flowName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // SpecDraftFlow は、上限額を呼び出し元が渡せる（flow start --budget-usd）ただ 1 つのフローの名前。
@@ -96,7 +101,7 @@ const SpecDraftFlow = "spec-draft"
 
 // StartOptions は Start に渡すもの。
 type StartOptions struct {
-	// Name はフローの名前（埋め込んだ定義。例: ticket）。
+	// Name はフローの名前（ワークスペースの .flywheel/flows/<名前>.yaml か、埋め込んだ定義。例: ticket）。
 	Name string
 	// Inputs は --input NAME=VALUE。
 	Inputs []string
@@ -114,7 +119,7 @@ type StartOptions struct {
 func Start(env Env, o StartOptions) int {
 	env = env.withDefaults()
 	if !flowName.MatchString(o.Name) {
-		logf(env.Stderr, "flywheel flow: フローの名前 %q は使えない（埋め込んだ定義の名前を渡す。例: ticket）\n", o.Name)
+		logf(env.Stderr, "flywheel flow: フローの名前 %q は使えない（定義の名前を渡す。例: ticket）\n", o.Name)
 		return ExitFailed
 	}
 	plugin, err := ResolvePlugin(env.Getenv, env.LookPath)
@@ -131,16 +136,21 @@ func Start(env Env, o StartOptions) int {
 		logf(env.Stderr, "flywheel flow: %v\n", err)
 		return ExitFailed
 	}
-	path := filepath.Join(layout.WorkflowDir, o.Name+".yaml")
-	if _, err := os.Stat(path); err != nil {
-		return writeContract(env.Stdout, env.Stderr, failedDoc(nil, fmt.Sprintf("no run was started: flow %q is not embedded", o.Name)))
+	// ワークスペースの .flywheel/flows/<名前>.yaml があればそれを、無ければ埋め込んだ定義を使う（上書き〔.claude-harness/overrides/〕は読まない）。
+	def, err := resolveDefinition(env.Workspace, o.Name, layout.WorkflowDir, plugin.ScriptsDir, filepath.Join(env.Workspace, ".flywheel", "flow"))
+	if errors.Is(err, errNoDefinition) {
+		return writeContract(env.Stdout, env.Stderr, failedDoc(nil, fmt.Sprintf("no run was started: flow %q is neither in the workspace (%s) nor embedded", o.Name, FlowsDir(env.Workspace))))
 	}
-	// 上書き（.claude-harness/overrides/）は読まない: 埋め込んだ定義そのものを読む。
-	wf, err := workflow.LoadWithOverrides(path, workflow.Options{ScriptsDir: plugin.ScriptsDir}, nil)
 	if err != nil {
-		logf(env.Stderr, "flywheel flow: workflow is not valid; no run was started\n%v\n", err)
-		return writeContract(env.Stdout, env.Stderr, failedDoc(nil, fmt.Sprintf("no run was started: workflow is not valid: %v", err)))
+		logf(env.Stderr, "flywheel flow: %v\n", err)
+		return ExitFailed
 	}
+	defer def.cleanup()
+	if !def.ok() {
+		logf(env.Stderr, "flywheel flow: workflow is not valid; no run was started\n%v\n", def.Problems)
+		return writeContract(env.Stdout, env.Stderr, failedDoc(nil, fmt.Sprintf("no run was started: workflow is not valid: %v", def.Problems)))
+	}
+	wf := def.WF
 	inputs, err := parseInputs(wf, o.Inputs)
 	if err != nil {
 		logf(env.Stderr, "flywheel flow: %v\n", err)
@@ -151,10 +161,16 @@ func Start(env Env, o StartOptions) int {
 		logf(env.Stderr, "flywheel flow: %v\n", err)
 		return ExitFailed
 	}
-	eng, err := engine.Start(engine.StartParams{
+	params := engine.StartParams{
 		RunsDir: runsDir(env.Workspace), WF: wf, Inputs: inputs, ScriptsDir: plugin.ScriptsDir, WorkflowDir: layout.WorkflowDir,
 		Cwd: cwd, Origin: "flow", BudgetUSD: o.BudgetUSD, CLIVersion: env.Version, Embedded: true, Models: workflow.ResolveModels(wf), Efforts: workflow.ResolveEfforts(wf),
-	})
+		Definition: def.record(),
+	}
+	if def.Source == runstate.DefinitionWorkspace {
+		// ワークスペースの定義は、検査した写しを実行のフォルダへ移し、その写しを定義の場所として始める（resume も写しで動く）。
+		params.WorkflowDir, params.Embedded, params.Relocate = wf.Dir, false, def.relocate(plugin.ScriptsDir)
+	}
+	eng, err := engine.Start(params)
 	if err != nil {
 		logf(env.Stderr, "flywheel flow: cannot start the run: %v\n", err)
 		return ExitFailed

@@ -100,29 +100,58 @@ func FromTaskAdditions(as []core.TaskAddition) []TaskAddition {
 // requested_kind は委譲先が求めていること（無ければ null）、run_id はその実行の ID。
 // flow は委譲の実行の記録の flow（無ければ null）、steps はステップの行を始まった順にすべての種類で並べたもの（無ければ `[]`）。
 type TaskDelegate struct {
-	Flow          *string            `json:"flow"`
-	RequestedKind *string            `json:"requested_kind"`
-	RunID         string             `json:"run_id"`
-	State         string             `json:"state"`
-	Steps         []TaskDelegateStep `json:"steps"`
-	Summary       string             `json:"summary"`
+	Definition    *TaskDelegateDefinition `json:"definition"`
+	Flow          *string                 `json:"flow"`
+	RequestedKind *string                 `json:"requested_kind"`
+	RunID         string                  `json:"run_id"`
+	State         string                  `json:"state"`
+	Steps         []TaskDelegateStep      `json:"steps"`
+	Summary       string                  `json:"summary"`
+}
+
+// TaskDelegateDefinition は委譲の実行が動いたフローの定義。source は `workspace`（ワークスペースの定義）か `builtin`（組み込み）、
+// sha256 は定義の中身のハッシュ、sha256_prefix はその先頭 12 文字（表示に使う）。記録の無い実行は delegate.definition が null。
+type TaskDelegateDefinition struct {
+	SHA256       string `json:"sha256"`
+	SHA256Prefix string `json:"sha256_prefix"`
+	Source       string `json:"source"`
+}
+
+// DefinitionHashPrefixLen は表示に出す定義のハッシュの先頭の文字数。
+const DefinitionHashPrefixLen = 12
+
+func fromTaskDelegateDefinition(d *core.ContractDefinition) *TaskDelegateDefinition {
+	if d == nil {
+		return nil
+	}
+	return &TaskDelegateDefinition{SHA256: d.SHA256, SHA256Prefix: DefinitionHashPrefix(d.SHA256), Source: d.Source}
+}
+
+// DefinitionHashPrefix は定義のハッシュの、表示に出す先頭（DefinitionHashPrefixLen 文字。短ければそのまま）。
+func DefinitionHashPrefix(sum string) string {
+	if len(sum) > DefinitionHashPrefixLen {
+		return sum[:DefinitionHashPrefixLen]
+	}
+	return sum
 }
 
 // TaskDelegateStep は delegate.steps の要素（ステップ 1 回ぶん）。cost_usd は USD に直した数（無ければ null）、models_used は使ったモデルの名前、
 // state は `running`・`finished`・`cancelled`・`interrupted`。effort はステップの記録の、書いた effort（無ければ null）。
+// findings_count はステップが返した指摘の数（指摘の一覧を返さないステップは null）。
 type TaskDelegateStep struct {
-	Attempt     int64    `json:"attempt"`
-	CostUnknown bool     `json:"cost_unknown"`
-	CostUSD     *float64 `json:"cost_usd"`
-	Effort      *string  `json:"effort"`
-	EndedAt     *string  `json:"ended_at"`
-	Kind        string   `json:"kind"`
-	Model       *string  `json:"model"`
-	ModelsUsed  []string `json:"models_used"`
-	Outcome     *string  `json:"outcome"`
-	StartedAt   string   `json:"started_at"`
-	State       string   `json:"state"`
-	Step        string   `json:"step"`
+	Attempt       int64    `json:"attempt"`
+	CostUnknown   bool     `json:"cost_unknown"`
+	CostUSD       *float64 `json:"cost_usd"`
+	Effort        *string  `json:"effort"`
+	EndedAt       *string  `json:"ended_at"`
+	FindingsCount *int64   `json:"findings_count"`
+	Kind          string   `json:"kind"`
+	Model         *string  `json:"model"`
+	ModelsUsed    []string `json:"models_used"`
+	Outcome       *string  `json:"outcome"`
+	StartedAt     string   `json:"started_at"`
+	State         string   `json:"state"`
+	Step          string   `json:"step"`
 }
 
 // TaskArtifact はタスクの実行の成果物 1 件。kind・ref・state は記録のまま、role は統合先の印（`integration`）か null。
@@ -172,11 +201,11 @@ func fromTaskDelegate(d *core.TaskDelegate) *TaskDelegate {
 	steps := make([]TaskDelegateStep, 0, len(d.Steps))
 	for _, sp := range d.Steps {
 		steps = append(steps, TaskDelegateStep{
-			Attempt: sp.Attempt, CostUnknown: sp.CostUnknown, CostUSD: sp.CostUSD, EndedAt: ts(sp.EndedAt), Kind: sp.Kind, Model: sp.Model,
+			Attempt: sp.Attempt, CostUnknown: sp.CostUnknown, CostUSD: sp.CostUSD, EndedAt: ts(sp.EndedAt), FindingsCount: sp.FindingsCount, Kind: sp.Kind, Model: sp.Model,
 			Effort: sp.Effort, ModelsUsed: append([]string{}, sp.ModelsUsed...), Outcome: sp.Outcome, StartedAt: FormatTimestamp(sp.StartedAt), State: sp.State, Step: sp.Step,
 		})
 	}
-	return &TaskDelegate{Flow: d.Flow, RequestedKind: d.RequestedKind, RunID: d.RunID, State: string(d.State), Steps: steps, Summary: d.Summary}
+	return &TaskDelegate{Definition: fromTaskDelegateDefinition(d.Definition), Flow: d.Flow, RequestedKind: d.RequestedKind, RunID: d.RunID, State: string(d.State), Steps: steps, Summary: d.Summary}
 }
 
 func fromTaskFacts(f map[string]string) map[string]string {

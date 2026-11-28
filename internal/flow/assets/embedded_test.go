@@ -15,6 +15,7 @@ import (
 
 	"github.com/masanami/flywheel/internal/flow/assets"
 	"github.com/masanami/flywheel/internal/flow/workflow"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // 展開した資材の定義を検査する。プラグインのエージェント定義は埋め込まないので、参照するエージェントの空の写しを置く。
@@ -88,7 +89,7 @@ func TestEmbeddedDefinitionsFixModelAndEffort(t *testing.T) {
 	}
 }
 
-// AC-101〜AC-104・AC-107・AC-108: ticket の implement と fix は model・effort を持たず、ほかの llm のステップは $models.main・$efforts.main を指す。
+// AC-101〜AC-104・AC-107・AC-108: ticket の implement・fix・self-review-fix（feature-implementer のステップ）は model・effort を持たず、ほかの llm のステップは $models.main・$efforts.main を指す。
 // reflect はすべての llm のステップが指す。
 func TestEmbeddedLLMStepsReferenceMainModelAndEffort(t *testing.T) {
 	seen := map[string]int{}
@@ -101,7 +102,7 @@ func TestEmbeddedLLMStepsReferenceMainModelAndEffort(t *testing.T) {
 				continue
 			}
 			seen[id]++
-			free := id == "ticket" && (st.ID == "implement" || st.ID == "fix")
+			free := id == "ticket" && (st.ID == "implement" || st.ID == "fix" || st.ID == "self-review-fix")
 			wantModel, wantEffort := "main", "main"
 			if free {
 				wantModel, wantEffort = "", ""
@@ -114,48 +115,200 @@ func TestEmbeddedLLMStepsReferenceMainModelAndEffort(t *testing.T) {
 			}
 		}
 	}
-	// 取りこぼし（llm のステップの増減）に気付くための件数。ticket は analyze・implement・fix・commit・sync-resolve・e2e・land-sync-resolve・respond・merge、reflect は describe・sync-resolve・land-sync-resolve。
-	if seen["ticket"] != 9 || seen["reflect"] != 3 {
-		t.Errorf("llm steps: ticket %d (want 9), reflect %d (want 3)", seen["ticket"], seen["reflect"])
+	// 取りこぼし（llm のステップの増減）に気付くための件数。ticket は analyze・implement・self-review・self-review-fix・fix・commit・sync-resolve・e2e・land-sync-resolve・respond・merge、reflect は describe・sync-resolve・land-sync-resolve。
+	if seen["ticket"] != 11 || seen["reflect"] != 3 {
+		t.Errorf("llm steps: ticket %d (want 11), reflect %d (want 3)", seen["ticket"], seen["reflect"])
 	}
 }
 
-// AC-67: ticket の implement の with の codex_review は、文字列の "on"。
-func TestEmbeddedTicketImplementPassesCodexReviewOn(t *testing.T) {
-	st := parseEmbedded(t, "ticket").Step("implement")
-	var got []any
-	for _, b := range st.With {
-		if b.Name == "codex_review" {
-			got = append(got, b.Value.Literal)
+// レビューのステップの入力（with）の既定: 標準はレビュアー 2 体・指摘を疑う役・Codex を使う、簡略はレビュアー 2 体・疑う役なし・Codex を使わない。
+// 境目はどちらも medium。実装のステップの with には codex_review が無い（Codex はレビューのステップへ移した）。
+func TestEmbeddedSelfReviewWithDefaults(t *testing.T) {
+	want := map[string]map[string]string{
+		"ticket": {"reviewers": "claude-harness:code-reviewer,claude-harness:design-reviewer", "verifier": "claude-harness:finding-verifier",
+			"fix_threshold": "medium", "codex_review": "on", "base": "$steps.resolve.base", "critical_design": "$steps.analyze.critical_design"},
+		"ticket-light": {"reviewers": "claude-harness:code-reviewer,claude-harness:design-reviewer", "verifier": "none",
+			"fix_threshold": "medium", "codex_review": "off", "base": "$steps.resolve.base"},
+	}
+	for id, w := range want {
+		wf := parseEmbedded(t, id)
+		got := map[string]string{}
+		for _, b := range wf.Step("self-review").With {
+			if b.Value.Ref != nil {
+				got[b.Name] = b.Value.Ref.Raw
+			} else if s, ok := b.Value.Literal.(string); ok {
+				got[b.Name] = s
+			}
+		}
+		for k, v := range w {
+			if got[k] != v {
+				t.Errorf("%s self-review with %s = %q, want %q", id, k, got[k], v)
+			}
+		}
+		if _, ok := got["critical_design"]; ok && id == "ticket-light" {
+			t.Errorf("ticket-light self-review with has critical_design")
+		}
+		for _, b := range wf.Step("implement").With {
+			if b.Name == "codex_review" {
+				t.Errorf("%s implement with still has codex_review", id)
+			}
 		}
 	}
-	if len(got) != 1 || got[0] != "on" {
-		t.Errorf("implement with codex_review = %#v, want the string \"on\" exactly once", got)
+	// 戻る回数の上限: 標準 3・簡略 1。
+	for id, n := range map[string]float64{"ticket": 3, "ticket-light": 1} {
+		var got float64
+		for _, l := range parseEmbedded(t, id).Limits {
+			if l.Name == "self_review" {
+				got = l.Value
+			}
+		}
+		if got != n {
+			t.Errorf("%s limits.self_review = %v, want %v", id, got, n)
+		}
 	}
 }
 
-// AC-71: 実装の出力の型は codex_review を必須の欄に持ち、値を 5 つに限る。
-func TestImplementResultRequiresCodexReviewWithFiveValues(t *testing.T) {
-	data, err := fs.ReadFile(assets.FS, "workflows/schemas/implement-result.json")
+// レビューのステップ化の遷移: 実装（と直し）からレビューへ、指摘ありは直すステップへ（上限で commit）、なしは commit、
+// 行えなかったは止める。直すステップはレビューへ戻る。self-review-route は無い。facts.self_review はレビューのステップから出す。
+func TestEmbeddedSelfReviewTransitions(t *testing.T) {
+	for _, id := range []string{"ticket", "ticket-light"} {
+		wf := parseEmbedded(t, id)
+		if wf.Step("self-review-route") != nil {
+			t.Errorf("%s still has self-review-route", id)
+		}
+		on := func(step, outcome string) *workflow.Transition {
+			for _, e := range wf.Step(step).On {
+				if e.Outcome == outcome {
+					return e.T
+				}
+			}
+			t.Errorf("%s: %s has no on.%s", id, step, outcome)
+			return &workflow.Transition{}
+		}
+		for _, c := range [][3]string{
+			{"implement", "pass", "self-review"}, {"implement", "skip", "self-review"},
+			{"self-review", "clean", "commit"}, {"self-review-fix", "pass", "self-review"}, {"fix", "pass", "self-review"},
+		} {
+			if got := on(c[0], c[1]).Target; got != c[2] {
+				t.Errorf("%s: %s.%s -> %q, want %q", id, c[0], c[1], got, c[2])
+			}
+		}
+		for _, e := range wf.Step("implement").On {
+			if e.Outcome == "review_incomplete" {
+				t.Errorf("%s: implement still has on.review_incomplete", id)
+			}
+		}
+		f := on("self-review", "findings")
+		if f.Kind != workflow.TGoto || f.Target != "self-review-fix" || f.Limit != "self_review" || f.Exhausted == nil || f.Exhausted.Kind != workflow.TStep || f.Exhausted.Target != "commit" {
+			t.Errorf("%s: self-review.findings = %s", id, transitionText(f))
+		}
+		if inc := on("self-review", "incomplete"); inc.Kind != workflow.TFail || inc.Reason != "self_review_incomplete" {
+			t.Errorf("%s: self-review.incomplete = %s", id, transitionText(inc))
+		}
+		if len(wf.Facts) != 1 || wf.Facts[0].Name != "self_review" || len(wf.Facts[0].Refs) != 1 || wf.Facts[0].Refs[0].Raw != "$steps.self-review.self_review" {
+			t.Errorf("%s: facts = %+v", id, wf.Facts)
+		}
+		var pub []string
+		for _, b := range wf.Step("publish").With {
+			if b.Name == "residual_findings" || b.Name == "review_unverified" {
+				pub = append(pub, b.Name+"="+b.Value.Ref.Raw)
+			}
+		}
+		if got := strings.Join(pub, ","); got != "residual_findings=$steps.self-review.residual_findings,review_unverified=$steps.self-review.unverified" {
+			t.Errorf("%s: publish with = %s", id, got)
+		}
+	}
+}
+
+// レビューのステップの出力の型: outcome は 3 つ、codex_review は必須で 5 つ、指摘の一覧はファイル・行・重さ・主張・根拠を持つ。
+// 実装の出力の型は self_review・codex_review・residual_findings を持たない。
+func TestSelfReviewResultSchema(t *testing.T) {
+	type prop struct {
+		Type  string   `json:"type"`
+		Enum  []string `json:"enum"`
+		Items struct {
+			Required []string `json:"required"`
+		} `json:"items"`
+	}
+	read := func(name string) (req []string, props map[string]prop) {
+		data, err := fs.ReadFile(assets.FS, "workflows/schemas/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sc struct {
+			Required   []string        `json:"required"`
+			Properties map[string]prop `json:"properties"`
+		}
+		if err := json.Unmarshal(data, &sc); err != nil {
+			t.Fatal(err)
+		}
+		return sc.Required, sc.Properties
+	}
+	req, props := read("self-review-result.json")
+	for _, f := range []string{"outcome", "self_review", "codex_review", "findings", "residual_findings", "unverified"} {
+		if !slices.Contains(req, f) {
+			t.Errorf("self-review-result: %s is not required", f)
+		}
+	}
+	if got := props["outcome"].Enum; !slices.Equal(got, []string{"findings", "clean", "incomplete"}) {
+		t.Errorf("outcome enum = %v", got)
+	}
+	if got := props["self_review"].Enum; !slices.Equal(got, []string{"complete", "incomplete"}) {
+		t.Errorf("self_review enum = %v", got)
+	}
+	if got := props["codex_review"].Enum; !slices.Equal(got, []string{"off", "complete", "partial", "failed", "skipped"}) {
+		t.Errorf("codex_review enum = %v", got)
+	}
+	for _, f := range []string{"file", "line", "severity", "claim", "evidence"} {
+		if !slices.Contains(props["findings"].Items.Required, f) {
+			t.Errorf("findings items lack %s", f)
+		}
+	}
+	_, impl := read("implement-result.json")
+	for _, f := range []string{"self_review", "codex_review", "residual_findings"} {
+		if _, ok := impl[f]; ok {
+			t.Errorf("implement-result still has %s", f)
+		}
+	}
+}
+
+// レビューのステップの出力の型は、outcome と self_review と findings の食い違った組み合わせを通さない。
+func TestSelfReviewResultSchemaRejectsInconsistentCombinations(t *testing.T) {
+	data, err := fs.ReadFile(assets.FS, "workflows/schemas/self-review-result.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sc struct {
-		Required   []string `json:"required"`
-		Properties map[string]struct {
-			Type string   `json:"type"`
-			Enum []string `json:"enum"`
-		} `json:"properties"`
-	}
-	if err := json.Unmarshal(data, &sc); err != nil {
+	sc, err := workflow.ParseOutputSchema("self-review-result.json", data)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(sc.Required, "codex_review") {
-		t.Errorf("codex_review is not required: %v", sc.Required)
+	finding := `{"file":"a.go","line":1,"severity":"high","claim":"c","evidence":"e","source":"s"}`
+	doc := func(outcome, selfReview, findings string) string {
+		return `{"outcome":"` + outcome + `","self_review":"` + selfReview + `","codex_review":"off","summary":"s","findings":[` + findings +
+			`],"residual_findings":[],"unverified":[]}`
 	}
-	p := sc.Properties["codex_review"]
-	if want := []string{"off", "complete", "partial", "failed", "skipped"}; p.Type != "string" || !slices.Equal(p.Enum, want) {
-		t.Errorf("codex_review = %+v, want a string enum %v", p, want)
+	cases := []struct {
+		outcome, selfReview, findings string
+		ok                            bool
+	}{
+		{"findings", "complete", finding, true},
+		{"findings", "complete", "", false},
+		{"findings", "incomplete", finding, false},
+		{"clean", "complete", "", true},
+		{"clean", "complete", finding, false},
+		{"clean", "incomplete", "", false},
+		{"incomplete", "incomplete", "", true},
+		{"incomplete", "incomplete", finding, true},
+		{"incomplete", "complete", "", false},
+	}
+	for _, c := range cases {
+		v, err := jsonschema.UnmarshalJSON(strings.NewReader(doc(c.outcome, c.selfReview, c.findings)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sc.Validate(v); (err == nil) != c.ok {
+			t.Errorf("outcome %s self_review %s findings %q: valid = %v, want %v (%v)", c.outcome, c.selfReview, c.findings, err == nil, c.ok, err)
+		}
 	}
 }
 
@@ -198,51 +351,61 @@ func hasSentenceWith(text string, terms ...string) bool {
 	return false
 }
 
-// AC-72〜AC-80: ticket-implement.md の Codex のレビューの指示。
-func TestTicketImplementPromptInstructsCodexReview(t *testing.T) {
-	p := readPrompt(t, "ticket-implement.md")
-	cases := []struct {
-		ac    string
-		terms []string
-	}{
-		{"AC-72", []string{"`inputs.codex_review` が `on`", "claude-harness-run codex-review-runner", "`/self-review` と並べて", "裏で起動"}},
-		{"AC-73", []string{"終わるまで", "返さない"}},
-		{"AC-74", []string{"中以上", "`refuted`", "直す"}},
-		{"AC-75", []string{"直した後", "`/quality-check`"}},
-		{"AC-76", []string{"`[Codex] `", "claim", "residual_findings"}},
-		{"AC-77", []string{"完了しなかった", "`unverified`"}},
-		{"AC-78", []string{"claude-harness-run cleanup-review-diff", "成否に関わらず"}},
-		{"AC-79", []string{"変更が無い", "`rerun`", "claude-harness-run codex-review-runner"}},
-		{"AC-80", []string{"`codex_review`", "`off`", "`failed`", "`skipped`"}},
+// レビューのステップの指示文（ticket-self-review.md）: レビュアーと疑う役を Task ツールで並べて呼び、Codex のレビューを並べ、直さずに返す。
+func TestSelfReviewPromptInstructsReviewersAndCodex(t *testing.T) {
+	p := readPrompt(t, "ticket-self-review.md")
+	cases := [][]string{
+		{"`inputs.reviewers`", "Task ツール", "同時に起動"},
+		{"`{findings: [{file, line, severity, claim, evidence}]}`"},
+		{"`inputs.verifier`", "`none`", "反証"},
+		{"`inputs.fix_threshold`", "以上", "直すべき指摘"},
+		{"`inputs.codex_review` が `on`", "裏で起動"},
+		{"claude-harness-run codex-review-runner", "裏で起動"},
+		{"終わるまで", "返さない"},
+		{"`[Codex] `", "claim"},
+		{"完了しなかった", "`unverified`"},
+		{"使えないことだけでは止め"},
+		{"claude-harness-run cleanup-review-diff", "成否に関わらず"},
+		{"`codex_review`", "`off`"},
+		{"`findings`", "`clean`", "`incomplete`"},
+		{"`residual_findings`", "全件"},
+		{"直さない"},
 	}
-	for _, c := range cases {
-		if !hasSentenceWith(p, c.terms...) {
-			t.Errorf("%s: no single sentence of ticket-implement.md has all of %q", c.ac, c.terms)
+	for _, terms := range cases {
+		if !hasSentenceWith(p, terms...) {
+			t.Errorf("no single sentence of ticket-self-review.md has all of %q", terms)
 		}
 	}
-	// 逆の意味に書き換えられていないこと（語の有無だけでは、否定や取り違えを見逃す）
-	for _, bad := range []string{"codex-review-runner` を走らせない", "refuted` も", "Codex を走らせる。`codex_review` は `skipped"} {
-		if strings.Contains(p, bad) {
-			t.Errorf("ticket-implement.md contains the inverted instruction %q", bad)
-		}
-	}
-	if i, j := strings.Index(p, "claude-harness-run codex-review-runner"), strings.Index(p, "`/quality-check` を通す"); i < 0 || j < 0 || i > j {
-		t.Errorf("codex-review-runner must be introduced before the /quality-check after fixing")
-	}
-	// 手順 1・2（差分は collect-review-diff で集め、要件の文脈は一時ファイルで渡す）
 	for _, term := range []string{"claude-harness-run collect-review-diff", "codex-review-context.XXXXXX"} {
 		if !strings.Contains(p, term) {
-			t.Errorf("ticket-implement.md lacks %q", term)
+			t.Errorf("ticket-self-review.md lacks %q", term)
 		}
 	}
 }
 
-// AC-83・AC-85: 直しと PR のレビュー対応のステップの指示文は、Codex を起動する語を一切持たない（否定の文にも書かない）。
-func TestFixAndRespondPromptsDoNotMentionCodexReviewRunner(t *testing.T) {
-	for _, name := range []string{"ticket-fix.md", "ticket-respond.md"} {
-		if strings.Contains(readPrompt(t, name), "codex-review-runner") {
-			t.Errorf("%s mentions codex-review-runner", name)
+// 実装・直し・レビュー対応・直すステップの指示文は、Codex を起動する語を一切持たない（Codex はレビューのステップだけが起動する）。
+// 直すステップの指示文は、渡された指摘だけを直して必須ゲートを通す。
+func TestOtherPromptsDoNotRunCodexReview(t *testing.T) {
+	for _, name := range []string{"ticket-implement.md", "ticket-light-implement.md", "ticket-fix.md", "ticket-light-fix.md", "ticket-respond.md", "ticket-self-review-fix.md", "ticket-light-self-review-fix.md"} {
+		p := readPrompt(t, name)
+		for _, w := range []string{"codex-review-runner", "collect-review-diff"} {
+			if strings.Contains(p, w) {
+				t.Errorf("%s mentions %s", name, w)
+			}
 		}
+		if !strings.Contains(p, "レビューのステップ") {
+			t.Errorf("%s does not say that the review step reviews", name)
+		}
+	}
+	for _, name := range []string{"ticket-self-review-fix.md", "ticket-light-self-review-fix.md"} {
+		p := readPrompt(t, name)
+		if !hasSentenceWith(p, "`inputs.findings`") || !hasSentenceWith(p, "渡された指摘だけを直して") || !hasSentenceWith(p, "`/quality-check`", "必須ゲート") {
+			t.Errorf("%s does not instruct to fix only the given findings and pass the gate", name)
+		}
+	}
+	// 標準のフローの実装のステップは、クリティカル設計の逸脱の確かめ（Step e-3）を残す。
+	if !hasSentenceWith(readPrompt(t, "ticket-implement.md"), "Step e-3", "行う") {
+		t.Errorf("ticket-implement.md does not keep Step e-3")
 	}
 }
 

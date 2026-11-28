@@ -53,6 +53,28 @@ type WorkflowRef struct {
 	Path   string `json:"path"`
 }
 
+// 定義の出どころ（DefinitionRecord.Source）。
+const (
+	DefinitionWorkspace = "workspace"
+	DefinitionBuiltin   = "builtin"
+)
+
+// DefinitionDir は、ワークスペースの定義で始めた run が、定義と使う資材（指示文・型・スクリプト）の写しを置く
+// run ディレクトリの中のディレクトリ。resume はこの写しで定義を組み立て直す。
+const DefinitionDir = "definition"
+
+// DefinitionRecord は run がどの定義で始まったか。Source は workspace（ワークスペースの .flywheel/flows/ に置いた定義）か
+// builtin（埋め込んだ定義）。SHA256 は定義のハッシュ（ワークスペースの定義は YAML と、ワークスペースに置いた指示文のうち
+// 定義が指すもの〔パスと中身〕から作る。組み込みは YAML の sha256）。Path はワークスペースの定義の元のファイル、
+// WorkspacePrompts はワークスペースから写した指示文（定義のディレクトリからの相対パス。昇順）。
+// この版より前に始めた run には無い。
+type DefinitionRecord struct {
+	Source           string   `json:"source"`
+	SHA256           string   `json:"sha256"`
+	Path             string   `json:"path,omitempty"`
+	WorkspacePrompts []string `json:"workspace_prompts,omitempty"`
+}
+
 // OverridesDir は run ディレクトリの中で上書きの写しを置くディレクトリ（docs/harness-runtime-overrides.md §7.1）。
 const OverridesDir = "overrides"
 
@@ -128,6 +150,8 @@ type RunStarted struct {
 	Embedded   bool     `json:"embedded,omitempty"`
 	Units      []string `json:"units"`
 	EntryStep  string   `json:"entry_step"`
+	// Definition は定義の出どころとハッシュ。この版より前に始めた run には無い。
+	Definition *DefinitionRecord `json:"definition,omitempty"`
 }
 
 // Trigger はラウンドの開始の契機（§4.1 Round。§5.5 の「中断」と「計画された再開」の区別）。

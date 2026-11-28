@@ -38,6 +38,10 @@ type integFlowClient struct {
 	byTask  map[string]*integFlowTask // タスクの ID → 台本
 }
 
+func (c *integFlowClient) CheckFlow(_ context.Context, in ContractLaunchInput) (FlowCheckOutput, error) {
+	return passingFlowCheck(in), nil
+}
+
 func (c *integFlowClient) Start(_ context.Context, in ContractLaunchInput) (ContractLaunchOutput, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

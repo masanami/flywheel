@@ -173,10 +173,20 @@ func (c *Connector) UsesContractCommands() bool {
 	return c != nil && (c.Form == ConnectorFormCLI || c.Form == ConnectorFormFlow)
 }
 
-// flowOperationNames は form: flow の操作の flow に書けるフロー名（ticket と ticket-light の閉集合）。
+// flowOperationNamePattern は form: flow の操作の flow に書けるフロー名の形（flow start が受ける名前と同じ）。組み込みの ticket・
+// ticket-light のほか、ワークスペースに置いた定義の名前を書ける（その名前の定義があるかは、委譲を始める前の確かめで見る）。
 // モデル・effort・Codex のレビューを使うかはフローの定義だけで決めるので、宣言には models・efforts の欄を持たない
 // （書くと未知のキーとして設定の誤りになる）。
-var flowOperationNames = map[string]bool{"ticket": true, "ticket-light": true}
+var flowOperationNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// flowOperationReservedNames は、形が合ってもタスクの操作に書けない名前（タスクを実装するフローではない組み込みのフロー。
+// 統合ブランチを上げる依頼と、仕様の下書きづくりは、core が自分で始める）。
+var flowOperationReservedNames = map[string]bool{"reflect": true, specDraftFlowName: true}
+
+// validFlowOperationName は、form: flow の操作の flow に name を書けるか。
+func validFlowOperationName(name string) bool {
+	return flowOperationNamePattern.MatchString(name) && !flowOperationReservedNames[name]
+}
 
 // ConnectorRepoSlots は repos[].slots。Paths は provider が clone のとき、
 // Base・Count は worktree のときだけ使う（合わないキーは未知のキーとして拒否）。
@@ -1012,8 +1022,8 @@ func validateOperation(c Connector, op ConnectorOperation, opIDs map[string]bool
 		if op.Flow == "" {
 			return fmt.Errorf("%w: connector %q (form flow) operation %q has no flow", ErrConfigInvalid, c.ID, op.ID)
 		}
-		if !flowOperationNames[op.Flow] {
-			return fmt.Errorf("%w: connector %q operation %q has invalid flow %q (want ticket or ticket-light)", ErrConfigInvalid, c.ID, op.ID, op.Flow)
+		if !validFlowOperationName(op.Flow) {
+			return fmt.Errorf("%w: connector %q operation %q has invalid flow %q (want a name of the form ^[a-z][a-z0-9-]*$, other than reflect and spec-draft)", ErrConfigInvalid, c.ID, op.ID, op.Flow)
 		}
 	} else if op.Flow != "" {
 		return fmt.Errorf("%w: connector %q (form %s) operation %q must not have flow (only form flow)", ErrConfigInvalid, c.ID, c.Form, op.ID)

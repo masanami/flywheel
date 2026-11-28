@@ -657,6 +657,7 @@ export interface TaskArtifact {
 }
 
 export interface TaskDelegate {
+  definition: TaskDelegateDefinition | null;
   flow: string | null;
   requested_kind: string | null;
   run_id: string;
@@ -665,12 +666,19 @@ export interface TaskDelegate {
   summary: string;
 }
 
+export interface TaskDelegateDefinition {
+  sha256: string;
+  sha256_prefix: string;
+  source: string;
+}
+
 export interface TaskDelegateStep {
   attempt: number;
   cost_unknown: boolean;
   cost_usd: number | null;
   effort: string | null;
   ended_at: string | null;
+  findings_count: number | null;
   kind: string;
   model: string | null;
   models_used: string[];

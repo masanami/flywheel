@@ -38,6 +38,8 @@ type rawContractStatus struct {
 	// flow・steps は任意。形が合わなければ無いものとして扱い、出力の全体は malformed にしない。
 	Flow  json.RawMessage `json:"flow"`
 	Steps json.RawMessage `json:"steps"`
+	// definition は任意（source・sha256 の 2 つの文字列）。形が合わなければ無いものとして扱い、出力の全体は malformed にしない。
+	Definition json.RawMessage `json:"definition"`
 }
 
 // decodeContractStatus は標準出力を core.ContractStatus へ正規化する。単一の JSON オブジェクトとして
@@ -91,6 +93,7 @@ func decodeContractStatus(stdout []byte) (*core.ContractStatus, bool) {
 		}
 	}
 	st.Steps = decodeSteps(raw.Steps)
+	st.Definition = decodeDefinition(raw.Definition)
 	if !isJSONNull(raw.CostUSD) {
 		v, ok := decodeNumber(raw.CostUSD)
 		if !ok {
@@ -99,6 +102,22 @@ func decodeContractStatus(stdout []byte) (*core.ContractStatus, bool) {
 		st.CostUSD = &v
 	}
 	return st, true
+}
+
+// decodeDefinition は definition を読む。無い・null・オブジェクトでない・source か sha256 が文字列でないときは nil
+// （値の閉集合は core が確かめる）。
+func decodeDefinition(raw json.RawMessage) *core.ContractDefinition {
+	if isJSONNull(raw) {
+		return nil
+	}
+	var d struct {
+		Source *string `json:"source"`
+		SHA256 *string `json:"sha256"`
+	}
+	if json.Unmarshal(raw, &d) != nil || d.Source == nil || d.SHA256 == nil {
+		return nil
+	}
+	return &core.ContractDefinition{Source: *d.Source, SHA256: *d.SHA256}
 }
 
 // Start は core.ContractClient の実装（契約の start）。
@@ -219,7 +238,7 @@ func decodeFacts(raw json.RawMessage) map[string]string {
 	return out
 }
 
-// stepKeys は steps の要素の必須の欄（effort は任意で含めない）（値が null でよい欄も、キーは必須）。
+// stepKeys は steps の要素の必須の欄（effort・findings_count は任意で含めない）（値が null でよい欄も、キーは必須）。
 var stepKeys = []string{"seq", "step", "kind", "attempt", "state", "outcome", "started_at", "ended_at", "cost_usd", "cost_unknown", "model", "models_used"}
 
 // decodeSteps は steps を読む。配列でない・要素に必須の欄が無い・欄の型が違う・state が 4 つの値の外・seq が 1 未満・
@@ -285,6 +304,14 @@ func decodeSteps(raw json.RawMessage) []core.ContractStep {
 			if sp.Effort, ok = stepNullableString(raw); !ok {
 				return nil
 			}
+		}
+		if raw, present := e["findings_count"]; present && !isJSONNull(raw) {
+			// 任意の欄。無い・null は nil。0 以上の整数でなければ steps の全体を無いものとして扱う。
+			n, ok := stepInt(raw)
+			if !ok || n < 0 {
+				return nil
+			}
+			sp.FindingsCount = &n
 		}
 		var models []string
 		if isJSONNull(e["models_used"]) || json.Unmarshal(e["models_used"], &models) != nil {

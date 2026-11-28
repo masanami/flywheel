@@ -10,16 +10,15 @@ import (
 )
 
 // ticket-light をレビュー待ちまで進める試験の準備。偽の claude の応答は、ticket の fixture（分析・実装・コミット）から、
-// 分析を除いた実装・コミットに並べ直す。タスクの文面のファイルと task_id（T-12）を渡すので、作業ブランチの鍵は task-12。
+// 分析を除いた実装・レビュー・コミットに並べ直す。タスクの文面のファイルと task_id（T-12）を渡すので、作業ブランチの鍵は task-12。
 func newLightFixture(t *testing.T) (*fixture, []string) {
 	t.Helper()
 	f := newFixture(t, "5.3.0")
 	f.branch = "feature/task-12-light"
-	implement := map[string]any{"outcome": "pass", "self_review": "complete", "codex_review": "off", "pr_title": "feat: add the widget", "summary": "Adds the widget.",
-		"behaviors": []map[string]string{}, "residual_findings": []map[string]string{}, "unverified": []string{}, "cross_repo_attestation": "", "deviation_report": ""}
-	f.respond(1, claudeStructured(implement, 2.0))
-	f.respond(2, claudeStructured(map[string]any{"outcome": "committed", "commit_sha": "abc", "summary": "committed"}, 0.5))
-	if err := os.Remove(filepath.Join(f.fdir, "responses", "3")); err != nil {
+	f.respond(1, claudeStructured(implementPass, 2.0))
+	f.respond(2, claudeStructured(reviewResult("clean"), 0.5))
+	f.respond(3, claudeStructured(map[string]any{"outcome": "committed", "commit_sha": "abc", "summary": "committed"}, 0.5))
+	if err := os.Remove(filepath.Join(f.fdir, "responses", "4")); err != nil {
 		t.Fatal(err)
 	}
 	taskFile := filepath.Join(f.root, "task.md")
@@ -82,9 +81,9 @@ func TestTicketLightRunsToReviewWithoutAnalysis(t *testing.T) {
 			t.Errorf("step %s was started in ticket-light: %v", s, l.started)
 		}
 	}
-	// claude を起動したステップは、最初が implement、次が commit（呼び出しの数は 2 回）。
-	if b, _ := os.ReadFile(filepath.Join(f.fdir, "count")); strings.TrimSpace(string(b)) != "2" {
-		t.Errorf("claude was started %q times, want 2 (implement and commit)", b)
+	// claude を起動したステップは、implement・self-review・commit の順（呼び出しの数は 3 回）。
+	if b, _ := os.ReadFile(filepath.Join(f.fdir, "count")); strings.TrimSpace(string(b)) != "3" {
+		t.Errorf("claude was started %q times, want 3 (implement, self-review and commit)", b)
 	}
 	if got := l.transitions["resolve"]; got != "ok→integration-route" {
 		t.Errorf("resolve: %s", got)
@@ -95,8 +94,11 @@ func TestTicketLightRunsToReviewWithoutAnalysis(t *testing.T) {
 	if got := l.transitions["branch"]; got != "ok→workspace" {
 		t.Errorf("branch: %s", got)
 	}
-	if got := l.transitions["self-review-route"]; got != "complete→commit" {
-		t.Errorf("self-review-route: %s", got)
+	if got := l.transitions["implement"]; got != "pass→self-review" {
+		t.Errorf("implement: %s", got)
+	}
+	if got := l.transitions["self-review"]; got != "clean→commit" {
+		t.Errorf("self-review: %s", got)
 	}
 	if got := l.transitions["sync"]; got != "current→quality" {
 		t.Errorf("sync: %s", got)
@@ -115,7 +117,7 @@ func TestTicketLightRunsToReviewWithoutAnalysis(t *testing.T) {
 	}
 }
 
-// AC-15: 品質の検査が fail を返すと、fix へ進む。
+// AC-15: 品質の検査が fail を返すと、fix へ進む。直した後はレビューのステップを通って commit へ進む。
 func TestTicketLightQualityFailGoesToFix(t *testing.T) {
 	f, extra := newLightFixture(t)
 	counter := filepath.Join(f.root, "quality-count")
@@ -127,14 +129,15 @@ if [ ! -e "`+counter+`" ]; then
 fi
 printf '%s\n' '{"result":"pass","auto_fix":{},"gates":{"test":{"status":"pass"}}}'
 `, 0o755)
-	f.respond(3, claudeStructured(map[string]any{"outcome": "pass", "summary": "fixed", "deviation_report": "", "self_review": "complete"}, 1.0))
-	f.respond(4, claudeStructured(map[string]any{"outcome": "committed", "commit_sha": "abd", "summary": "committed"}, 0.5))
+	f.respond(4, claudeStructured(map[string]any{"outcome": "pass", "summary": "fixed", "deviation_report": ""}, 1.0))
+	f.respond(5, claudeStructured(reviewResult("clean"), 0.5))
+	f.respond(6, claudeStructured(map[string]any{"outcome": "committed", "commit_sha": "abd", "summary": "committed"}, 0.5))
 	id := f.startLight(extra...)
 	f.waitState(id, "waiting")
 	f.waitRunnerExit(id)
 	l := f.lightEvents(id)
 	joined := strings.Join(l.all, " ")
-	for _, want := range []string{"quality:fail→fix", "fix:pass→commit"} {
+	for _, want := range []string{"quality:fail→fix", "fix:pass→self-review", "self-review:clean→commit"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("transitions lack %q: %s", want, joined)
 		}
@@ -144,8 +147,8 @@ printf '%s\n' '{"result":"pass","auto_fix":{},"gates":{"test":{"status":"pass"}}
 // AC-17: 実装の出力の outcome が deviation のとき、設計の逸脱の待ちに入る。
 func TestTicketLightDeviationWaitsAtDesignDeviation(t *testing.T) {
 	f, extra := newLightFixture(t)
-	f.respond(1, claudeStructured(map[string]any{"outcome": "deviation", "self_review": "not_run", "codex_review": "off", "pr_title": "feat: add the widget", "summary": "stopped",
-		"behaviors": []map[string]string{}, "residual_findings": []map[string]string{}, "unverified": []string{}, "cross_repo_attestation": "", "deviation_report": "範囲を超える"}, 1.0))
+	f.respond(1, claudeStructured(map[string]any{"outcome": "deviation", "pr_title": "feat: add the widget", "summary": "stopped",
+		"behaviors": []map[string]string{}, "unverified": []string{}, "cross_repo_attestation": "", "deviation_report": "範囲を超える"}, 1.0))
 	id := f.startLight(extra...)
 	f.waitState(id, "waiting")
 	f.waitRunnerExit(id)

@@ -137,6 +137,7 @@ var builtinWith = map[string][]withSpec{
 		{name: "quality", typ: "string"},          // 実装ステップの outcome（pass / skip）。skip なら未検証を明記する（I7）
 		{name: "residual_findings", typ: "array"}, // 残指摘の全件（I13）
 		{name: "unverified", typ: "array"},        // 未検証の事項（I7）
+		{name: "review_unverified", typ: "array"}, // レビューのステップの未検証の事項（unverified の後ろに並べて載せる）
 		{name: "cross_repo", typ: "string"},       // クロスリポジトリ確証（I13）
 	},
 }

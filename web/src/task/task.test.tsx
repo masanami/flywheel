@@ -738,6 +738,7 @@ const D = (p: Partial<NonNullable<Task["delegate"]>> = {}) => ({
   state: "succeeded",
   summary: "要約",
   flow: null,
+  definition: null,
   steps: [],
   ...p,
 });
@@ -1525,6 +1526,7 @@ const S = (p: Partial<StepRow> = {}): StepRow => ({
   cost_usd: 1,
   effort: null,
   ended_at: "2026-01-01T00:00:10Z",
+  findings_count: null,
   kind: "llm",
   model: null,
   models_used: [],
@@ -1589,7 +1591,7 @@ it("AC-157 AC-158 AC-159 AC-160 #1229: 名前は表にあれば「日本語名 �
   ]);
 });
 
-it("AC-157 #1229: 表の 26 件すべてが「日本語名 識別子」で出る（仕様の表の文字列を固定）", async () => {
+it("AC-157 #1229・フローのカスタマイズ S1: 表の 28 件（レビューのステップの 2 件を足した）すべてが「日本語名 識別子」で出る（仕様の表の文字列を固定）", async () => {
   const want = [
     "入力の確かめ resolve",
     "統合ブランチの用意 integration",
@@ -1617,12 +1619,14 @@ it("AC-157 #1229: 表の 26 件すべてが「日本語名 識別子」で出る
     "PR の説明 describe",
     "push push",
     "作業ブランチ名の決定 branch",
+    "セルフレビュー self-review",
+    "セルフレビューの直し self-review-fix",
   ];
   const sec = await openSteps(
     want.map((w) => S({ step: w.slice(w.lastIndexOf(" ") + 1) })),
   );
   expect(rowsOf(sec).map((r) => r[0])).toEqual(want);
-  expect(Object.keys(STEP_LABELS).length).toBe(26);
+  expect(Object.keys(STEP_LABELS).length).toBe(28);
 });
 
 it("AC-158 #1229: Object の継承キー（constructor）は表にある識別子として扱わず、識別子だけを出す", async () => {
@@ -1683,6 +1687,27 @@ it("AC-167 AC-168 AC-169 #1229: 費用は小数 2 桁の USD、null は「—」
     "1.94 USD",
     "—",
     "2.00 USD（上限額で計上）",
+  ]);
+});
+
+it("#1416: レビューのステップの行は、結果に指摘の数を添える（0 件も出す。指摘の数の無い行と実行中の行は添えない）", async () => {
+  const sec = await openSteps([
+    S({ step: "self-review", outcome: "findings", findings_count: 2 }),
+    S({ step: "self-review-fix" }),
+    S({ step: "self-review", outcome: "clean", findings_count: 0 }),
+    S({
+      step: "self-review",
+      state: "running",
+      outcome: null,
+      ended_at: null,
+      findings_count: null,
+    }),
+  ]);
+  expect(rowsOf(sec).map((r) => r[1])).toEqual([
+    "findings（指摘 2 件）",
+    "pass",
+    "clean（指摘 0 件）",
+    "実行中…",
   ]);
 });
 
@@ -1782,4 +1807,57 @@ it("AC-152 AC-153 AC-154 #1263: モデルの欄は effort が null でなけれ�
 it("AC-155 #1263: 識別子 branch の行は「作業ブランチ名の決定 branch」で出る", async () => {
   const sec = await openSteps([S({ step: "branch", kind: "command" })]);
   expect(rowsOf(sec).map((r) => r[0])).toEqual(["作業ブランチ名の決定 branch"]);
+});
+
+it("フローのカスタマイズ S1: 委譲先の実行に、動いた定義の出どころとハッシュの先頭を出し、記録が無ければ出さない", async () => {
+  const sum =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const ws = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          delegate: D({
+            definition: {
+              source: "workspace",
+              sha256: sum,
+              sha256_prefix: "0123456789ab",
+            },
+          }),
+        }),
+      ],
+    }),
+  );
+  expect(
+    within(within(ws.root).getByTestId("task-delegate")).getByTestId(
+      "delegate-definition",
+    ).textContent,
+  ).toBe("置いた定義（ハッシュ 0123456789ab）");
+  cleanup();
+  const builtin = await open(
+    show({
+      tasks: [
+        T("T-2", {
+          delegate: D({
+            definition: {
+              source: "builtin",
+              sha256: sum,
+              sha256_prefix: "0123456789ab",
+            },
+          }),
+        }),
+      ],
+    }),
+  );
+  expect(
+    within(within(builtin.root).getByTestId("task-delegate")).getByTestId(
+      "delegate-definition",
+    ).textContent,
+  ).toBe("組み込み（ハッシュ 0123456789ab）");
+  cleanup();
+  const none = await open(show({ tasks: [T("T-2", { delegate: D() })] }));
+  expect(
+    within(within(none.root).getByTestId("task-delegate")).queryByTestId(
+      "delegate-definition",
+    ),
+  ).toBeNull();
 });

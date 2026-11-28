@@ -54,6 +54,23 @@ type contractDoc struct {
 	// ステップがまだ無くても Steps は [] を出す。
 	Flow  *string         `json:"flow,omitempty"`
 	Steps *[]contractStep `json:"steps,omitempty"`
+	// Definition は run がどの定義で始まったか（任意の欄。run を読めたときは必ず出す）。
+	Definition *contractDefinition `json:"definition,omitempty"`
+}
+
+// contractDefinition は契約の definition: 定義の出どころ（workspace・builtin）と定義のハッシュ。
+type contractDefinition struct {
+	Source string `json:"source"`
+	SHA256 string `json:"sha256"`
+}
+
+// definitionOf は run の定義の出どころとハッシュ。記録の無い（この版より前に始めた）run は、埋め込んだ定義で始めたものとして
+// YAML の sha256 を出す。
+func definitionOf(st *runstate.State) *contractDefinition {
+	if r := st.Definition; r != nil {
+		return &contractDefinition{Source: r.Source, SHA256: r.SHA256}
+	}
+	return &contractDefinition{Source: runstate.DefinitionBuiltin, SHA256: st.Workflow.Hash}
 }
 
 // contractStep は steps の要素（ステップ 1 回ぶん。キーは辞書順）。Seq は step_started の記録の通し番号。
@@ -65,14 +82,16 @@ type contractStep struct {
 	CostUSD     *float64 `json:"cost_usd"`
 	EndedAt     *string  `json:"ended_at"`
 	Effort      *string  `json:"effort"`
-	Kind        string   `json:"kind"`
-	Model       *string  `json:"model"`
-	ModelsUsed  []string `json:"models_used"`
-	Outcome     *string  `json:"outcome"`
-	Seq         int      `json:"seq"`
-	StartedAt   string   `json:"started_at"`
-	State       string   `json:"state"`
-	Step        string   `json:"step"`
+	// FindingsCount は、終わったステップの出力が指摘の一覧（最上位の配列 findings）を持てばその件数（持たなければ null）。
+	FindingsCount *int     `json:"findings_count"`
+	Kind          string   `json:"kind"`
+	Model         *string  `json:"model"`
+	ModelsUsed    []string `json:"models_used"`
+	Outcome       *string  `json:"outcome"`
+	Seq           int      `json:"seq"`
+	StartedAt     string   `json:"started_at"`
+	State         string   `json:"state"`
+	Step          string   `json:"step"`
 }
 
 // mainUnit は steps の対象の単位の名前。
@@ -186,6 +205,7 @@ func contractFromView(v *runView, note string) contractDoc {
 	d.Flow = &flow
 	steps := contractSteps(v)
 	d.Steps = &steps
+	d.Definition = definitionOf(st)
 	return d
 }
 
@@ -237,11 +257,28 @@ func contractSteps(v *runView) []contractStep {
 				o := x.Outcome
 				cs.Outcome = &o
 			}
+			cs.FindingsCount = findingsCount(x.Output)
 			out = append(out, cs)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	return out
+}
+
+// findingsCount は、ステップの出力が最上位に配列 findings を持てばその件数を返す（無い・配列でなければ nil）。
+// レビューのステップ（self-review）の指摘の数を、ステップの記録に出すためのもの。
+func findingsCount(output json.RawMessage) *int {
+	if len(output) == 0 {
+		return nil
+	}
+	var o struct {
+		Findings *[]json.RawMessage `json:"findings"`
+	}
+	if json.Unmarshal(output, &o) != nil || o.Findings == nil {
+		return nil
+	}
+	n := len(*o.Findings)
+	return &n
 }
 
 // summarize は人が読む 1 行の要約。
