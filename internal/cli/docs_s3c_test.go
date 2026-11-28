@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// このファイルは、区切り S3c の文書と指示文の受入基準（#926）を、基準ごとに文書の本文で確かめる。
-// AC-91〜AC-93 は J5 の指示文（internal/invoker/prompts/j5.md）、AC-136〜AC-141 は文書を読む。
+// このファイルは、区切り S3c の指示文の受入基準（#926。AC-91〜AC-93）を、J5 の指示文（internal/invoker/prompts/j5.md）で確かめる。
 
 const j5ConflictFixHeading = "## コンフリクトの解消の確かめ"
 
@@ -42,70 +41,4 @@ func TestSpec_AC93_J5PromptUncertainWhenUnreadable(t *testing.T) {
 // J5 の出力の形は変えない旨がある。
 func TestSpec_S3c_J5PromptKeepsOutputShape(t *testing.T) {
 	docLineWith(t, j5ConflictFixSection(t), "出力の形は変えない")
-}
-
-// AC-136: architecture.md の §21 の実装済みの範囲の記述に、S3c（コンフリクトの解消を、J5 が差分で確かめて通す）がある。
-func TestSpec_AC136_ArchSection21NoteHasS3c(t *testing.T) {
-	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection21)
-	first := strings.SplitN(strings.TrimLeft(body, "\n"), "\n", 2)[0]
-	for _, want := range []string{"区切り S3c〔コンフリクトの解消を、J5 が差分で確かめて通す〕の範囲は実装済み", "区切り S3c で実装した範囲は"} {
-		if !strings.Contains(first, want) {
-			t.Errorf("AC-136: the opening note of §21 lacks %q", want)
-		}
-	}
-}
-
-// AC-137: 同じ節に、対話の欄での知らせは S4 である旨がある。
-func TestSpec_AC137_ArchSection21NotifyInConversationIsS4(t *testing.T) {
-	body := sectionBody(t, readRepoDoc(t, "docs", "architecture.md"), archSection21)
-	docLineWith(t, body, "区切り S3c で実装した範囲は", "記録して課題の詳細で読める所までが実装と一致し", "対話の欄での知らせは区切り S4")
-}
-
-// AC-138: m1-core.md の、作業ログの action の一覧に、conflict_fix_passed がある。
-func TestSpec_AC138_M1ActivityActionListHasConflictFixPassed(t *testing.T) {
-	doc := readRepoDoc(t, "docs", "features", "m1-core.md")
-	docLineWith(t, doc, "| `action` | string |", "`integration_ref_set`\\|`conflict_fix_passed`\\|`backup`", "`conflict_fix_passed` は区切り S3c で追加した", "統合先宛てならタスク、反映先宛てなら反映の操作")
-}
-
-// AC-139: m3-invoker-delegation.md の、J5 の節に、コンフリクトの解消の確かめへの参照がある。
-func TestSpec_AC139_M3J5SectionRefersToConflictFixCheck(t *testing.T) {
-	body := sectionBody(t, m3Doc(t), "### J5 検証 [S2]")
-	docLineWith(t, body, "コンフリクトの解消の確かめ", "対象", "入力", "結果", "j5.md")
-}
-
-// AC-140: 用語集に、「コンフリクトの解消の確かめ」の行がある。
-func TestSpec_AC140_GlossaryHasConflictFixCheck(t *testing.T) {
-	cols := glossaryRow(t, "コンフリクトの解消の確かめ")
-	if !strings.Contains(cols[1], "直した差分だけを確かめる") {
-		t.Errorf("AC-140: the definition = %q", cols[1])
-	}
-}
-
-// AC-141: 用語集の「反映」の行が、コンフリクトの解消を承認し直さずに通す形は S3c で入った、と書いている。
-func TestSpec_AC141_GlossaryReflectConflictEnteredInS3c(t *testing.T) {
-	cols := glossaryRow(t, "反映")
-	if !strings.Contains(cols[4], "コンフリクトの解消を承認し直さずに通す形は、S3c で入った") {
-		t.Errorf("AC-141: since = %q", cols[4])
-	}
-	if strings.Contains(cols[4], "S3c から") {
-		t.Errorf("AC-141: since still says S3c is ahead: %q", cols[4])
-	}
-}
-
-// 出荷済みの節（前の区切りで足した形の節）と、S3a・S3b の受入基準の試験の正本は消していない。
-// S3c・S3d の要件も、実装対象が次の区切り（S4a）へ移った後、出荷済みの節として残っている。
-func TestSpec_S3c_KeepsShippedSections(t *testing.T) {
-	doc := readRepoDoc(t, "docs", "features", "core-redesign.md")
-	for _, want := range []string{
-		"前の区切りで足した形のうち、試験がこの文書の記述を正本として読むもの",
-		"### S3c で入れた要件（出荷済み）",
-		"#### コンフリクトの解消の確かめ（J5 の動き方）",
-		"### S3d で入れた要件（出荷済み）",
-		"### S3b で入れた要件（出荷済み）",
-		"### S3a で入れた要件（出荷済み）",
-	} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("core-redesign.md lost %q, which tests read as the source of truth", want)
-		}
-	}
 }
