@@ -422,7 +422,7 @@ const ActivityActionBackup = "backup"
 // ExecutionResult は release の実行の試行の結果（operation_execution.result）の閉集合。
 type ExecutionResult string
 
-// ExecutionResult の27値。merged・not_mergeable・merge_failed・merge_unconfirmed は見直し前の記録の行を読むために残す
+// ExecutionResult の28値。merged・not_mergeable・merge_failed・merge_unconfirmed は見直し前の記録の行を読むために残す
 // （新しく書く経路は反映を委譲先へ移した後の値を使う）。
 const (
 	ExecutionResultMerged           ExecutionResult = "merged"
@@ -453,6 +453,8 @@ const (
 	ExecutionResultDelegateEnded    ExecutionResult = "delegate_ended"
 	// ExecutionResultWaitingFixCheck は、コンフリクトの解消の確かめの結果を待っている（承認は取り消さない）。waiting_delegate（委譲先の実行を待つ）とは別。
 	ExecutionResultWaitingFixCheck ExecutionResult = "waiting_fix_check"
+	// ExecutionResultFullCheckFailed は、統合ブランチを反映先へ上げる前のフルの検査が通らず、上げなかった（承認を取り消す）。
+	ExecutionResultFullCheckFailed ExecutionResult = "full_check_failed"
 )
 
 // ExecutionClass は試行の結果の分類。
@@ -503,6 +505,7 @@ var executionResultSpecs = []struct {
 	{ExecutionResultWaitingOutside, ExecutionClassWait, false},
 	{ExecutionResultDelegateEnded, ExecutionClassCancel, false},
 	{ExecutionResultWaitingFixCheck, ExecutionClassWait, false},
+	{ExecutionResultFullCheckFailed, ExecutionClassCancel, false},
 }
 
 // ExecutionResultValues は閉集合の全値を表の順に返す。

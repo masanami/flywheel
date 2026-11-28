@@ -197,6 +197,7 @@ var executionResultLabels = map[core.ExecutionResult]string{
 	core.ExecutionResultLimitReached:     "失敗が連続の回数の上限に達した",
 	core.ExecutionResultInterrupted:      "試行が途中で止まった",
 	core.ExecutionResultLanded:           "委譲先が反映先へ入れた",
+	core.ExecutionResultFullCheckFailed:  "上げる前のフルの検査が通らなかった",
 	core.ExecutionResultLandSent:         "委譲先へ「入れてよい」を返した",
 	core.ExecutionResultLandUnconfirmed:  "「入れてよい」が届いたか分からない",
 	core.ExecutionResultLandRefused:      "委譲先が入れられなかった",

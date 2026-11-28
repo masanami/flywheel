@@ -31,6 +31,8 @@ type operationExecutionRow struct {
 	ID          int64
 	OperationID int64
 	StartedAt   time.Time
+	// RenewedAt は試行の生存を最後に更新した時刻（更新していなければゼロ値）。
+	RenewedAt time.Time
 	// EndedAt は終了していない試行ではゼロ値。
 	EndedAt time.Time
 	// Result は終了していない試行では空。
@@ -80,6 +82,22 @@ func beginOperationExecution(ctx context.Context, tx *sql.Tx, opID int64, in beg
 	return getOperationExecution(ctx, tx, id)
 }
 
+// renewOperationExecution は終了していない試行 id の生存を at に更新する。終了していれば（行が無いときを含む）errExecutionNotOpen。
+func renewOperationExecution(ctx context.Context, tx *sql.Tx, id int64, at time.Time) error {
+	res, err := tx.ExecContext(ctx, `UPDATE operation_execution SET renewed_at = ? WHERE id = ? AND ended_at IS NULL`, formatTimestamp(at), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errExecutionNotOpen
+	}
+	return nil
+}
+
 // closeOperationExecutionInput は試行を閉じる入力。
 type closeOperationExecutionInput struct {
 	EndedAt      time.Time
@@ -113,7 +131,7 @@ func closeOperationExecution(ctx context.Context, tx *sql.Tx, id int64, in close
 	return nil
 }
 
-const operationExecutionSelect = `SELECT id, operation_id, started_at, ended_at, result, approved_head, observed_head, detail, pid, host
+const operationExecutionSelect = `SELECT id, operation_id, started_at, ended_at, result, approved_head, observed_head, detail, pid, host, renewed_at
 	FROM operation_execution`
 
 func scanOperationExecution(sc interface{ Scan(...any) error }) (*operationExecutionRow, error) {
@@ -121,8 +139,9 @@ func scanOperationExecution(sc interface{ Scan(...any) error }) (*operationExecu
 		r                                         operationExecutionRow
 		started                                   string
 		ended, result, approved, observed, detail sql.NullString
+		renewed                                   sql.NullString
 	)
-	if err := sc.Scan(&r.ID, &r.OperationID, &started, &ended, &result, &approved, &observed, &detail, &r.PID, &r.Host); err != nil {
+	if err := sc.Scan(&r.ID, &r.OperationID, &started, &ended, &result, &approved, &observed, &detail, &r.PID, &r.Host, &renewed); err != nil {
 		return nil, err
 	}
 	var err error
@@ -131,6 +150,11 @@ func scanOperationExecution(sc interface{ Scan(...any) error }) (*operationExecu
 	}
 	if ended.Valid {
 		if r.EndedAt, err = parseTimestamp(ended.String); err != nil {
+			return nil, err
+		}
+	}
+	if renewed.Valid {
+		if r.RenewedAt, err = parseTimestamp(renewed.String); err != nil {
 			return nil, err
 		}
 	}

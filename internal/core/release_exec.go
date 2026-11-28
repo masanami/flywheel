@@ -46,7 +46,7 @@ const NotStartedWaitingOutside NotStartedReason = "waiting_outside"
 const NotStartedDependency NotStartedReason = "dependency"
 
 // releaseAttemptStaleAfter は、終了していない試行を、プロセスの有無によらず止まったとみなす経過時間。
-// ちょうどこの時間は止まったに含めない。
+// ちょうどこの時間は止まったに含めない。経過は、開始か、生存を最後に更新した時刻（renewed_at）から数える。
 const releaseAttemptStaleAfter = 15 * time.Minute
 
 // ReleaseExecOptions は ExecuteReleases の入力。Checks・Connectors は必須
@@ -59,6 +59,14 @@ type ReleaseExecOptions struct {
 	Compare UpstreamCompareSource
 	// Connectors は PR のリポジトリ・既定ブランチを引く宣言。
 	Connectors *ConnectorsDeclaration
+	// FullCheck・HeadGit は、統合ブランチを反映先へ上げる前のフルの検査（full_check.go）の起動と、通す中身を取り出す一時の
+	// 作業ツリーの口。接続の宣言に full_check があるのに、どちらかが nil なら「入れてよい」を返さない。
+	FullCheck FullCheckRunner
+	HeadGit   HeadWorktreeGit
+	// attemptID は実行中の反映の試行の ID（executeRelease が入れる）。fullCheckRenewEvery はフルの検査の間に試行の生存を
+	// 更新する間隔（0 は fullCheckRenewInterval。テストが短くする）。
+	attemptID           int64
+	fullCheckRenewEvery time.Duration
 	// Agent は failure_limit と、契約のコマンドの時間の上限の出どころ。nil なら既定値。
 	Agent *AgentDeclaration
 	// Contract は契約のコマンド（status・resume）の起動。課題に対応する契約の実行があるときに使う（nil なら読めなかったものとして扱う）。
@@ -386,6 +394,7 @@ func (s *Store) executeRelease(ctx context.Context, opID int64, opts ReleaseExec
 		return nil, notStarted, nil
 	}
 
+	opts.attemptID = attempt.ID
 	j, err := s.judgeRelease(ctx, row, approvedRow, opts)
 	var notStartedErr *releaseNotStartedError
 	if errors.As(err, &notStartedErr) {
@@ -485,20 +494,26 @@ func (s *Store) closeHeldEndAfterConflict(ctx context.Context, challengeID int64
 	_, _ = s.closeHeldEndWithoutOwner(context.WithoutCancel(ctx), challengeID)
 }
 
-// abandonReleaseAttempt は、終えられなかった試行を interrupted で閉じる（閉じられなくても何もしない）。
+// abandonReleaseAttempt は、終えられなかった試行を interrupted で閉じる（閉じられなくても何もしない）。呼び出し元の ctx が
+// 取り消された後でも閉じる。
 func (s *Store) abandonReleaseAttempt(ctx context.Context, attemptID int64, at time.Time, cause error) {
+	ctx = context.WithoutCancel(ctx)
 	_ = s.db.Write(ctx, func(tx *sql.Tx) error {
 		return closeOperationExecution(ctx, tx, attemptID, closeOperationExecutionInput{EndedAt: at, Result: ExecutionResultInterrupted, Detail: cause.Error()})
 	})
 }
 
 // releaseAttemptStale は終了していない試行が止まっているかを返す: 同じホストで pid のプロセスが
-// 無い、または開始から 15 分を過ぎた（ホストを問わない。ちょうど 15 分は過ぎたに含めない）。
+// 無い、または開始（生存を更新していれば最後の更新）から 15 分を過ぎた（ホストを問わない。ちょうど 15 分は過ぎたに含めない）。
 func releaseAttemptStale(a *operationExecutionRow, now time.Time) bool {
 	if !isRunProcessAlive(a.Host, a.PID) {
 		return true
 	}
-	return now.Sub(a.StartedAt) > releaseAttemptStaleAfter
+	alive := a.StartedAt
+	if a.RenewedAt.After(alive) {
+		alive = a.RenewedAt
+	}
+	return now.Sub(alive) > releaseAttemptStaleAfter
 }
 
 // latestReleaseApprovedHead は opID の最新の承認（approved）の記録の head_sha を返す（無ければ空）。

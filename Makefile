@@ -9,7 +9,7 @@ BINARY := $(BUILD_DIR)/flywheel
 NPM := npm
 WEB_DIR := web
 
-.PHONY: check gate e2e e2e-real ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
+.PHONY: check gate gate-light e2e e2e-real ui-install ui-check ui-lint ui-test ui-build fmt-check vet lint test build print-golangci-lint-version clean
 
 ## check はすべての品質ゲートを順に実行する。1 つでも失敗すれば非 0 で終わる。
 ## UI の lint・テスト・ビルドを先に実行し、その成果物を埋め込んだ状態で go test・go build を行う。
@@ -39,11 +39,20 @@ e2e: ui-install
 	@echo "==> npm run e2e (web)"
 	cd $(WEB_DIR) && $(NPM) run e2e
 
-## gate: 手元の必須のゲート（claude-harness の品質ゲートの宣言 .claude-harness/quality-gate.json が呼ぶ）。
-## make check に続けて make e2e を流す。CI は同じ 2 つを別の手順で流す。
+## gate: フルの検査。make check に続けて make e2e を流す。CI は同じ 2 つを別の手順で流す。
+## 統合ブランチは main へ上げる前に、flywheel がその先頭で 1 回回す（connectors.json の repos[].full_check）。
 gate:
 	$(MAKE) check
 	$(MAKE) e2e
+
+## gate-light: タスクの PR の軽い検査（品質ゲートの宣言 .claude-harness/quality-gate.json が呼ぶ）。
+## origin/main との merge-base から変えたパッケージとその逆依存だけを go test -race -count=1 で試し、
+## web/ を変えたときだけ UI のゲートと e2e を流す。宛先が main か判定できないときは make gate を回す
+## （判定と選び方は scripts/gate-light.sh）。
+# $(MAKE) を直接書くと make -n でもレシピが実行されるので、変数を挟む。
+GATE_LIGHT_MAKE = $(MAKE)
+gate-light:
+	@MAKE="$(GATE_LIGHT_MAKE)" sh scripts/gate-light.sh
 
 ## e2e-real: 課題のツリー・フォローアップの一覧・「いま進められること」・計画の承認のブラウザの E2E を、本物の flywheel serve に向けて流す（Playwright。web/e2e-real/）。
 ## make check と make e2e には入れない。ui-build と build の後に、準備の段（web/e2e-real/global-setup.ts）が

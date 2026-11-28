@@ -244,9 +244,9 @@ func TestNotStartedReasonValues_AreTheTwentyTwoAndACopy(t *testing.T) {
 	}
 }
 
-// --- ExecutionResult（release の実行の試行の結果。27 値と分類） ---
+// --- ExecutionResult（release の実行の試行の結果。28 値と分類） ---
 
-func TestExecutionResult_ClosedSetHas27ValuesWithClasses(t *testing.T) {
+func TestExecutionResult_ClosedSetHas28ValuesWithClasses(t *testing.T) {
 	t.Parallel()
 	want := map[ExecutionResult]struct {
 		class  ExecutionClass
@@ -267,10 +267,12 @@ func TestExecutionResult_ClosedSetHas27ValuesWithClasses(t *testing.T) {
 		"reflect_failed": {ExecutionClassCancel, false}, "waiting_delegate": {ExecutionClassWait, false},
 		"waiting_outside": {ExecutionClassWait, false}, "delegate_ended": {ExecutionClassCancel, false},
 		"waiting_fix_check": {ExecutionClassWait, false},
+		// 統合ブランチを反映先へ上げる前のフルの検査。
+		"full_check_failed": {ExecutionClassCancel, false},
 	}
 	values := ExecutionResultValues()
-	if len(values) != 27 || len(want) != 27 {
-		t.Fatalf("len(ExecutionResultValues()) = %d, want 27", len(values))
+	if len(values) != 28 || len(want) != 28 {
+		t.Fatalf("len(ExecutionResultValues()) = %d, want 28", len(values))
 	}
 	seen := map[ExecutionResult]bool{}
 	for _, v := range values {

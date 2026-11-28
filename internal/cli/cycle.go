@@ -146,12 +146,13 @@ func runCycle(a Args) (any, error) {
 		headGit   core.HeadWorktreeGit
 		compare   core.UpstreamCompareSource
 		contract  core.ContractClient
+		fullCheck core.FullCheckRunner
 	)
 	if hasConnectors {
 		delegate, slotGit, reconcile, checks = launcher, git.New(), newBranchSource(a.lookPath()), newCheckSource(a.lookPath())
 		diffs, headGit = newDiffSource(a.lookPath()), git.New()
 		compare, bodies = newCompareSource(a.lookPath()), newDescriptionSource(a.lookPath())
-		contract = launcher
+		contract, fullCheck = launcher, launcher
 	}
 
 	// 周の開始を標準出力へ知らせる（UI の server が起動の合図として読む）。--json では書かない。
@@ -188,6 +189,7 @@ func runCycle(a Args) (any, error) {
 		Diffs:        diffs,
 		Descriptions: bodies,
 		HeadGit:      headGit,
+		FullCheck:    fullCheck,
 		Compare:      compare,
 		// backup の段の口。connectors.json の有無にかかわらず組み立てる。
 		WorkspaceGit: git.NewWorkspace(),

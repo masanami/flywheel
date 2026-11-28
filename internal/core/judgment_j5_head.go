@@ -1,6 +1,6 @@
 package core
 
-// このファイルは、J5 が PR の中身を読むための準備（#465）を持つ。J5 の入力にしたチェックの取得で
+// このファイルは、J5 が PR の中身を読むための準備（#465）を持つ（コミットを一時の worktree へ取り出す口は、full_check.go も使う）。J5 の入力にしたチェックの取得で
 // 得た PR の head の SHA を固定の値として、次の 2 つを用意する。
 //
 //   - 固定した SHA の PR の差分（データの区画）
@@ -57,7 +57,7 @@ const j5HeadRefPrefix = "refs/flywheel/j5-heads/"
 
 // HeadWorktreeGit は J5 の一時の worktree と一時の ref を作って消す口。実装は internal/adapters/git。
 // clone は元のクローンの絶対パス。`git clone` は実行しない。`git fetch` を実行してよいのは FetchHead
-// だけ（どの PR を・いつ fetch するかは core が決める）。
+// だけ（どの PR を・いつ fetch するかは core が決める。J5 と、上げる前のフルの検査が使う）。
 type HeadWorktreeGit interface {
 	// HasCommit は clone に sha のコミットがあるかを返す（無いことはエラーではなく false）。
 	HasCommit(ctx context.Context, clone, sha string) (bool, error)

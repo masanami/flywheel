@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 // --- .flywheel/connectors.json（宣言）§IF / API ---
@@ -207,6 +208,9 @@ type ConnectorRepo struct {
 	// ReflectConnector は反映の依頼の口にする委譲先の ID（任意。"" は「無い」）。
 	// 指せるのは、form: cli で commands.reflect を持つ委譲先だけ。
 	ReflectConnector string
+	// FullCheck は、統合ブランチを反映先へ上げる前に、その先頭で実行するフルの検査の引数の配列（任意。nil は「無い」）。
+	// シェルを介さずに実行する（full_check.go）。
+	FullCheck []string
 }
 
 // ConnectorsDeclaration は .flywheel/connectors.json の中身
@@ -271,7 +275,7 @@ var operationKeys = map[string]bool{
 var cliCommandsKeys = map[string]bool{"start": true, "status": true, "resume": true, "cancel": true, "reflect": true}
 var connectorRepoKeys = map[string]bool{
 	"name": true, "remote": true, "default_branch": true, "connector": true, "slots": true,
-	"reflect_connector": true,
+	"reflect_connector": true, "full_check": true,
 }
 var connectorRepoSlotsKeys = map[string]bool{"provider": true, "paths": true, "base": true, "count": true}
 
@@ -665,6 +669,17 @@ func parseConnectorRepos(raw json.RawMessage) ([]ConnectorRepo, error) {
 			}
 			if r.ReflectConnector == "" {
 				return nil, fmt.Errorf("[%d].reflect_connector: must not be empty", i)
+			}
+		}
+		if v, ok := rr["full_check"]; ok {
+			if isJSONNull(v) {
+				return nil, fmt.Errorf("[%d].full_check: must not be null", i)
+			}
+			if err := json.Unmarshal(v, &r.FullCheck); err != nil {
+				return nil, fmt.Errorf("[%d].full_check: %w", i, err)
+			}
+			if len(r.FullCheck) == 0 || strings.TrimSpace(r.FullCheck[0]) == "" {
+				return nil, fmt.Errorf("[%d].full_check: must be a non-empty array whose first element is the command", i)
 			}
 		}
 		if v, ok := rr["slots"]; ok {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/masanami/flywheel/internal/adapters/git"
 	"github.com/masanami/flywheel/internal/core"
 	"github.com/masanami/flywheel/internal/invoker"
 	"github.com/masanami/flywheel/internal/view"
@@ -50,7 +51,9 @@ func runOpAdd(a Args) (any, error) {
 // config_not_found、無くした項目が残っていれば config_invalid）→ 周の開始（trigger "op exec"。
 // 排他ロックは取らない）→ ExecuteReleases → EndCycle。
 func runOpExec(a Args) (any, error) {
-	ctx := context.Background()
+	// フルの検査は別のプロセスグループで長く走るので、SIGINT・SIGTERM は ctx の取り消しにして、検査を止めてから返る。
+	ctx, stop := interruptContext()
+	defer stop()
 	ws := a.Store.Workspace()
 
 	decl, err := core.LoadAgentDeclaration(ws)
@@ -83,8 +86,11 @@ func runOpExec(a Args) (any, error) {
 		Agent:      decl,
 		// 契約のコマンド（status・resume）の起動。claude は起動しない。
 		Contract: invoker.NewLauncherWithLookPath(a.LookPath),
-		Trigger:  core.ReleaseExecTriggerOpExec,
-		CycleID:  cyc.ID,
+		// 統合ブランチを反映先へ上げる前のフルの検査（宣言の full_check）の起動と、検査する中身を取り出す口。
+		FullCheck: invoker.NewLauncherWithLookPath(a.LookPath),
+		HeadGit:   git.New(),
+		Trigger:   core.ReleaseExecTriggerOpExec,
+		CycleID:   cyc.ID,
 	})
 
 	endResult := core.CycleResultCompleted
@@ -92,7 +98,7 @@ func runOpExec(a Args) (any, error) {
 		endResult = core.CycleResultAborted
 	}
 	// 周は必ず終える（run と同じ）。
-	if _, endErr := a.Store.EndCycle(ctx, cyc.ID, endResult); endErr != nil && runErr == nil {
+	if _, endErr := a.Store.EndCycle(context.WithoutCancel(ctx), cyc.ID, endResult); endErr != nil && runErr == nil {
 		return nil, mapCoreErr(endErr)
 	}
 	if runErr != nil {

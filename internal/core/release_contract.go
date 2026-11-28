@@ -455,6 +455,13 @@ func (s *Store) landToRun(ctx context.Context, row *operationRow, opts ReleaseEx
 		j.detail = fmt.Sprintf("the contract run says %q (%d candidates); upstream has %q", got, n, passRef)
 		return j, nil
 	}
+	// 統合ブランチを反映先へ上げる前のフルの検査（full_check.go）。通らなければ「入れてよい」を返さない。
+	if blocked, err := s.fullCheckBeforeLand(ctx, row, opts, run, passRef); err != nil {
+		return releaseJudgment{}, err
+	} else if blocked != nil {
+		blocked.observedHead, blocked.route = observed, run.route()
+		return *blocked, nil
+	}
 	// 承認が取り消された・実行された操作へ「入れてよい」を返さない（読んだ後に別の経路が変えたときの確認）。
 	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
 		cur, err := loadOperationRow(ctx, tx, row.ID)
