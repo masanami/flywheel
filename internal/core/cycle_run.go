@@ -461,6 +461,7 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 			ConnDecl:  in.ConnDecl,
 			Invoker:   in.Invoker,
 			Upstream:  in.Upstream,
+			Contract:  in.Contract,
 			CycleID:   cycleID,
 			Cycle:     jc,
 		})
@@ -475,6 +476,7 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 			ConnDecl:  in.ConnDecl,
 			Invoker:   in.Invoker,
 			Upstream:  in.Upstream,
+			Contract:  in.Contract,
 			CycleID:   cycleID,
 			Cycle:     jc,
 		})

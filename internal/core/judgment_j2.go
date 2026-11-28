@@ -1564,7 +1564,7 @@ func (s *Store) prepareJ2(ctx context.Context, ch Challenge, in J2AutoInput) (*j
 		}
 	}
 	sections = append(sections,
-		JudgmentDataSection{Label: "対象リポジトリと操作の宣言", Content: formatJ2DeclarationSection(in.ConnDecl, prepared.HasSource, in.AgentDecl)},
+		JudgmentDataSection{Label: "対象リポジトリと操作の宣言", Content: formatJ2DeclarationSection(in.ConnDecl, prepared.HasSource, in.AgentDecl, s.j2FlowHints(ctx, in))},
 		JudgmentDataSection{Label: "サイズごとの予算の既定", Content: formatJ2BudgetDefaultsSection(in.AgentDecl)},
 	)
 	sections = append(sections, memoryIndexSections(s.workspace, in.AgentDecl)...)
@@ -1600,11 +1600,44 @@ func yesNo(b bool) string {
 	return "いいえ"
 }
 
+// j2FlowHints は、J2 の入力の操作の行に添える目安（フローの名前 → 定義の説明を 1 行にしたもの）を返す。
+// 目安があるのは、組み込みのほかの名前で、ワークスペースの定義が確かめを通り、説明が空でないフローだけ。
+// 確かめられない・通らないフローは目安を持たないだけで、誤りも保留も出さない（壊れた定義は委譲の前の確かめが扱う）。
+// 確かめはプロセスを起動するので、ストアのトランザクションの外で呼ぶ。
+func (s *Store) j2FlowHints(ctx context.Context, in J2AutoInput) map[string]string {
+	hints := map[string]string{}
+	if in.Contract == nil || in.ConnDecl == nil {
+		return hints
+	}
+	checked := map[string]bool{}
+	for _, r := range in.ConnDecl.Repos {
+		_, connector := in.ConnDecl.findConnectorRepo(r.Name)
+		if connector == nil || connector.Form != ConnectorFormFlow {
+			continue
+		}
+		for _, op := range connector.Operations {
+			if _, builtin := flowDisplayNames[op.Flow]; builtin || op.Flow == "" || checked[op.Flow] {
+				continue
+			}
+			checked[op.Flow] = true
+			v := s.checkFlowDefinition(ctx, in.Contract, in.AgentDecl, op.Flow)
+			if !v.OK || v.Definition.Source != FlowDefinitionSourceWorkspace {
+				continue
+			}
+			if d := oneLine(v.Definition.Description); d != "" {
+				hints[op.Flow] = d
+			}
+		}
+	}
+	return hints
+}
+
 // formatJ2DeclarationSection は J2 が選べる対象リポジトリと操作の一覧
 // （§J2「宣言の対象リポジトリと操作の一覧（id・形態・対話前提か・成果物の種類）」）。
 // J2 が選んでも不正になる操作には注記を付ける（取り込み元の対応の無い課題では、
 // 取り込み元の差し込みを持つ操作、および commands.start がそれを要する cli 形態の操作は選べない）。
-func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, agent *AgentDeclaration) string {
+// flowHints（フローの名前 → 目安。j2FlowHints）にあるフローの操作の行は「｜目安: <説明>」で終わる。
+func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, agent *AgentDeclaration, flowHints map[string]string) string {
 	var b strings.Builder
 	if hasSource {
 		b.WriteString("この課題は取り込み元の GitHub Issue と対応している。\n")
@@ -1632,6 +1665,9 @@ func formatJ2DeclarationSection(conn *ConnectorsDeclaration, hasSource bool, age
 			}
 			if connector.Form == ConnectorFormFlow && op.Flow != "" {
 				line += "｜フロー: " + flowLabel(op.Flow)
+				if hint := flowHints[op.Flow]; hint != "" {
+					line += "｜目安: " + hint
+				}
 			}
 			b.WriteString(line + "\n")
 		}
@@ -2020,6 +2056,9 @@ type J2AutoInput struct {
 	// Upstream は J2 の起動の直前の上流の取得（core の IF。実装は
 	// internal/adapters/github）。取り込み元の対応の無い課題では呼ばれない。
 	Upstream UpstreamThreadSource
+	// Contract は、ワークスペースの定義のフローを選ぶ目安（定義の説明）を読むための、定義の確かめの起動の口。
+	// nil なら目安を付けない。
+	Contract ContractClient
 	// CycleID はこの操作が属する周（BeginCycle が返した ID）。空は ErrValidation。
 	CycleID string
 	// Cycle が非 nil なら、ID を省略した対象の処理の枠超過の状態をこの

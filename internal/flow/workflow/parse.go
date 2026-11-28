@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -234,6 +235,9 @@ func (p *parser) boolean(n *yaml.Node, what string) (bool, bool) {
 	return n.Value == "true" || n.Value == "True" || n.Value == "TRUE", true
 }
 
+// MaxDescriptionRunes は description の文字数の上限。計画を作る判断点の入力の操作の行へ載るので、長さを抑える。
+const MaxDescriptionRunes = 500
+
 // Load はワークフローの YAML を読み込み、構文（§3.1・§3.3）を検査する。参照先・網羅などの意味の検査は Validate が行う。
 func Load(path string) (*Workflow, error) {
 	data, err := os.ReadFile(path)
@@ -275,6 +279,9 @@ func Parse(path string, data []byte) (*Workflow, error) {
 			wf.ID, _ = p.matched(pr.val, "id", reStepID)
 		case "description":
 			wf.Description, _ = p.str(pr.val, "description")
+			if utf8.RuneCountInString(wf.Description) > MaxDescriptionRunes {
+				p.errf(pr.val, "description must be at most %d characters", MaxDescriptionRunes)
+			}
 		case "inputs":
 			wf.Inputs = p.inputs(pr.val)
 		case "limits":
