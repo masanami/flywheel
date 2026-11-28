@@ -233,7 +233,7 @@ func loadWorkspaceDefinition(workspace, name, builtinDir, scriptsDir, stageParen
 // 無ければ組み込みを使う。どちらにも無い指示文は写さない（検査が「無い」と返す）。ワークスペースの指示文の道筋に
 // シンボリックリンクか通常のファイルでないものがあれば、写さずに誤り（Problems）として返す（組み込みへも落ちない）。
 func stageDefinition(stage, name string, data []byte, parsed *workflow.Workflow, flowsDir, builtinDir string) (map[string][]byte, workflow.Problems, error) {
-	if err := writeReadOnly(filepath.Join(stage, name+".yaml"), data, 0o444); err != nil {
+	if err := writeCopy(filepath.Join(stage, name+".yaml"), data, 0o444); err != nil {
 		return nil, nil, err
 	}
 	for _, dir := range forbiddenWorkspaceDirs {
@@ -261,14 +261,14 @@ func stageDefinition(stage, name string, data []byte, parsed *workflow.Workflow,
 			}
 			if found {
 				fromWorkspace[filepath.ToSlash(rel)] = b
-				if err := writeReadOnly(filepath.Join(stage, rel), b, 0o444); err != nil {
+				if err := writeCopy(filepath.Join(stage, rel), b, promptCopyMode); err != nil {
 					return nil, nil, err
 				}
 				continue
 			}
 		}
 		if b, ok := readRegular(filepath.Join(builtinDir, rel)); ok {
-			if err := writeReadOnly(filepath.Join(stage, rel), b, 0o444); err != nil {
+			if err := writeCopy(filepath.Join(stage, rel), b, promptCopyMode); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -400,7 +400,11 @@ func readRegular(p string) ([]byte, bool) {
 	return b, err == nil
 }
 
-func writeReadOnly(p string, data []byte, mode os.FileMode) error {
+// promptCopyMode は写した指示文の権限（所有者が書ける。定義の YAML・schemas/・scripts/ の写しと展開した元は読み取り専用）。
+const promptCopyMode os.FileMode = 0o644
+
+// writeCopy は写しのファイルを mode で新しく作る。
+func writeCopy(p string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}

@@ -139,7 +139,7 @@ func Start(env Env, o StartOptions) int {
 	// ワークスペースの .flywheel/flows/<名前>.yaml があればそれを、無ければ埋め込んだ定義を使う（上書き〔.claude-harness/overrides/〕は読まない）。
 	def, err := resolveDefinition(env.Workspace, o.Name, layout.WorkflowDir, plugin.ScriptsDir, filepath.Join(env.Workspace, ".flywheel", "flow"))
 	if errors.Is(err, errNoDefinition) {
-		return writeContract(env.Stdout, env.Stderr, failedDoc(nil, fmt.Sprintf("no run was started: flow %q is neither in the workspace (%s) nor embedded", o.Name, FlowsDir(env.Workspace))))
+		return notStarted(env, fmt.Sprintf("flow %q is neither in the workspace (%s) nor embedded", o.Name, FlowsDir(env.Workspace)))
 	}
 	if err != nil {
 		logf(env.Stderr, "flywheel flow: %v\n", err)
@@ -147,14 +147,12 @@ func Start(env Env, o StartOptions) int {
 	}
 	defer def.cleanup()
 	if !def.ok() {
-		logf(env.Stderr, "flywheel flow: workflow is not valid; no run was started\n%v\n", def.Problems)
-		return writeContract(env.Stdout, env.Stderr, failedDoc(nil, fmt.Sprintf("no run was started: workflow is not valid: %v", def.Problems)))
+		return notStarted(env, fmt.Sprintf("workflow is not valid: %v", def.Problems))
 	}
 	wf := def.WF
 	inputs, err := parseInputs(wf, o.Inputs)
 	if err != nil {
-		logf(env.Stderr, "flywheel flow: %v\n", err)
-		return writeContract(env.Stdout, env.Stderr, failedDoc(nil, fmt.Sprintf("no run was started: %v", err)))
+		return notStarted(env, err.Error())
 	}
 	cwd, err := env.Getwd()
 	if err != nil {
@@ -189,6 +187,16 @@ func Start(env Env, o StartOptions) int {
 		return writeContractExit(env, contractFromView(newView(st), derr.Error()), ExitFailed)
 	}
 	return writeContract(env.Stdout, env.Stderr, contractFromView(newView(st), ""))
+}
+
+// notStarted は run を作らずに終わる start の返し方: 理由を標準エラーへ 1 行で出し（人が打ったときに読む）、
+// 契約の failed の JSON を標準出力に出す。終了コードは JSON を書ければ 0（呼び出し元は JSON で判断する）。
+func notStarted(env Env, why string) int {
+	summary := "no run was started: " + why
+	// 複数行の理由（定義の誤りの一覧など）は、標準エラーでは 1 行につなぐ。契約の summary は変えない。
+	line := strings.Join(strings.FieldsFunc(summary, func(r rune) bool { return r == '\n' || r == '\r' }), "; ")
+	logf(env.Stderr, "flywheel flow: %s\n", line)
+	return writeContract(env.Stdout, env.Stderr, failedDoc(nil, summary))
 }
 
 // writeContractExit は契約の JSON を出し、書けたら want の終了コードで終わる（書けなければ ExitFailed）。
