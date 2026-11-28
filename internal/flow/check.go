@@ -97,6 +97,8 @@ type checkDefinition struct {
 	SHA256   string         `json:"sha256"`
 	OK       bool           `json:"ok"`
 	Problems []checkProblem `json:"problems"`
+	// Description は定義の説明（通らなければ空）。core が、計画を作る判断点の入力の目安にする。
+	Description string `json:"description"`
 }
 
 type checkProblem struct {
@@ -194,7 +196,7 @@ func checkOne(workspace, name, builtinDir, scriptsDir, stageParent string) check
 		cd.Problems = append(cd.Problems, checkProblem{File: p.File, Line: p.Line, Message: p.Msg})
 	}
 	if def.ok() {
-		cd.OK, cd.SHA256 = true, def.SHA256
+		cd.OK, cd.SHA256, cd.Description = true, def.SHA256, def.WF.Description
 	}
 	return cd
 }

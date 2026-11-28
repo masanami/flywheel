@@ -311,7 +311,7 @@ func TestCheck(t *testing.T) {
 	if len(doc.Definitions) != 3 {
 		t.Fatalf("definitions = %d\n%s", len(doc.Definitions), out)
 	}
-	keys := []string{"kind", "name", "ok", "path", "problems", "sha256", "source"}
+	keys := []string{"description", "kind", "name", "ok", "path", "problems", "sha256", "source"}
 	byName := map[string]checkDefinition{}
 	for _, raw := range doc.Definitions {
 		if len(raw) != len(keys) {
@@ -326,6 +326,12 @@ func TestCheck(t *testing.T) {
 		var cd checkDefinition
 		_ = json.Unmarshal(b, &cd)
 		byName[cd.Name] = cd
+	}
+	if c := byName["hello"]; c.Description != "ワークスペースの定義の試験" {
+		t.Errorf("hello description = %q", c.Description)
+	}
+	if c := byName["broken"]; c.Description != "" {
+		t.Errorf("a broken definition has a description: %q", c.Description)
 	}
 	if c := byName["hello"]; !c.OK || c.Kind != "new" || c.Source != "workspace" || len(c.SHA256) != 64 || c.Path != filepath.Join(FlowsDir(f.ws), "hello.yaml") {
 		t.Errorf("hello = %+v", c)

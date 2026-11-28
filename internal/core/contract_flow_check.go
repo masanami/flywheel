@@ -39,6 +39,8 @@ type FlowCheckDefinition struct {
 	SHA256   string // 通らなければ空
 	OK       bool
 	Problems []FlowCheckProblem
+	// Description は定義の説明（通らなければ空）。計画を作る判断点の入力で、ワークスペースの定義を選ぶ目安にする。
+	Description string
 }
 
 // FlowCheckOutput は確かめのコマンド 1 回の結果。Result は launch_failed | timed_out | malformed | errored | succeeded のどれか
