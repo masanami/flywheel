@@ -453,6 +453,10 @@ const (
 	ExecutionResultDelegateEnded    ExecutionResult = "delegate_ended"
 	// ExecutionResultWaitingFixCheck は、コンフリクトの解消の確かめの結果を待っている（承認は取り消さない）。waiting_delegate（委譲先の実行を待つ）とは別。
 	ExecutionResultWaitingFixCheck ExecutionResult = "waiting_fix_check"
+	// ExecutionResultGateFailed は、昇格の前の検査が通らなかった（「入れてよい」を返さず、取り消す）。
+	ExecutionResultGateFailed ExecutionResult = "gate_failed"
+	// ExecutionResultGateUnavailable は、昇格の前の検査を回せなかった（「入れてよい」を返さず、承認を保って待つ）。
+	ExecutionResultGateUnavailable ExecutionResult = "gate_unavailable"
 )
 
 // ExecutionClass は試行の結果の分類。
@@ -503,6 +507,8 @@ var executionResultSpecs = []struct {
 	{ExecutionResultWaitingOutside, ExecutionClassWait, false},
 	{ExecutionResultDelegateEnded, ExecutionClassCancel, false},
 	{ExecutionResultWaitingFixCheck, ExecutionClassWait, false},
+	{ExecutionResultGateFailed, ExecutionClassCancel, false},
+	{ExecutionResultGateUnavailable, ExecutionClassWait, false},
 }
 
 // ExecutionResultValues は閉集合の全値を表の順に返す。

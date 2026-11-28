@@ -152,7 +152,11 @@ func checkWithdrawable(ctx context.Context, tx *sql.Tx, cid int64, current *Chal
 		return nil, err
 	}
 	for _, a := range attempts {
-		if !releaseAttemptStale(a, at) {
+		dead, err := releaseAttemptStaleForChallenge(ctx, tx, cid, a, at)
+		if err != nil {
+			return nil, err
+		}
+		if !dead {
 			return nil, errWithdrawReleaseInProgress(current.ID)
 		}
 		stale = append(stale, a)

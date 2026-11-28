@@ -207,6 +207,8 @@ var executionResultLabels = map[core.ExecutionResult]string{
 	core.ExecutionResultWaitingOutside:   "flywheel の外での反映を待っている",
 	core.ExecutionResultDelegateEnded:    "委譲先の実行が、入れずに終わった",
 	core.ExecutionResultWaitingFixCheck:  "コンフリクトの解消の確かめを待っている",
+	core.ExecutionResultGateFailed:       "上げる前の検査が通らなかった",
+	core.ExecutionResultGateUnavailable:  "上げる前の検査を回せなかった",
 }
 
 // ExecutionResultLabel は反映の試行の結果の語を返す。閉集合の外には空文字。

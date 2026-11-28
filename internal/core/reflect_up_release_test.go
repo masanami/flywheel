@@ -12,6 +12,7 @@ const reflIntegRef = "feat/integration-1"
 
 func (f *reflFixture) useIntegration(t *testing.T) {
 	t.Helper()
+	f.gate, f.headGit = &fakeGate{}, &fakeGateHeadGit{declaration: gateDeclarationMake, has: true}
 	writeForTest(t, f.s, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE challenge SET uses_integration = 1, integration_ref = ? WHERE id = ?`, reflIntegRef, f.cid)
 		return err

@@ -1434,6 +1434,16 @@ func releaseOnCompletionRejection(ctx context.Context, tx *sql.Tx, opID int64, n
 	if err != nil {
 		return 0, nil, err
 	}
+	stale := false
+	if last != nil && last.open() {
+		op, err := loadOperationRow(ctx, tx, opID)
+		if err != nil {
+			return 0, nil, err
+		}
+		if stale, err = releaseAttemptStaleForChallenge(ctx, tx, op.ChallengeID, last, now); err != nil {
+			return 0, nil, err
+		}
+	}
 	switch {
 	case last == nil:
 		return rejectReleaseWithdraw, nil, nil
@@ -1441,7 +1451,7 @@ func releaseOnCompletionRejection(ctx context.Context, tx *sql.Tx, opID int64, n
 		return rejectReleaseKeep, nil, nil
 	case !last.open():
 		return rejectReleaseWithdraw, nil, nil
-	case !releaseAttemptStale(last, now):
+	case !stale:
 		return rejectReleaseRunning, nil, nil
 	default:
 		return rejectReleaseWithdraw, last, nil

@@ -93,6 +93,8 @@ type CycleRunInput struct {
 	Descriptions UpstreamDescriptionSource
 	// HeadGit は J5 が PR の head を読む一時の worktree の口。ConnDecl が非 nil のとき必須。
 	HeadGit HeadWorktreeGit
+	// Gate は release の段の、昇格の前の検査の起動（HeadGit と一緒に使う）。
+	Gate PromotionGateRunner
 	// Compare は release の段が、完了の課題の承認待ちの release の PR に検証の後の変更が入ったかを判定する比較の取得
 	// （GET だけ）。nil なら、その判定をしない。
 	Compare UpstreamCompareSource
@@ -390,6 +392,8 @@ func (s *Store) runAdvancePhases(ctx context.Context, in CycleRunInput, cycleID 
 			Connectors: in.ConnDecl,
 			Agent:      in.AgentDecl,
 			Contract:   in.Contract,
+			Gate:       in.Gate,
+			HeadGit:    in.HeadGit,
 			Trigger:    ReleaseExecTriggerCycle,
 			CycleID:    cycleID,
 		})
