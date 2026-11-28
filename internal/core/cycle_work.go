@@ -51,7 +51,7 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 	}
 
 	var runTargets []int64
-	var contractRuns, blockedRuns, specDrafts int
+	var contractRuns, blockedRuns, specDrafts, flowHolds int
 	err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		ids, _, err := selectJ1AutoTargets(ctx, tx)
 		if err != nil {
@@ -121,6 +121,10 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 			return err
 		}
 		specDrafts = len(startable) + len(stalls)
+		// 定義を直したかもしれない flow_definition_invalid の保留も、委譲の段が確かめ直して進める。
+		if flowHolds, err = countRecheckableFlowDefinitionHolds(ctx, tx, s.workspace); err != nil {
+			return err
+		}
 		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM contract_run WHERE ended_at IS NULL`).Scan(&contractRuns)
 	})
 	if err = classifyReadWriteErr(err); err != nil {
@@ -141,7 +145,7 @@ func (s *Store) CountCycleWork(ctx context.Context, agent *AgentDeclaration, con
 		if err != nil {
 			return nil, err
 		}
-		st.Run = n + contractRuns + blockedRuns + len(reflects) + specDrafts
+		st.Run = n + contractRuns + blockedRuns + len(reflects) + specDrafts + flowHolds
 	}
 	return &CycleWork{Total: st.sum(), Stages: st}, nil
 }

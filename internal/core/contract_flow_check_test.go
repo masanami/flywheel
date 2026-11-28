@@ -5,10 +5,14 @@ package core
 
 import (
 	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // failingFlowCheck は、name のワークスペースの定義が検査を通らない確かめの結果。
@@ -265,5 +269,58 @@ func TestFlowCheck_IntegrationChallengeHoldsPerTask(t *testing.T) {
 	}
 	if got := f.statusOf(t, id); got != StatusInProgress {
 		t.Errorf("status = %s, want in_progress", got)
+	}
+}
+
+// サイクルを回すと進むものの数え: 開いている flow_definition_invalid の保留は、保留を立てた後に定義の置き場が変わったとき
+// （置き場が無くなったときを含む）だけ委譲の段の仕事に数える（直した定義でサイクルが始まり、壊れたままなら空回りしない）。
+func TestFlowCheck_CycleWorkCountsAHoldOnlyAfterTheDefinitionChanged(t *testing.T) {
+	t.Parallel()
+	f := newFlowContractFixture(t, "")
+	f.client.checkOut = failingFlowCheck("ticket")
+	f.runDelegationStage(t, nil)
+	if f.openFlowHolds(t, f.cid) != 1 {
+		t.Fatal("no flow hold")
+	}
+	dir := filepath.Join(f.s.Workspace(), ".flywheel", "flows")
+	if err := os.MkdirAll(filepath.Join(dir, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "ticket.yaml")
+	if err := os.WriteFile(file, []byte("broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	for _, p := range []string{file, filepath.Join(dir, "prompts"), dir} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func() int {
+		t.Helper()
+		var n int
+		if err := f.s.db.Read(context.Background(), func(tx *sql.Tx) (err error) {
+			n, err = countRecheckableFlowDefinitionHolds(context.Background(), tx, f.s.Workspace())
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("count before the definition changed = %d, want 0", n)
+	}
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(file, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("count after the definition changed = %d, want 1", n)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("count after the definitions were removed = %d, want 1", n)
 	}
 }

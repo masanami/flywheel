@@ -17,7 +17,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // FlowCheckProblem は確かめの出力の problems の 1 要素（どのファイルのどこが、なぜ悪いか）。Line は 0 なら行が無い。
@@ -302,4 +305,75 @@ func (s *Store) closeFlowDefinitionHold(ctx context.Context, h flowDefinitionHol
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// countRecheckableFlowDefinitionHolds は、開いている flow_definition_invalid の保留のうち、保留を立てた後にワークスペースの
+// フローの定義の置き場（<ws>/.flywheel/flows とその下の指示文）が変わったものの数を返す（サイクルを回すと進むものの数え）。
+// 置き場が変わっていない保留は、確かめ直しても通らないので数えない（定義が壊れたままのワークスペースでサイクルを空回りさせない）。
+// 置き場が無くなった（組み込みへ戻した）ときは変わったとみなす。
+func countRecheckableFlowDefinitionHolds(ctx context.Context, tx *sql.Tx, workspace string) (int, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT h.raised_at FROM hold h JOIN challenge c ON c.id = h.challenge_id
+		WHERE h.reason = ? AND h.answer IS NULL AND h.closed_at IS NULL AND h.task_id IS NOT NULL AND c.status = ?`,
+		string(holdReasonFlowDefinitionInvalid), string(StatusAwaitingHuman))
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	var raised []time.Time
+	for rows.Next() {
+		var at string
+		if err := rows.Scan(&at); err != nil {
+			return 0, err
+		}
+		t, err := parseTimestamp(at)
+		if err != nil {
+			return 0, err
+		}
+		raised = append(raised, t)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(raised) == 0 {
+		return 0, nil
+	}
+	changed, gone := flowsDirLatestChange(filepath.Join(workspace, ".flywheel", "flows"))
+	n := 0
+	for _, t := range raised {
+		if gone || changed.After(t) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// flowsDirLatestChange は、置き場のディレクトリと、その中・prompts の下の項目の更新の日時のうち最も新しいものを返す。
+// 置き場が無ければ gone が真。
+func flowsDirLatestChange(dir string) (latest time.Time, gone bool) {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return time.Time{}, true
+	}
+	latest = fi.ModTime()
+	var walk func(d string, depth int)
+	walk = func(d string, depth int) {
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			if info.ModTime().After(latest) {
+				latest = info.ModTime()
+			}
+			if e.IsDir() && depth < 3 {
+				walk(filepath.Join(d, e.Name()), depth+1)
+			}
+		}
+	}
+	walk(dir, 0)
+	return latest, false
 }
