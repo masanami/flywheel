@@ -64,18 +64,19 @@ func newGatePRRepo(t *testing.T) *gatePRRepo {
 		t.Fatal(err)
 	}
 	for path, content := range map[string]string{
-		"scripts/gate-pr.sh": string(script),
-		"go.mod":             "module example.com/m\n\ngo 1.22\n",
-		"Makefile":           "all:\n",
-		"a/a.go":             "package a\n",
-		"a/data.txt":         "x\n",
-		"b/b.go":             "package b\n\nimport _ \"example.com/m/a\"\n",
-		"c/c.go":             "package c\n\nimport _ \"example.com/m/b\"\n",
-		"d/d.go":             "package d\n",
-		"d/d_test.go":        "package d_test\n\nimport _ \"example.com/m/b\"\n",
-		"e/e.go":             "package e\n",
-		"docs/x.md":          "x\n",
-		"web/x.ts":           "x\n",
+		"scripts/gate-pr.sh":                string(script),
+		"go.mod":                            "module example.com/m\n\ngo 1.22\n",
+		"Makefile":                          "all:\n",
+		"a/a.go":                            "package a\n",
+		"a/data.txt":                        "x\n",
+		"b/b.go":                            "package b\n\nimport _ \"example.com/m/a\"\n",
+		"c/c.go":                            "package c\n\nimport _ \"example.com/m/b\"\n",
+		"d/d.go":                            "package d\n",
+		"d/d_test.go":                       "package d_test\n\nimport _ \"example.com/m/b\"\n",
+		"e/e.go":                            "package e\n",
+		".claude-harness/quality-gate.json": "{}\n",
+		"docs/x.md":                         "x\n",
+		"web/x.ts":                          "x\n",
 	} {
 		writeGatePRFile(t, filepath.Join(r.dir, path), content, 0o644)
 	}
@@ -83,6 +84,7 @@ func newGatePRRepo(t *testing.T) *gatePRRepo {
 	r.git(t, "add", ".")
 	r.git(t, "commit", "-qm", "init")
 	r.git(t, "update-ref", "refs/remotes/origin/main", "HEAD")
+	r.git(t, "update-ref", "refs/remotes/origin/integration/c-1", "HEAD")
 	r.git(t, "checkout", "-q", "-b", "feature/x")
 	r.upstream(t, "origin", "integration/c-1")
 	return r
@@ -159,7 +161,13 @@ func TestGatePR_RunsTheFullGateUnlessTheDestinationIsAnIntegrationBranch(t *test
 			r.setGH(t, "exit 1")
 			r.upstream(t, "origin", "main")
 		},
-		"no merge base with origin/main": func(t *testing.T, r *gatePRRepo) {
+		"no merge base with the destination": func(t *testing.T, r *gatePRRepo) {
+			r.git(t, "update-ref", "-d", "refs/remotes/origin/integration/c-1")
+		},
+		"no merge base with origin/main when there are two destinations": func(t *testing.T, r *gatePRRepo) {
+			r.setGH(t, "echo integration/c-1; echo integration/c-2")
+			// 2 つの宛先はどちらも在る。比べる相手が origin/main であることだけを、その有無で確かめる。
+			r.git(t, "update-ref", "refs/remotes/origin/integration/c-2", "HEAD")
 			r.git(t, "update-ref", "-d", "refs/remotes/origin/main")
 		},
 	} {
@@ -189,14 +197,16 @@ func TestGatePR_TheLightGateTestsTheChangedPackagesAndTheirDependents(t *testing
 	}{
 		"dependents include test imports": {[]string{"a/a.go"}, m + "a " + m + "b " + m + "c " + m + "d"},
 		"a leaf":                          {[]string{"c/c.go"}, m + "c"},
-		"an untracked file":               {[]string{"e/new.go.txt", "e/e.go"}, m + "e"},
+		"an untracked file":               {[]string{"e/new.go"}, m + "e"},
 		"a non-Go file next to a Go change belongs to its package": {[]string{"a/data.txt", "e/e.go"},
 			m + "a " + m + "b " + m + "c " + m + "d " + m + "e"},
-		"no Go file":    {[]string{"a/data.txt", "docs/x.md"}, ""},
-		"go.mod":        {[]string{"go.mod"}, "./..."},
-		"go.sum":        {[]string{"go.sum"}, "./..."},
-		"Makefile":      {[]string{"Makefile"}, "./..."},
-		".golangci.yml": {[]string{".golangci.yml"}, "./..."},
+		"no Go file":      {[]string{"a/data.txt", "docs/x.md"}, ""},
+		"go.mod":          {[]string{"go.mod"}, "./..."},
+		"go.sum":          {[]string{"go.sum"}, "./..."},
+		"Makefile":        {[]string{"Makefile"}, "./..."},
+		".golangci.yml":   {[]string{".golangci.yml"}, "./..."},
+		"the gate script": {[]string{"scripts/gate-pr.sh"}, "./..."},
+		"a declaration":   {[]string{".claude-harness/quality-gate.json"}, "./..."},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -204,6 +214,10 @@ func TestGatePR_TheLightGateTestsTheChangedPackagesAndTheirDependents(t *testing
 			for _, p := range c.changed {
 				if p == "go.mod" {
 					r.git(t, "commit", "-q", "--allow-empty", "-m", "x")
+				}
+				if p == "e/new.go" { // 追跡外の新しい Go のファイル
+					writeGatePRFile(t, filepath.Join(r.dir, p), "package e\n", 0o644)
+					continue
 				}
 				r.change(t, p)
 			}
@@ -222,6 +236,36 @@ func TestGatePR_CommittedChangesSinceTheMergeBaseCount(t *testing.T) {
 	r.change(t, "c/c.go")
 	r.git(t, "commit", "-qam", "change c")
 	wantCalls(t, r.calls(t), "make fmt-check vet lint", gatePRTest+"example.com/m/c", "make build")
+}
+
+// 統合ブランチに先に入った変更（別のタスクの PR で試し済み）は、軽い検査の差分に数えない。
+func TestGatePR_ChangesAlreadyOnTheIntegrationBranchDoNotCount(t *testing.T) {
+	t.Parallel()
+	r := newGatePRRepo(t)
+	r.git(t, "checkout", "-q", "-b", "integ", "main")
+	r.change(t, "a/a.go")
+	r.git(t, "commit", "-qam", "an earlier task")
+	r.git(t, "update-ref", "refs/remotes/origin/integration/c-1", "HEAD")
+	r.git(t, "checkout", "-q", "-B", "feature/x", "integ")
+	r.upstream(t, "origin", "integration/c-1")
+	r.change(t, "c/c.go")
+	wantCalls(t, r.calls(t), "make fmt-check vet lint", gatePRTest+"example.com/m/c", "make build")
+}
+
+// 宛先が 2 つ以上なら origin/main と比べる（統合ブランチに先に入った変更も数える側に倒す）。
+func TestGatePR_TwoDestinationsCompareWithMain(t *testing.T) {
+	t.Parallel()
+	r := newGatePRRepo(t)
+	r.git(t, "checkout", "-q", "-b", "integ", "main")
+	r.change(t, "a/a.go")
+	r.git(t, "commit", "-qam", "an earlier task")
+	r.git(t, "update-ref", "refs/remotes/origin/integration/c-1", "HEAD")
+	r.git(t, "update-ref", "refs/remotes/origin/integration/c-2", "HEAD")
+	r.git(t, "checkout", "-q", "-B", "feature/x", "integ")
+	r.setGH(t, "echo integration/c-1; echo integration/c-2")
+	r.change(t, "c/c.go")
+	const m = "example.com/m/"
+	wantCalls(t, r.calls(t), "make fmt-check vet lint", gatePRTest+m+"a "+m+"b "+m+"c "+m+"d", "make build")
 }
 
 func TestGatePR_TheUIGateAndE2ERunOnlyWhenWebChanges(t *testing.T) {

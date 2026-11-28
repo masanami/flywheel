@@ -61,8 +61,8 @@
 
 ```
 タスクの PR の入口は make gate-pr（claude-harness の宣言 .claude-harness/quality-gate.json が呼ぶ。本体は scripts/gate-pr.sh）。
-宛先が統合ブランチ（integration/…）なら軽い検査: gofmt・vet・golangci-lint・build は全体、go test -race -count=1 は origin/main との
-merge-base からの差分があるパッケージとその逆依存だけ（Go の差分が無ければ飛ばし、go.mod・go.sum・Makefile・.golangci.yml の差分があれば全部）、
+宛先が統合ブランチ（integration/…）なら軽い検査: gofmt・vet・golangci-lint・build は全体、go test -race -count=1 は PR の宛先との
+merge-base からの差分があるパッケージとその逆依存だけ（Go の差分が無ければ飛ばし、go.mod・go.sum・Makefile・.golangci.yml・scripts/gate-pr.sh・.claude-harness/ の宣言の差分があれば全部）、
 UI のゲートと make e2e は web/ の差分があるときだけ。宛先が main・判定できないときはフルの make gate。
 軽い検査で拾えないもの（差分の外のパッケージのテストが読むファイル・Go の差分が無い変更・web/ の差分が無いときの E2E）は、フルの検査で拾う。
 フルの検査は make gate（make check の後に make e2e）。統合ブランチを main へ上げる前に、flywheel が反映の段で「入れてよい」を返す直前に

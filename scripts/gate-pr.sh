@@ -8,9 +8,10 @@
 #   2. 無い・gh が使えなければ、いまのブランチの上流（remote が origin の branch.<名前>.merge。作業ツリーは origin の宛先から切るので、
 #      上流が宛先を指す。自分のブランチ名を上流にしていれば、判定できない扱いになる）
 #
-# 軽い検査: gofmt・vet・golangci-lint・build は全体。go test -race -count=1 は、origin/main との merge-base からの差分
+# 軽い検査: gofmt・vet・golangci-lint・build は全体。go test -race -count=1 は、PR の宛先との merge-base からの差分
 # （未コミットと追跡外を含む）のファイルがあるパッケージと、それに依存するパッケージ（テストの import を含む）だけ。
-# Go のファイルの差分が無ければ go test を飛ばす。go.mod・go.sum・Makefile・.golangci.yml の差分があれば全パッケージを試す。
+# Go のファイルの差分が無ければ go test を飛ばす。go.mod・go.sum・Makefile・.golangci.yml・このスクリプト・
+# .claude-harness/ の宣言の差分があれば全パッケージを試す。
 # web/ の差分があるときだけ、UI のゲート（make ui-check）と make e2e を流す。
 # ここで拾えないもの（差分の外のパッケージが読むファイル・Go の差分が無い変更・UI の差分が無いときの E2E）は、
 # 反映先へ上げる前のフルの make gate で拾う。
@@ -47,7 +48,11 @@ for base in $bases; do
 	esac
 done
 
-mb=$(git merge-base origin/main HEAD) || full "cannot find the merge base with origin/main"
+# 差分は PR の宛先（統合ブランチ）との merge-base から取る。先に統合ブランチへ入ったタスクの変更は、
+# そのタスクの PR で試し済みなので数えない。宛先が 2 つ以上なら origin/main と比べる（多く試す側に倒す）。
+set -- $bases
+if [ $# -eq 1 ]; then cmp="origin/$1"; else cmp=origin/main; fi
+mb=$(git merge-base "$cmp" HEAD) || full "cannot find the merge base with $cmp"
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/gate-pr.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -58,7 +63,7 @@ git -c core.quotepath=false ls-files --others --exclude-standard >>"$tmp/changed
 web=false
 if grep -q '^web/' "$tmp/changed"; then web=true; fi
 scope=none
-if grep -q -E '^(go\.mod|go\.sum|Makefile|\.golangci\.yml)$' "$tmp/changed"; then
+if grep -q -E '^(go\.mod|go\.sum|Makefile|\.golangci\.yml|scripts/gate-pr\.sh|\.claude-harness/.*\.json)$' "$tmp/changed"; then
 	scope=all
 elif grep -q '\.go$' "$tmp/changed"; then
 	scope=changed
