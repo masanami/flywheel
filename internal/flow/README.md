@@ -118,3 +118,14 @@ claude-harness の「フロー（YAML）と、それを進める仕組み」を 
 - **記録と契約**: 実行の始まりの記録（`run_started`）に `definition`（`source`＝`workspace`・`builtin`、`sha256`、ワークスペースの定義では元のパスと写した指示文の一覧）を残す。契約（版 1 のまま）の JSON に任意の欄 `definition`（`source`・`sha256`）を足し、実行を読めた `start`・`status`・`resume`・`cancel` の出力に必ず載せる。記録の無い（この版より前に始めた）実行は `builtin` と YAML の sha256 を出す。
 - **写す口**: `flywheel flow export <名前>` は、組み込みの定義の YAML だけを `.flywheel/flows/<名前>.yaml` へ書き出し、その絶対パスを標準出力へ出す（指示文は書き出さない）。書き出す先に既にあれば上書きせず、組み込みに無い名前と合わせて 0 でない終了コード。`.flywheel/flows/` が無ければ作る。
 - **確かめる口**: `flywheel flow check [--json] [<名前>...]` は、名前が無ければ `.flywheel/flows/*.yaml` をすべて、あればその名前だけを検査する（置いていない名前は組み込みを検査し、組み込みにも無ければ通らない）。すべて通れば 0、1 つでも通らなければ 1。テキストは定義ごとに 1 行（名前・種別・通ったか・ハッシュの先頭 12 文字）と「ファイル:行: 理由」。`--json` は `{"definitions":[{"name","source","kind"（replace・new・builtin）,"path","sha256","ok","problems":[{"file","line","message"}],"description"}]}`（`description` は通った定義の説明。通らなければ空）。定義の `description` は 500 文字以内で、超えると検査を通らない（組み込みにも同じ検査）。core は、組み込みのほかの名前のワークスペースの定義では、この説明を計画を作る判断点の入力の操作の行に目安として添える。検査はプラグインのスクリプトとエージェントの実在も確かめるので、`start` と同じくプラグインの場所を解決できないと検査できない（0 でない終了コード）。
+
+### 取り込み元の Issue を、反映先へ入るときに閉じる（flywheel#1424）
+
+GitHub は、既定ブランチへ入ったときにだけ Issue を閉じる。統合ブランチを使う課題では、閉じる行は昇格の PR（統合ブランチ → 既定ブランチ）が持つ。
+
+- **番号の経路**: core が、課題の取り込み元の Issue の番号を、入力 `challenge_issue` で渡す（`ticket`・`ticket-light` の開始は統合先を使う課題だけ。`reflect` の開始は統合先を使う課題だけ）。タスクの開始には、反映の依頼の口の委譲先が `form: flow` のときだけ渡す（`form: cli` の口と、口の無いリポジトリには番号が届かないので、タスクの PR の参照は足す前のままにする）。タスクの数や、タスクが対応する取り込み元の子には依らない。取り込み元が無いときと、取り込み元の Issue が PR を作るリポジトリのものでないときは渡さない。`issue` の入力の決め方は変えない。
+- **タスクの PR**: `resolve`（`resolve-ticket.sh`）は、`uses_integration` が `true` で `challenge_issue` があれば、その番号を `closes` でなく `refs` に入れる。タスクが対応する子の `Closes` は変えない。統合先を使わない 1 タスクの課題は、`issue` の入力のとおり `Closes` を書く。
+- **昇格の PR**: `reflect` に段 `links`（`resolve-ticket.sh --links_only true`。出力の型は `schemas/source-issue-links.json`）を `describe` と `open` の間に足した。`open` は `with.closes`（任意の整数）の番号の `Closes` の行を、タスクの PR の本文に依らず書く。同じ番号は `Closes` だけにする。Issue の参照の行のほかの本文は変えない。
+- **`Closes: なし`**: 取り込み元の本文にあれば、タスクの PR も昇格の PR も、足す前と同じ。`Closes:` の行の値が読めない（「なし」でない）ときに `links_invalid` で止めるのは、取り込み元がその実行の入力の Issue（`issue`）のときだけ。入力でない取り込み元は、`resolve` では参照を足さず、`links` では `Closes` を書かずに（理由は出力の `message`）、止めずに進める。`resolve` は、入力でない取り込み元を `gh` で読めなかったときも同じ。`links` は読めなければ失敗で終わる（`Closes` の無い昇格の PR を作らない）。本文を読むのは `resolve-ticket.sh` の 1 か所。
+- **開いている昇格の PR**: `open` が既存の PR を使うときは、本文を書き換えない。
+- **足す前に書き出したワークスペースの定義**: 入力 `challenge_issue` を宣言していない定義は、渡されても読み飛ばして始める（足す前と同じ動き）。ワークスペースの `reflect` が宣言していない（か読めない）ときは、タスクのフローにも渡さない（タスクの PR の参照は足す前と同じになり、`Closes` を持つタスクの PR の行は昇格の PR へ写る）。どちらの場合も `flow start` は理由を標準エラーに出す。昇格の PR に取り込み元の `Closes` を必ず書くには、`reflect` の定義にも、入力 `challenge_issue`・段 `links`・`open` の `closes` を足す。

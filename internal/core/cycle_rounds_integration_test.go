@@ -146,6 +146,10 @@ func runIntegrationCycleWith(t *testing.T, verdicts []string, flow *flowShimClie
 	f.agent.CyclePollIntervalSec = 1
 	id = f.newMulti(t, "chain", "P1", true, multiTask{key: "a"}, multiTask{key: "b", deps: []string{"a"}})
 
+	if flow != nil && flow.setup != nil {
+		flow.setup(f, id)
+	}
+
 	tasks := map[string]*integFlowTask{
 		"a": {pr: 11, content: "c0ffee1", landed: "d0000001"},
 		"b": {pr: 12, content: "c0ffee2", landed: "d0000002"},

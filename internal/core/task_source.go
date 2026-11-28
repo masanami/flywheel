@@ -5,11 +5,32 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
 // このファイルは、委譲へ渡す取り込み元（差し込み {issue_number}・{issue_url}・{external_key} の値）を、実行が結び付く
 // タスクから決める口と、タスクが対応する子による「起動しない理由」を持つ。規則は core に置き、CLI・server・invoker は持たない。
+
+// challengeIssueNumber は、統合先を使う課題で、タスクの PR と昇格の PR へ参照を書く、課題の取り込み元の Issue の番号を返す
+// （タスクの数やタスクが対応する子に依らない）。sb は課題の取り込み元、repo は PR を作るリポジトリの宣言。
+// 取り込み元が無いときと、取り込み元の Issue が repo の Issue でないとき（PR の本文の `#N` は PR のリポジトリの番号を指す）は ""。
+func challengeIssueNumber(sb *sourceBinding, repo *ConnectorRepo) string {
+	if sb == nil || repo == nil {
+		return ""
+	}
+	name, number, ok := parseExternalKey(sb.ExternalKey)
+	if !ok || !strings.EqualFold(name, repo.Remote) {
+		return ""
+	}
+	return strconv.Itoa(number)
+}
+
+// reflectTakesChallengeIssue は、反映の依頼の口の委譲先 c（無ければ nil）が取り込み元の番号を受けるか。
+// 受けるのは form: flow だけ（form: cli の commands.reflect には番号の差し込みが無い）。
+func reflectTakesChallengeIssue(c *Connector) bool {
+	return c != nil && c.Form == ConnectorFormFlow
+}
 
 // resolveTaskSourceBinding は、タスク t の実行へ渡す取り込み元を決める。sb は課題の取り込み元（無ければ nil）、
 // planTaskCount は t の計画の版のタスクの数、children は課題の取り込み元の子の記録。

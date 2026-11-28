@@ -435,6 +435,8 @@ type flowShimClient struct {
 	mu    sync.Mutex
 	inner *integFlowClient
 	raw   [][]string // 届いた flow のコマンド（start のもの）
+	// setup は、課題を作った後・サイクルを回す前に呼ぶ（nil なら何もしない）。
+	setup func(f *contractFixture, id string)
 	// checks は届いた委譲の前の確かめのコマンド。
 	checks [][]string
 }

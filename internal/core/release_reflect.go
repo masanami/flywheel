@@ -68,19 +68,25 @@ func (s *Store) startReflectRequest(ctx context.Context, row *operationRow, opts
 	artifactRef := row.Ref.String
 	var integ bool
 	var integRef sql.NullString
+	var binding *sourceBinding
 	if err := s.db.Read(ctx, func(tx *sql.Tx) error {
 		u, err := challengeUsesIntegration(ctx, tx, cid)
 		if err != nil {
 			return err
 		}
 		if integ = u != nil && *u; integ {
+			if binding, err = loadSourceBindingByChallengeID(ctx, tx, cid); err != nil {
+				return err
+			}
 			return tx.QueryRowContext(ctx, `SELECT integration_ref FROM challenge WHERE id = ?`, cid).Scan(&integRef)
 		}
 		return nil
 	}); classifyReadWriteErr(err) != nil {
 		return releaseJudgment{}, classifyReadWriteErr(err)
 	}
+	challengeIssue := ""
 	if integ {
+		challengeIssue = challengeIssueNumber(binding, decl)
 		if integRef.String == "" {
 			j.result, j.detail = ExecutionResultUnsupported, "could not start the reflect request: the challenge has no integration ref"
 			return j, nil
@@ -88,7 +94,7 @@ func (s *Store) startReflectRequest(ctx context.Context, row *operationRow, opts
 		artifactRef = integRef.String
 	}
 	command, err := s.contractCommandArgs(connector, contractCmdReflect,
-		contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: artifactRef})
+		contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: artifactRef, ChallengeIssue: challengeIssue})
 	if err != nil {
 		j.result, j.detail = ExecutionResultUnsupported, "could not fill the reflect command: "+err.Error()
 		return j, nil

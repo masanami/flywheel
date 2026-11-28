@@ -1,5 +1,6 @@
 #!/bin/bash
-# resolve-ticket.sh [--issue <番号>] [--base <ブランチ>] [--task_file <絶対パス>] [--task_id T-<番号>] [--uses_integration true|false] [--challenge_id <ID>]
+# resolve-ticket.sh [--issue <番号>] [--base <ブランチ>] [--task_file <絶対パス>] [--task_id T-<番号>] [--uses_integration true|false] [--challenge_id <ID>] [--challenge_issue <番号>]
+# resolve-ticket.sh --links_only true [--challenge_issue <番号>]   （reflect の links の段）
 #
 # ticket ワークフローの最初のステップ（docs/harness-runtime-design.md §3.3・§3.4・§5.6.2。/impl の「base の決定」I2・I3 を切り出したもの）。
 #   0. 入力どうしの条件を確かめる（YAML の文法は持たない。§3.1）。満たさなければ input_invalid（gh・git は呼ばない）。
@@ -10,6 +11,8 @@
 #      （uses_integration の統合ブランチは確かめない。作るのは次の段 ensure-base）
 #   4. PR 本文に書く Issue 参照を決める（#305）: Issue 本文の `Refs: #N[, #M]` 行を refs に、`Closes: なし` 行があれば
 #      closes を 0（closing キーワードを書かない）にする。どちらの行も無ければ closes は Issue 自身、refs は空（従来どおり）
+#      uses_integration が true で --challenge_issue（課題の取り込み元の Issue）があれば、その番号は closes でなく refs に入れる
+#      （閉じるのは昇格の PR）。取り込み元の本文が Closes: なし なら何も変えない。uses_integration が true でなければ読まない
 #
 # stdout に JSON を 1 つ出す（schemas/resolve-ticket.json）。outcome は ok | base_missing | links_invalid | input_invalid |
 # 出力の integration は create（uses_integration が true で ok）| none。key は名前の鍵（task-<n> か issue-<n>。作業ツリーの場所とブランチの名前に使う）、scope は作業の範囲の正本
@@ -32,10 +35,12 @@ task_file=""
 task_id=""
 uses_integration=""
 challenge_id=""
-usage="usage: resolve-ticket.sh [--issue <number>] [--base <branch>] [--task_file <absolute path>] [--task_id T-<number>] [--uses_integration true|false] [--challenge_id <id>]"
+challenge_issue=""
+links_only=""
+usage="usage: resolve-ticket.sh [--issue <number>] [--base <branch>] [--task_file <absolute path>] [--task_id T-<number>] [--uses_integration true|false] [--challenge_id <id>] [--challenge_issue <number>] [--links_only true]"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --issue|--base|--task_file|--task_id|--uses_integration|--challenge_id)
+    --issue|--base|--task_file|--task_id|--uses_integration|--challenge_id|--challenge_issue|--links_only)
       if [ $# -lt 2 ]; then echo "Error: $1 needs a value ($usage)" >&2; exit 2; fi
       case "$1" in
         --issue) issue="$2"; issue_given=true ;;
@@ -44,6 +49,8 @@ while [ $# -gt 0 ]; do
         --task_id) task_id="$2" ;;
         --uses_integration) uses_integration="$2" ;;
         --challenge_id) challenge_id="$2" ;;
+        --challenge_issue) challenge_issue="$2" ;;
+        --links_only) links_only="$2" ;;
       esac
       shift 2 ;;
     *) echo "Error: unknown argument '$1' ($usage)" >&2; exit 2 ;;
@@ -54,11 +61,84 @@ if [ "$issue_given" = true ] && ! [[ "$issue" =~ ^[1-9][0-9]*$ ]]; then
   echo "Error: --issue must be a positive integer, got '${issue}'" >&2
   exit 2
 fi
+if [ -n "$challenge_issue" ] && ! [[ "$challenge_issue" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: --challenge_issue must be a positive integer, got '${challenge_issue}'" >&2
+  exit 2
+fi
 if ! command -v jq >/dev/null 2>&1; then
   echo "Error: jq is required but was not found in PATH" >&2
   exit 1
 fi
 [ "$issue_given" = true ] || issue=0
+
+# key_lines は本文から `<key> <値>` 行の値を列挙する（key は awk の正規表現。例: `Base:`）。HTML コメントとコードブロック
+# 〔``` / ~~~〕の中は読まない。前後の空白と ` を除く。
+key_lines() {
+  tr -d '\r' | awk -v key="$1" '
+    {
+      line = $0
+      out = ""
+      while (length(line) > 0) {
+        if (incomment) {
+          i = index(line, "-->")
+          if (i == 0) { line = ""; break }
+          line = substr(line, i + 3); incomment = 0
+        } else {
+          i = index(line, "<!--")
+          if (i == 0) { out = out line; line = ""; break }
+          out = out substr(line, 1, i - 1); line = substr(line, i + 4); incomment = 1
+        }
+      }
+      if (!incomment && out ~ /^[ \t]*(```|~~~)/) { infence = !infence; next }
+      if (infence) next
+      if (out ~ ("^[ \t]*" key)) {
+        sub("^[ \t]*" key "[ \t]*", "", out)
+        sub(/[ \t]+$/, "", out)
+        gsub(/`/, "", out)
+        print out
+      }
+    }'
+}
+
+# check_closes_lines <Issue 番号> <本文> は Closes: 行を読む（#305）。値が「なし」（無し・none も同じ）の行があれば closes_none を true にし、
+# ほかの値があれば closes_err に直し方を入れる。
+check_closes_lines() {
+  closes_none=false
+  closes_err=""
+  local v
+  while IFS= read -r v; do
+    case "$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')" in
+      なし|無し|none) closes_none=true ;;
+      *)
+        closes_err="Issue #$1 の本文の Closes: 行の値 '${v}' は受け付けない（受け付けるのは「Closes: なし」だけ。行が無ければ、PR が反映先へ入るときにこの Issue を閉じる）。行を消すか「Closes: なし」に直してから再実行する"
+        break ;;
+    esac
+  done < <(printf '%s\n' "$2" | key_lines 'Closes(:|：)' | awk 'NF' | sort -u)
+}
+
+# --links_only true は、reflect の links の段。課題の取り込み元の Issue（--challenge_issue）の本文の Closes: 行だけを読み、昇格の PR が
+# 必ず閉じる Issue（closes。0 は無し）を出す。取り込み元が無ければ gh を呼ばない。出力は schemas/source-issue-links.json。
+if [ "$links_only" = true ]; then
+  closes=0
+  outcome="ok"
+  message=""
+  if [ -n "$challenge_issue" ]; then
+    if ! view="$(gh issue view "$challenge_issue" --json body)"; then
+      echo "Error: gh issue view ${challenge_issue} failed" >&2
+      exit 1
+    fi
+    check_closes_lines "$challenge_issue" "$(jq -r '.body // ""' <<<"$view")"
+    if [ -n "$closes_err" ]; then
+      # タスクがすべて入った後なので止めない。閉じてよいかを決められないので、Closes は書かない。
+      message="Issue #${challenge_issue} の本文の Closes: 行を読めないので、昇格の PR に Closes #${challenge_issue} を書かない。閉じるときは手で閉じる"
+      echo "Warning: ${message}" >&2
+    elif [ "$closes_none" != true ]; then
+      closes="$challenge_issue"
+    fi
+  fi
+  jq -n --arg outcome "$outcome" --argjson closes "$closes" --arg message "$message" '{outcome: $outcome, closes: $closes, message: $message}'
+  exit 0
+fi
 
 # 名前の鍵と作業の範囲の正本。key は入力が正しいときだけ意味を持つ（誤りのときは空文字）。
 key=""
@@ -158,35 +238,6 @@ valid_branch() {
   return 0
 }
 
-# key_lines は本文から `<key> <値>` 行の値を列挙する（key は awk の正規表現。例: `Base:`）。HTML コメントとコードブロック
-# 〔``` / ~~~〕の中は読まない。前後の空白と ` を除く。
-key_lines() {
-  tr -d '\r' | awk -v key="$1" '
-    {
-      line = $0
-      out = ""
-      while (length(line) > 0) {
-        if (incomment) {
-          i = index(line, "-->")
-          if (i == 0) { line = ""; break }
-          line = substr(line, i + 3); incomment = 0
-        } else {
-          i = index(line, "<!--")
-          if (i == 0) { out = out line; line = ""; break }
-          out = out substr(line, 1, i - 1); line = substr(line, i + 4); incomment = 1
-        }
-      }
-      if (!incomment && out ~ /^[ \t]*(```|~~~)/) { infence = !infence; next }
-      if (infence) next
-      if (out ~ ("^[ \t]*" key)) {
-        sub("^[ \t]*" key "[ \t]*", "", out)
-        sub(/[ \t]+$/, "", out)
-        gsub(/`/, "", out)
-        print out
-      }
-    }'
-}
-
 title=""
 state=""
 body=""
@@ -282,14 +333,36 @@ while IFS= read -r v; do
   done
 done < <(printf '%s\n' "$body" | key_lines 'Refs(:|：)' | awk 'NF')
 if [ -z "$links_msg" ]; then
-  while IFS= read -r v; do
-    case "$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')" in
-      なし|無し|none) closes=0 ;;
-      *)
-        links_msg="Issue #${issue} の本文の Closes: 行の値 '${v}' は受け付けない（受け付けるのは「Closes: なし」だけ。PR 本文は既定で Closes #${issue} を書く）。行を消すか「Closes: なし」に直してから再実行する"
-        break ;;
-    esac
-  done < <(printf '%s\n' "$body" | key_lines 'Closes(:|：)' | awk 'NF' | sort -u)
+  check_closes_lines "$issue" "$body"
+  links_msg="$closes_err"
+  [ "$closes_none" != true ] || closes=0
+fi
+# 統合先を使う実行の、課題の取り込み元の Issue（--challenge_issue）。既定ブランチへ入るときに閉じるのは昇格の PR（reflect の open）なので、
+# タスクの PR は Closes でなく Refs で書く。取り込み元の本文が Closes: なし なら、何も変えない（#305）。
+# 取り込み元がこの実行の入力の Issue（--issue）でないときは、参照を足すためだけに読むので、読めなくても（gh の失敗・Closes: 行の値が不正）
+# 止めずに、何も変えない。入力の Issue の本文の誤りは、上の links_msg で止まる。
+if [ -z "$links_msg" ] && [ "$integration" = create ] && [ -n "$challenge_issue" ]; then
+  add_ref=true
+  challenge_body="$body"
+  if [ "$challenge_issue" != "$issue" ]; then
+    if view="$(gh issue view "$challenge_issue" --json body)"; then
+      challenge_body="$(jq -r '.body // ""' <<<"$view")"
+    else
+      add_ref=false
+      echo "Warning: gh issue view ${challenge_issue} failed; the pull request does not refer to the source issue" >&2
+    fi
+  fi
+  if [ "$add_ref" = true ]; then
+    check_closes_lines "$challenge_issue" "$challenge_body"
+    if [ -n "$closes_err" ]; then
+      echo "Warning: cannot read the Closes: line of issue #${challenge_issue}; the pull request does not refer to the source issue" >&2
+    elif [ "$closes_none" != true ]; then
+      [ "$closes" != "$challenge_issue" ] || closes=0
+      dup=false
+      for r in ${refs[@]+"${refs[@]}"}; do [ "$r" = "$challenge_issue" ] && dup=true; done
+      [ "$dup" = true ] || refs+=("$challenge_issue")
+    fi
+  fi
 fi
 if [ -n "$links_msg" ] && [ "$outcome" = "ok" ]; then
   outcome="links_invalid"
