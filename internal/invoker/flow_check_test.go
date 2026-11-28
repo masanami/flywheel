@@ -41,6 +41,10 @@ func TestCheckFlow_ResultsAndShape(t *testing.T) {
 		d.Problems[0] != (core.FlowCheckProblem{File: "/ws/.flywheel/flows/ticket.yaml", Line: 3, Message: "bad"}) {
 		t.Errorf("definition = %+v", d)
 	}
+	described, _ := contractInput(t, fakeClaudeFixture{Stdout: `{"definitions":[{"name":"ui-only","source":"workspace","kind":"new","path":"/ws/x.yaml","sha256":"abc","ok":true,"problems":[],"description":"画面だけの直し"}]}`})
+	if out, _ := NewLauncher().CheckFlow(context.Background(), described); len(out.Definitions) != 1 || out.Definitions[0].Description != "画面だけの直し" {
+		t.Errorf("description = %+v", out.Definitions)
+	}
 	missing := core.ContractLaunchInput{Command: []string{"/no/such/flywheel", "flow", "check"}, TimeoutSec: 5}
 	if out, _ := NewLauncher().CheckFlow(context.Background(), missing); out.Result != core.RunResultLaunchFailed {
 		t.Errorf("missing executable = %s, want launch_failed", out.Result)

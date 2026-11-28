@@ -66,6 +66,7 @@ func runPlanAuto(a Args) (any, error) {
 		ConnDecl:    conn,
 		Invoker:     launcher,
 		Upstream:    newUpstreamThreadSource(a.lookPath()),
+		Contract:    launcher,
 		CycleID:     cyc.ID,
 	})
 

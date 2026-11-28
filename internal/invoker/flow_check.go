@@ -29,6 +29,7 @@ type rawFlowCheck struct {
 			Line    int    `json:"line"`
 			Message string `json:"message"`
 		} `json:"problems"`
+		Description string `json:"description"`
 	} `json:"definitions"`
 }
 
@@ -44,7 +45,7 @@ func decodeFlowCheck(stdout []byte) ([]core.FlowCheckDefinition, bool) {
 		if d.OK == nil || d.Name == "" {
 			return nil, false
 		}
-		def := core.FlowCheckDefinition{Name: d.Name, Source: d.Source, Kind: d.Kind, Path: d.Path, SHA256: d.SHA256, OK: *d.OK}
+		def := core.FlowCheckDefinition{Name: d.Name, Source: d.Source, Kind: d.Kind, Path: d.Path, SHA256: d.SHA256, OK: *d.OK, Description: d.Description}
 		for _, p := range d.Problems {
 			def.Problems = append(def.Problems, core.FlowCheckProblem{File: p.File, Line: p.Line, Message: p.Message})
 		}
