@@ -34,6 +34,9 @@ type IngestScan struct {
 	ListFailed []string
 	// Unresolved は self_assignees を解決できなかった取り込み元の ID。
 	Unresolved []string
+	// taken は走査の前に読んだ、課題か子になっている external_key。listed は読めた開いている Issue の
+	// 一覧に在った external_key（取り込めるかに依らない）。どちらもキーは小文字。断る理由を分けるために持つ。
+	taken, listed map[string]bool
 }
 
 // isIngestable は取り込めるものの判定の本体。issue がその取り込み元の方針
@@ -93,7 +96,10 @@ func (s *Store) ScanIngestable(ctx context.Context, sources []SourceEntry, upstr
 
 // scanIngestable は ScanIngestable の上流を読む部分（ストアには触れない）。
 func scanIngestable(ctx context.Context, taken map[string]bool, sources []SourceEntry, upstream UpstreamIssueSource) (*IngestScan, error) {
-	scan := &IngestScan{}
+	scan := &IngestScan{taken: map[string]bool{}, listed: map[string]bool{}}
+	for k := range taken {
+		scan.taken[strings.ToLower(k)] = true
+	}
 	seen := map[string]bool{}
 	for _, src := range sources {
 		selfAssignees, resolved := resolveIngestSelfAssignees(ctx, src, upstream)
@@ -114,6 +120,7 @@ func scanIngestable(ctx context.Context, taken map[string]bool, sources []Source
 					continue
 				}
 				seen[issue.ExternalKey] = true
+				scan.listed[strings.ToLower(issue.ExternalKey)] = true
 				if isIngestable(src, selfAssignees, resolved, issue, taken) {
 					scan.Candidates = append(scan.Candidates, IngestCandidate{Source: src, Issue: issue})
 				}
@@ -158,6 +165,7 @@ var (
 // IngestSelected は指定した Issue だけを新しい課題にする。指定のどれか 1 つでも
 // 取り込めるものに無ければ、どれも作らず ErrValidation（上流を取得できない・
 // self_assignees を解決できないために判定できないときは ErrUpstreamFetchFailed）。
+// 断る指定が複数あれば、文には指定ごとの理由を指定の順に並べ、誤りの種類は最初に断る指定のものにする。
 // 作成は 1 つのトランザクションで行い、その中で課題になっていないことを読み直す。
 func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelectedInput) (*IngestSelectedResult, error) {
 	if len(in.Specs) == 0 {
@@ -201,9 +209,6 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 		return nil, err
 	}
 
-	unavailable := func(what string) error {
-		return fmt.Errorf("%w: cannot decide whether %s is ingestable (upstream list or self_assignees unavailable)", ErrUpstreamFetchFailed, what)
-	}
 	unresolved := map[string]bool{}
 	for _, id := range scan.Unresolved {
 		unresolved[id] = true
@@ -215,6 +220,19 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 
 	chosen := make([]IngestCandidate, 0, len(specs))
 	chosenKey := map[string]bool{}
+	// 断る指定は途中で返さずに集める（指定の順）。class は最初に断る指定の誤りの種類。
+	var class error
+	var refusals []string
+	refuse := func(kind error, detail string) {
+		if class == nil {
+			class = kind
+		}
+		refusals = append(refusals, detail)
+	}
+	cannotDecide := func(what string) {
+		refuse(ErrUpstreamFetchFailed, fmt.Sprintf("cannot decide whether %s is ingestable (upstream list or self_assignees unavailable)", what))
+	}
+specLoop:
 	for _, sp := range specs {
 		var matches []IngestCandidate
 		for _, c := range scan.Candidates {
@@ -241,21 +259,24 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 					bad = bad || failedRepo[strings.ToLower(repo)]
 				}
 				if bad {
-					return nil, unavailable(sp.raw)
+					cannotDecide(sp.raw)
+					continue specLoop
 				}
 			}
 		}
 		if len(matches) == 1 {
 			c := matches[0]
 			if chosenKey[c.Issue.ExternalKey] {
-				return nil, fmt.Errorf("%w: %q selects an issue that is already listed", ErrIngestUsage, sp.raw)
+				refuse(ErrIngestUsage, fmt.Sprintf("%q selects an issue that is already listed", sp.raw))
+				continue
 			}
 			chosenKey[c.Issue.ExternalKey] = true
 			chosen = append(chosen, c)
 			continue
 		}
 		if len(matches) > 1 {
-			return nil, fmt.Errorf("%w: %q matches %d ingestable issues; specify <owner>/<repo>#<number>", ErrValidation, sp.raw, len(matches))
+			refuse(ErrValidation, fmt.Sprintf("%q matches %d ingestable issues; specify <owner>/<repo>#<number>", sp.raw, len(matches)))
+			continue
 		}
 		// 取り込めるものに無い。判定できなかったことが原因かを見分ける。
 		for _, src := range in.Sources {
@@ -267,11 +288,19 @@ func (s *Store) IngestSelected(ctx context.Context, ch Channel, in IngestSelecte
 					continue
 				}
 				if unresolved[src.ID] || failedRepo[strings.ToLower(repo)] {
-					return nil, unavailable(sp.raw)
+					cannotDecide(sp.raw)
+					continue specLoop
 				}
 			}
 		}
-		return nil, fmt.Errorf("%w: %q is not an ingestable issue (already a challenge, closed, out of policy, or not found)", ErrValidation, sp.raw)
+		reason, err := ingestRejectReason(ctx, scan, in, sp.key, sp.number)
+		if err != nil {
+			return nil, err
+		}
+		refuse(ErrValidation, fmt.Sprintf("%q is not ingestable: %s", sp.raw, reason))
+	}
+	if class != nil {
+		return nil, fmt.Errorf("%w: %s", class, strings.Join(refusals, "; "))
 	}
 
 	// 子孫は、取り込めるものの中だけで親をたどって決める。同じコマンドの別の指定の子孫にあたる指定は拒む。
