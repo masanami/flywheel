@@ -1655,3 +1655,16 @@ func InsertSliceSplitHold(t *testing.T, workspace string, challengeID int, exter
 		SELECT ?, 'awaiting_owner', 'r', ?, ?, MAX(id), ?, ? FROM hold WHERE challenge_id = ?`,
 		challengeID, proposal, fmt.Sprintf(".flywheel/requirements/split-C-%d.md", challengeID), at, at, challengeID)
 }
+
+// CloseOperation はテスト専用のフィクスチャとして、opID（内部整数 ID）の不可逆操作を理由 reason で閉じた状態にする。
+func CloseOperation(t *testing.T, workspace string, opID int64, reason, closedAt string) {
+	t.Helper()
+	db := openExisting(t, workspace)
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE operation SET state = 'closed', closed_reason = ?, closed_at = ? WHERE id = ?`, reason, closedAt, opID)
+		return err
+	}); err != nil {
+		t.Fatalf("coretest: CloseOperation: %v", err)
+	}
+}

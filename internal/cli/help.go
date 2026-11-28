@@ -19,7 +19,9 @@ const usageText = `flywheel - flywheel の core を操作する CLI
             （--requirement＝作る課題が指す要求の記録。無い記録と解決済みの記録は指せない）
   requirement create --title <t>   （要求の記録を作り、ID と証跡の場所を返す。題名は 200 文字以内。証跡のファイルは作らない。
             対話の欄から実行すると会話を持つ記録になる）
-  show <ID> [--plan]   （--plan＝最新の計画の方針・問いと推奨・タスクのツリー・予算の見込み・統合先を使うかを出す）
+  show <ID> [--plan]   （<ID>＝課題の ID〔C-<n>〕と操作の ID〔OP-<n>〕の両方を受ける。--plan は課題の ID だけで使える）
+            （操作の ID では、操作の種類・どの課題のものか・反映の対象〔リポジトリ・反映先のブランチ・PR〕・いまの状態を出す）
+            （--plan＝最新の計画の方針・問いと推奨・タスクのツリー・予算の見込み・統合先を使うかを出す）
   list [--status <状態>]
   edit <ID> [--title <t>] [--description <d>] [--done-criteria <c>] [--urgency <高|中|低>]
             [--headline <h>] [--context <c>] [--expected <json>] [--actual <json>]
