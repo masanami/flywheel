@@ -1,9 +1,9 @@
 # すでにある PR か、統合ブランチ（名前で受ける）を、既定ブランチの最新を取り込んで検証し、land を受けたら既定ブランチへ入れる依頼
 # （docs/harness-runtime-design.md §5.6.2 の「PR を受けて既定ブランチへ上げる依頼: reflect」・#388 の S3-6。統合ブランチの名前を受ける道は §5.6.3・#413 の S3b-3）。
 #
-#   harness run reflect --input artifact_ref=<PR の URL | 統合ブランチの名前> [--input challenge_id=<ID>]
+#   harness run reflect --input artifact_ref=<PR の URL | 統合ブランチの名前> [--input challenge_id=<ID>] [--input challenge_issue=<番号>]
 #
-# 段は adopt（→ 統合ブランチに開いている PR が無ければ describe → open → adopt）→ workspace → sync（→ sync-resolve）→ quality → push → review（gate）
+# 段は adopt（→ 統合ブランチに開いている PR が無ければ describe → links → open → adopt）→ workspace → sync（→ sync-resolve）→ quality → push → review（gate）
 # → land（→ land-sync → land-sync-resolve → land-push → review）→ retire-route（統合ブランチの名前を受けた依頼だけ retire）→ cleanup。
 # sync 以降は ticket と同じ中身で、pr・base は adopt の出力を読む（PR を見つけた道と作った道で、後ろの段は同じ $steps.adopt.* を読む）。ticket との違い:
 #   - 最初の sync に expect_head（adopt が受けた PR の先頭）を渡す。使い回した作業ツリーの、push していない手元のコミットを一緒に出さない（local_head_mismatch）
@@ -19,6 +19,7 @@ description: すでにある PR か統合ブランチを、既定ブランチの
 inputs:
   artifact_ref: { type: string, required: true }   # PR の URL か、統合ブランチの名前（§5.6.3）
   challenge_id: { type: string }                   # 作る PR の本文に書くだけ（名前の鍵にしない）
+  challenge_issue: { type: integer }               # 課題の取り込み元の Issue。作る PR の本文に Closes #N を必ず書く（本文が Closes: なし なら書かない）
 models:
   main: opus
 efforts:
@@ -61,13 +62,22 @@ steps:
     output: schemas/reflect-describe.json
     budget_usd: 1
     timeout: 15m
-    on: { ok: open, failure: { fail: describe_failed } }
+    on: { ok: links, failure: { fail: describe_failed } }
+
+  links:                                            # 取り込み元の Issue の本文の Closes: 行を読み、作る PR が閉じる Issue を決める（challenge_issue が無ければ gh を呼ばず 0）
+    kind: command
+    run: resolve-ticket
+    with: { links_only: "true", challenge_issue: $inputs.challenge_issue }
+    output: schemas/source-issue-links.json
+    timeout: 2m
+    on:
+      ok: open
 
   open:                                             # 統合ブランチから既定ブランチへの PR を作る（在れば作らない。push しない）。本文は Go が組み立てる
     kind: pull-request
     action: open
     with: { head: $steps.adopt.branch, base: $steps.adopt.base, title: $steps.describe.pr_title,
-            summary: $steps.describe.summary, challenge_id: $inputs.challenge_id }
+            summary: $steps.describe.summary, challenge_id: $inputs.challenge_id, closes: $steps.links.closes }
     on: { opened: adopt, existing: adopt }
 
   workspace:

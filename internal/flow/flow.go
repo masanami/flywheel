@@ -150,7 +150,7 @@ func Start(env Env, o StartOptions) int {
 		return notStarted(env, fmt.Sprintf("workflow is not valid: %v", def.Problems))
 	}
 	wf := def.WF
-	inputs, err := parseInputs(wf, o.Inputs)
+	inputs, err := parseInputs(wf, challengeIssueInputs(env, wf, o.Name, o.Inputs))
 	if err != nil {
 		return notStarted(env, err.Error())
 	}
@@ -261,6 +261,54 @@ func ensureGitignore(workspace string) error {
 	return nil
 }
 
+// inputChallengeIssue は、課題の取り込み元の Issue を渡す入力の名前（core が、統合先を使う課題の開始と反映の依頼にだけ渡す）。
+const inputChallengeIssue = "challenge_issue"
+
+// reflectFlowName は、統合ブランチを反映先へ上げるフローの名前。
+const reflectFlowName = "reflect"
+
+// challengeIssueInputs は、名前 name の定義 wf を始める --input のうち、challenge_issue をそのまま渡すかを決める。
+// タスクのフローは challenge_issue があると取り込み元を Refs で書き、閉じる行を昇格の PR（reflect）に任せる。ワークスペースの reflect が
+// この入力を宣言していないと閉じる行を誰も書かないので、タスクのフローにも渡さない。渡さないとき・定義が宣言していなくて読み飛ばすときは、
+// 標準エラーに理由を出す。
+func challengeIssueInputs(env Env, wf *workflow.Workflow, name string, raw []string) []string {
+	var rest []string
+	given := false
+	for _, kv := range raw {
+		if v, ok := strings.CutPrefix(kv, inputChallengeIssue+"="); ok {
+			given = given || v != ""
+			continue
+		}
+		rest = append(rest, kv)
+	}
+	if !given {
+		return raw
+	}
+	if wf.Input(inputChallengeIssue) == nil {
+		logf(env.Stderr, "flywheel flow: 定義 %s は入力 %s を宣言していないので読み飛ばす（昇格の PR に取り込み元の Closes を書くには、定義を直す）\n", name, inputChallengeIssue)
+		return raw
+	}
+	if name != reflectFlowName && !reflectDeclaresChallengeIssue(env.Workspace) {
+		logf(env.Stderr, "flywheel flow: ワークスペースの定義 %s が入力 %s を宣言していない（か読めない）ので、%s にも渡さない（昇格の PR に取り込み元の Closes を書くには、%s の定義を直す）\n", reflectFlowName, inputChallengeIssue, name, reflectFlowName)
+		return rest
+	}
+	return raw
+}
+
+// reflectDeclaresChallengeIssue は、reflect の定義が入力 challenge_issue を宣言しているか。ワークスペースに置いていなければ組み込みで、宣言している。
+func reflectDeclaresChallengeIssue(workspace string) bool {
+	path := workspaceDefinitionPath(workspace, reflectFlowName)
+	if path == "" {
+		return true
+	}
+	data, found, problem := readWorkspaceFile(FlowsDir(workspace), reflectFlowName+".yaml")
+	if !found || problem != nil {
+		return false
+	}
+	wf, err := workflow.Parse(path, data)
+	return err == nil && wf.Input(inputChallengeIssue) != nil
+}
+
 // parseInputs は --input NAME=VALUE を宣言された型で読む。integer・string はそのまま、array・object は JSON で渡す。
 // 値が空の文字列（NAME=）は型を見る前に読み飛ばし、入力が無いものとして扱う。
 func parseInputs(wf *workflow.Workflow, raw []string) (map[string]json.RawMessage, error) {
@@ -272,6 +320,10 @@ func parseInputs(wf *workflow.Workflow, raw []string) (map[string]json.RawMessag
 			return nil, fmt.Errorf("--input %q must be NAME=VALUE", kv)
 		}
 		in := wf.Input(name)
+		if in == nil && name == inputChallengeIssue {
+			// 後から足した入力。宣言していない定義（足す前に書き出したワークスペースの定義）も、足す前と同じに始められる。
+			continue
+		}
 		if in == nil {
 			return nil, fmt.Errorf("input %q is not declared by workflow %s", name, wf.ID)
 		}

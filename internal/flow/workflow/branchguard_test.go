@@ -174,12 +174,12 @@ func TestBundledReflectIntegrationRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(wf.Steps) != 17 {
-		t.Fatalf("%d steps, want 17", len(wf.Steps))
+	if len(wf.Steps) != 18 {
+		t.Fatalf("%d steps, want 18", len(wf.Steps))
 	}
 	for _, c := range []struct{ step, outcome, target string }{
 		{"adopt", "adopted", "workspace"}, {"land", "landed", "retire-route"}, {"retire", "deleted", "cleanup"}, {"retire", "absent", "cleanup"},
-		{"retire", "kept", "cleanup-kept"}, {"open", "opened", "adopt"}, {"open", "existing", "adopt"}, {"describe", "ok", "open"},
+		{"retire", "kept", "cleanup-kept"}, {"open", "opened", "adopt"}, {"open", "existing", "adopt"}, {"describe", "ok", "links"}, {"links", "ok", "open"},
 	} {
 		if tr := wf.Step(c.step).OnFor(c.outcome); tr == nil || tr.Target != c.target {
 			t.Errorf("%s.%s = %+v, want %s", c.step, c.outcome, tr, c.target)

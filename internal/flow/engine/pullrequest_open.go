@@ -77,9 +77,13 @@ func (c *prCtx) open() result {
 	if len(merged) >= mergedListLimit {
 		return stepError("%d merged pull requests to %q were read, which reaches the limit (%d); the table and the Closes lines could be incomplete, so no pull request is created", len(merged), head, mergedListLimit)
 	}
+	closes := c.number("closes") // 取り込み元の Issue（0・省略は無し）。Closes: なし の扱いは、値を作る段（links）が決める
+	if closes < 0 {
+		return stepError("with.closes must be an issue number (0 to write no closing keyword)")
+	}
 	bodyRel := filepath.Join(runstate.LogsDir, fmt.Sprintf("%s.%d.body.md", c.step.ID, c.attempt))
 	bodyPath := filepath.Join(c.e.Run.Dir, bodyRel)
-	if err := os.WriteFile(bodyPath, []byte(renderIntegrationPRBody(summary, merged, c.runID, c.str("challenge_id"))), 0o644); err != nil {
+	if err := os.WriteFile(bodyPath, []byte(renderIntegrationPRBody(summary, merged, closes, c.runID, c.str("challenge_id"))), 0o644); err != nil {
 		return result{err: err}
 	}
 	argv, r = c.gh("pr", "create", "--base", base, "--head", head, "--title", neutralizeClosing(title), "--body-file", bodyPath)
@@ -116,9 +120,13 @@ var (
 )
 
 // issueLinks は、入ったタスクの PR の本文のうち、行の全体が `Closes #<番号>`・`Refs #<番号>` の形の行だけを集める（publish が書く形。RenderPRBody）。
+// sourceCloses（課題の取り込み元の Issue。0 は無し）は、タスクの PR の本文に無くても closes に入れる。
 // 重複は除き、両方に在る番号は Closes だけにする。
-func issueLinks(prs []mergedPR) (closes, refs []int) {
+func issueLinks(prs []mergedPR, sourceCloses int) (closes, refs []int) {
 	cs, rs := map[int]bool{}, map[int]bool{}
+	if sourceCloses > 0 {
+		cs[sourceCloses] = true
+	}
 	for _, pr := range prs {
 		for _, line := range strings.Split(pr.Body, "\n") {
 			if m := reCloseLine.FindStringSubmatch(line); m != nil {
@@ -143,9 +151,10 @@ func issueLinks(prs []mergedPR) (closes, refs []int) {
 	return closes, refs
 }
 
-// renderIntegrationPRBody は統合ブランチ → 既定ブランチの PR の本文を、決定的に作る。Closes・Refs の行は、gh で読んだタスクの PR の本文から写したものだけで、
+// renderIntegrationPRBody は統合ブランチ → 既定ブランチの PR の本文を、決定的に作る。Closes・Refs の行は、gh で読んだタスクの PR の本文から写したものと、
+// 入力の sourceCloses（0 は無し）の Closes の行だけで、
 // summary（LLM の出力）からは作らない（summary の中の Issue を閉じる記法は無効にする）。
-func renderIntegrationPRBody(summary string, prs []mergedPR, runID, challengeID string) string {
+func renderIntegrationPRBody(summary string, prs []mergedPR, sourceCloses int, runID, challengeID string) string {
 	var b strings.Builder
 	b.WriteString("## 概要\n\n")
 	if s := strings.TrimSpace(neutralizeClosing(summary)); s != "" {
@@ -164,7 +173,7 @@ func renderIntegrationPRBody(summary string, prs []mergedPR, runID, challengeID 
 		}
 		b.WriteString("\n")
 	}
-	closes, refs := issueLinks(prs)
+	closes, refs := issueLinks(prs, sourceCloses)
 	if len(closes)+len(refs) > 0 {
 		b.WriteString("## Issue 参照\n\n")
 		for _, n := range closes {

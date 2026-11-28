@@ -452,6 +452,9 @@ type contractFill struct {
 	Flow string
 	// ArtifactRef は reflect の {artifact_ref}（反映の操作の参照）。反映の依頼を始める反映の段だけが入れる（それ以外は空）。
 	ArtifactRef string
+	// ChallengeIssue は form: flow の start・reflect の `--input challenge_issue=` の値（統合先を使う課題の取り込み元の Issue の番号）。
+	// 空なら引数を足さない。
+	ChallengeIssue string
 	// Spec は下書きづくりの開始（contractCmdSpec）の値。ほかのコマンドでは nil。
 	Spec *specContractFill
 }
@@ -767,6 +770,13 @@ func (s *Store) StartContractDelegation(ctx context.Context, in ContractStartInp
 	startFill := contractFill{
 		ChallengeID: in.ChallengeID, Source: taskSource, EmptySource: startTakesTaskFile(connector),
 		TaskFile: "", TaskID: task.ID, UsesIntegration: usesIntegration, Flow: taskStartFlow(connector, task),
+	}
+	if usesIntegration {
+		taskRepo, _ := in.ConnDecl.findConnectorRepo(task.Repo)
+		// タスクの PR が Refs になるのは番号を渡したときなので、昇格の PR が閉じる行を書ける（反映の依頼の口が番号を受ける）ときだけ渡す。
+		if taskRepo != nil && reflectTakesChallengeIssue(in.ConnDecl.ReflectConnectorFor(*taskRepo)) {
+			startFill.ChallengeIssue = challengeIssueNumber(binding, taskRepo)
+		}
 	}
 	if _, err := s.contractCommandArgs(connector, contractCmdStart, startFill); err != nil {
 		return nil, err
