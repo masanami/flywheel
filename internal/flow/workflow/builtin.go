@@ -116,6 +116,7 @@ var builtinWith = map[string][]withSpec{
 		{name: "title", typ: "string", required: true}, // 題名（describe が書く）
 		{name: "summary", typ: "string", required: true},
 		{name: "challenge_id", typ: "string"}, // 本文の末尾に書くだけ（省かれうる）
+		{name: "closes", typ: "integer"},      // 本文に必ず Closes #N を書く Issue（課題の取り込み元）。省略か 0 なら、タスクの PR から写す行だけ
 	},
 	"pull-request:" + PRActionRetire: {
 		{name: "pr", typ: "integer", required: true},

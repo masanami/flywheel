@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "scripts/resolve-ticket.sh --links_only true の出力（reflect ワークフローの links。昇格の PR が必ず閉じる Issue）",
+  "type": "object",
+  "required": ["outcome", "closes", "message"],
+  "properties": {
+    "outcome": { "type": "string", "enum": ["ok"] },
+    "closes": { "type": "integer", "minimum": 0, "description": "昇格の PR の本文に Closes #N を書く Issue。0 は無し（取り込み元が無い・取り込み元の本文が Closes: なし・Closes: 行の値が読めない〔理由は message〕）" },
+    "message": { "type": "string" }
+  },
+  "additionalProperties": false
+}

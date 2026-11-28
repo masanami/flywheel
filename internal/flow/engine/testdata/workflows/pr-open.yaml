@@ -7,11 +7,12 @@ inputs:
   title: { type: string, required: true }
   summary: { type: string, required: true }
   challenge_id: { type: string }
+  closes: { type: integer }
 steps:
   open:
     kind: pull-request
     action: open
-    with: { head: $inputs.head, base: $inputs.base, title: $inputs.title, summary: $inputs.summary, challenge_id: $inputs.challenge_id }
+    with: { head: $inputs.head, base: $inputs.base, title: $inputs.title, summary: $inputs.summary, challenge_id: $inputs.challenge_id, closes: $inputs.closes }
     on:
       opened: { done: opened }
       existing: { done: existing }

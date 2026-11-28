@@ -51,6 +51,7 @@ inputs:
   task_id:          { type: string }  # T-<番号>。作業ツリーとブランチの名前の鍵（task-<番号>）になる
   uses_integration: { type: string }  # true | false。true なら宛先は統合ブランチ（integration/<challenge_id を小文字にしたもの>）に決まり、integration で確かめて作る（§5.6.3）
   challenge_id:     { type: string }  # uses_integration が true のとき、統合ブランチの名前の鍵（resolve だけが名前の規則を知る）。false・無しのときは受けるだけ
+  challenge_issue:  { type: integer }  # 課題の取り込み元の Issue。uses_integration が true のとき、タスクの PR は Refs で書く（閉じるのは昇格の PR）
 models:
   main: opus
 efforts:
@@ -75,7 +76,8 @@ steps:
     kind: command
     run: resolve-ticket             # scripts/resolve-ticket.sh: gh issue view＋Base:・Refs:・Closes: 行の抽出＋統合ブランチの remote 存在確認
     with: { issue: $inputs.issue, base: $inputs.base, task_file: $inputs.task_file, task_id: $inputs.task_id,
-            uses_integration: $inputs.uses_integration, challenge_id: $inputs.challenge_id }
+            uses_integration: $inputs.uses_integration, challenge_id: $inputs.challenge_id,
+            challenge_issue: $inputs.challenge_issue }
     output: schemas/resolve-ticket.json
     timeout: 2m
     on:
@@ -262,8 +264,8 @@ steps:
     kind: pull-request
     with:
       base: $steps.resolve.base
-      closes: $steps.resolve.closes                 # 既定は Issue 自身。Issue 本文の Closes: なし 行で 0（書かない。#305）
-      refs: $steps.resolve.refs                     # Issue 本文の Refs: 行（#305）
+      closes: $steps.resolve.closes                 # 既定は Issue 自身。Issue 本文の Closes: なし 行で 0（書かない。#305）。統合先を使う実行の取り込み元も 0
+      refs: $steps.resolve.refs                     # Issue 本文の Refs: 行（#305）と、統合先を使う実行の取り込み元
       title: $steps.implement.pr_title
       summary: $steps.implement.summary
       behaviors: $steps.implement.behaviors         # #304: 振る舞いの一覧（テスト名・ケース名・シグネチャと保証すること）

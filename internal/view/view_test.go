@@ -61,6 +61,7 @@ func TestStructFieldsAreInKeyOrder(t *testing.T) {
 		view.Challenge{}, view.Task{}, view.ApprovalPlanTask{}, view.TaskDelegateStep{}, view.Plan{}, view.PlanDetail{}, view.Approval{}, view.Hold{}, view.Operation{},
 		view.SourceBinding{}, view.Run{}, view.Activity{}, view.ChallengeResponse{}, view.ChallengeWithPlanResponse{},
 		view.ChallengeApprovalResponse{}, view.ChallengeHoldResponse{}, view.OperationResponse{},
+		view.OperationShowChallenge{}, view.OperationTarget{}, view.OperationShowResponse{},
 		view.OperationApprovalResponse{}, view.ListResponse{}, view.ShowResponse{}, view.LogResponse{},
 		view.RunsResponse{}, view.Discrepancy{}, view.Triage{}, view.BudgetExhausted{}, view.WaitingExternal{},
 		view.Slot{}, view.StatusNeedsHuman{}, view.StatusActionable{}, view.StatusApproved{},

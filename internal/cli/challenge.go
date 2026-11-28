@@ -35,8 +35,12 @@ func runCreate(a Args) (any, error) {
 	return textOutput{json: view.ChallengeResponse{Challenge: view.FromChallenge(*c)}, text: challengeText(*c)}, nil
 }
 
-// runShow は `flywheel show <C-ID>` の実装。
+// runShow は `flywheel show <ID>` の実装。操作の ID（approve・reject と同じ isOperationID）は runShowOperation へ渡し、
+// それ以外は課題の ID として扱う。
 func runShow(a Args) (any, error) {
+	if id := a.Positional[0]; isOperationID(id) {
+		return runShowOperation(a, id)
+	}
 	ctx := context.Background()
 	if a.Bools["plan"] {
 		// サイズごとの既定を引く宣言は、予算の上限の表示にだけ使う（読めなくても計画は出す）。

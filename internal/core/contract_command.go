@@ -96,16 +96,14 @@ func (s *Store) flowCommandArgs(c *Connector, cmd contractCmd, f contractFill) (
 			"--input", "task_file="+f.TaskFile,
 			"--input", "task_id="+f.TaskID,
 			"--input", "uses_integration="+usesIntegration,
-			"--input", "challenge_id="+challengeID,
-			f.Flow)
-		return args, nil
+			"--input", "challenge_id="+challengeID)
+		return append(appendChallengeIssue(args, f), f.Flow), nil
 	case contractCmdReflect:
 		args := append(append(append(base, "start"), ws...), perm...)
 		args = append(args,
 			"--input", "artifact_ref="+f.ArtifactRef,
-			"--input", "challenge_id="+challengeID,
-			"reflect")
-		return args, nil
+			"--input", "challenge_id="+challengeID)
+		return append(appendChallengeIssue(args, f), "reflect"), nil
 	case contractCmdSpec:
 		sp := f.Spec
 		if sp == nil {
@@ -142,6 +140,14 @@ func (s *Store) flowCommandArgs(c *Connector, cmd contractCmd, f contractFill) (
 		return append(args, f.RunID), nil
 	}
 	return nil, fmt.Errorf("%w: unknown contract command %q", ErrValidation, cmd)
+}
+
+// appendChallengeIssue は、課題の取り込み元の Issue の番号があるときだけ、その入力を足す。
+func appendChallengeIssue(args []string, f contractFill) []string {
+	if f.ChallengeIssue == "" {
+		return args
+	}
+	return append(args, "--input", "challenge_issue="+f.ChallengeIssue)
 }
 
 // withDelegatedRun は command の `--delegated-run` の値の仮の印を runID へ差し替えた複製を返す（印が無ければ command のまま）。

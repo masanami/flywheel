@@ -1,7 +1,7 @@
 #!/bin/bash
 # テスト用の偽の gh（実際の gh を呼ばずに pull-request 種類・pr-state の観測・resolve-ticket・ci-wait を試す）。FAKE_GH_DIR の下で動く。
 #   calls: 受け取った argv（1 呼び出し 1 行。引数は TAB 区切り）
-#   issue view            → issue.json（無ければ exit 1）
+#   issue view <n>        → issue.<n>.fail があれば exit 1。issue.<n>.json、無ければ issue.json（どちらも無ければ exit 1）
 #   repo view             → default-branch（無ければ main）。--json に nameWithOwner があれば（reflect の adopt）、repo-view.json の中身
 #                           （無ければ o/r・https://github.com/o/r・default-branch から作る）
 #   pr view <url> --json ...isCrossRepository...（reflect の adopt） → adopt.json の中身（無ければ exit 1）
@@ -23,6 +23,9 @@ dir="$FAKE_GH_DIR"
 ( IFS=$'\t'; printf '%s\n' "$*" ) >> "$dir/calls"
 case "$1 ${2:-}" in
   "issue view")
+    # issue.<番号>.fail があれば失敗する。issue.<番号>.json があれば、その番号はそれを返す。無ければ issue.json。
+    if [ -f "$dir/issue.$3.fail" ]; then echo "fake gh: issue view $3 failed" >&2; exit 1; fi
+    if [ -f "$dir/issue.$3.json" ]; then cat "$dir/issue.$3.json"; exit 0; fi
     [ -f "$dir/issue.json" ] || { echo "fake gh: no issue.json" >&2; exit 1; }
     cat "$dir/issue.json" ;;
   "repo view")

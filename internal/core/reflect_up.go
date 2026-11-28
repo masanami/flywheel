@@ -441,7 +441,15 @@ func (s *Store) startIntegrationReflect(ctx context.Context, in DelegateInput, c
 	holdFailed := func(detail string) error {
 		return s.holdChallengeForReflect(ctx, challengeID, reflectFailedQuestion(detail), holdReasonReflectFailed)
 	}
-	command, err := s.contractCommandArgs(connector, contractCmdReflect, contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: ref})
+	var binding *sourceBinding
+	if err := classifyReadWriteErr(s.db.Read(ctx, func(tx *sql.Tx) (err error) {
+		binding, err = loadSourceBindingByChallengeID(ctx, tx, cid)
+		return err
+	})); err != nil {
+		return nil, nil, err
+	}
+	command, err := s.contractCommandArgs(connector, contractCmdReflect,
+		contractFill{ChallengeID: challengeID, EmptySource: true, ArtifactRef: ref, ChallengeIssue: challengeIssueNumber(binding, decl)})
 	if err != nil {
 		return nil, nil, holdFailed("宣言の commands.reflect の引数を埋められなかった（" + err.Error() + "）。")
 	}
